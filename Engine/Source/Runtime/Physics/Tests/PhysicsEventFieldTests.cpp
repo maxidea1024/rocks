@@ -26,6 +26,8 @@ constexpr int MaxEntries = 32;
 constexpr double NormalTolerance = 1.0e-6;
 // HitResult의 리플렉션 값 칸 수다(component·actor는 NATIVE).
 constexpr usize HitResultReflectedFields = 12;
+// PrimitiveComponent의 이벤트 필드 수다(hit·overlap 셋 — PH4e, 깨움·잠듦·물리 상태 셋 — PH5d).
+constexpr usize PrimitiveComponentEvents = 6;
 
 // 기록 종류다.
 enum class EntryKind : uint8 {
@@ -553,9 +555,13 @@ TEST(PhysicsEventField_EventSchemaParameters) {
     REQUIRE(lease);
     const TypeSchema& schema = lease.Value().Schema();
     const FieldSchema* hit = nullptr;
+    const FieldSchema* state = nullptr;
     for (const FieldSchema& field : schema.fields) {
-        if (StringView(field.name.Data(), field.name.Size()) == StringView("componentHit")) {
+        const StringView name(field.name.Data(), field.name.Size());
+        if (name == StringView("componentHit")) {
             hit = &field;
+        } else if (name == StringView("componentPhysicsStateChanged")) {
+            state = &field;
         }
     }
 
@@ -567,7 +573,13 @@ TEST(PhysicsEventField_EventSchemaParameters) {
     CHECK(hit->eventParameters[2].value.kind == ValueKind::WeakObjectReference);
     CHECK(hit->eventParameters[4].value.kind == ValueKind::Struct);
     CHECK(hit->eventParameters[4].value.type == TypeIdOf<HitResult>());
-    CHECK(lease.Value().Ops().events.Size() == 3);
+    // 물리 상태 이벤트는 컴포넌트 약한 참조와 enum이다(PH5d — 7.1.19절).
+    REQUIRE(state != nullptr);
+    CHECK(state->kind == FieldKind::Event);
+    REQUIRE(state->eventParameters.Size() == 2);
+    CHECK(state->eventParameters[0].value.kind == ValueKind::WeakObjectReference);
+    CHECK(state->eventParameters[1].value.kind == ValueKind::Enum);
+    CHECK(lease.Value().Ops().events.Size() == PrimitiveComponentEvents);
 }
 
 // HitResult 리플렉션 schema는 값 칸만 싣는다(component·actor는 NATIVE).

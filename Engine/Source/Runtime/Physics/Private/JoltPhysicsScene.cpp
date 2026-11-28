@@ -163,8 +163,9 @@ JoltPhysicsScene::JoltPhysicsScene(Allocator& allocator, JoltRuntimeLease&& runt
       jobs_(scheduler, JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers), activations_(allocator),
       contacts_(*this, allocator), slots_(allocator), freeSlots_(allocator),
       pendingResults_(allocator), kinematicTargets_(allocator), kinematicMoving_(allocator),
-      pendingImpulses_(allocator), frameForces_(allocator), slept_(allocator), moved_(allocator),
-      contactHits_(allocator), takenContactHits_(allocator),
+      wakeEventBodies_(allocator), wakeEvents_(allocator), transitionData_(allocator),
+      transitionAwake_(allocator), pendingImpulses_(allocator), frameForces_(allocator),
+      slept_(allocator), moved_(allocator), contactHits_(allocator), takenContactHits_(allocator),
       minDeltaVelocityForHitEvents_(static_cast<double>(settings.minDeltaVelocityForHitEvents)),
       maxAngularVelocityDegrees_(static_cast<double>(settings.maxAngularVelocity)),
       maxAngularVelocityRadians_(
@@ -341,10 +342,13 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     settings.mUserData = PackUserData(index, slots_[index].generation);
 
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
+    // 생성의 활성은 깨움 이벤트가 아니다(UE 생성 상태 — 7.1.19절).
+    activations_.SetRecordTransitions(false);
     const JPH::BodyID created =
         bodies.CreateAndAddBody(settings, desc.motion == BodyMotion::Dynamic && desc.startAwake
                                               ? JPH::EActivation::Activate
                                               : JPH::EActivation::DontActivate);
+    activations_.SetRecordTransitions(true);
     if (created.IsInvalid()) {
         responseSets_.Release(responseSet.Value());
         (void)freeSlots_.TryPushBack(index);
@@ -393,7 +397,10 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     // 구속을 body보다 먼저 뗀다(구속이 body를 가리킨다).
     DetachDofConstraint(slot);
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
+    // 삭제의 비활성은 잠듦 이벤트가 아니다(세대 검사로 버려질 기록이 용량을 쓰지 않게 끈다).
+    activations_.SetRecordTransitions(false);
     bodies.RemoveBody(slot.body);
+    activations_.SetRecordTransitions(true);
     bodies.DestroyBody(slot.body);
     responseSets_.Release(slot.responseSet);
     slot.responseSet = 0;
@@ -409,6 +416,8 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     slot.notifyContacts = false;
     slot.hasTarget = false;
     slot.movedLastStep = false;
+    slot.wakeEvent = WakeTransition::None;
+    slot.queuedWakeEvent = false;
     DropPendingImpulse(slot);
     // 세대 0은 "없음"이라 건너뛴다.
     slot.generation = slot.generation + 1 == 0 ? 1 : slot.generation + 1;
@@ -501,6 +510,8 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
         return;
     }
 
+    // 앞선 전이를 옛 운동 종류로 옮긴다(Kinematic이 되면 깨움·잠듦 이벤트가 없다 — 7.1.19절).
+    CollectWakeTransitions();
     // 대기 Kinematic 목표·정지 표지는 Kinematic에만 뜻이 있다(목록에 남은 칸은 다음 step이
     // 건너뛴다). 결과 목록 표지는 둔다: Dynamic이던 step의 자세가 아직 컴포넌트에 가지 않았을 수
     // 있다.
@@ -516,8 +527,10 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
                              JPH::EActivation::DontActivate);
         bodies.SetLinearAndAngularVelocity(slot.body, JPH::Vec3::sZero(), JPH::Vec3::sZero());
         // 대기 충격량·프레임 힘을 버린다(Chaos Kinematic은 impulse velocity·힘을 적분하지 않는다 —
-        // 7.1.17절). Jolt 누적 힘은 SetMotionType(Kinematic)이 지운다(Body.cpp:62-65).
+        // 7.1.17절). Jolt 누적 힘은 SetMotionType(Kinematic)이 지운다(Body.cpp:62-65). 쌓인 깨움·
+        // 잠듦 이벤트도 버린다(Kinematic은 이벤트가 없다 — 7.1.19절).
         DropPendingImpulse(slot);
+        slot.wakeEvent = WakeTransition::None;
 
         // Kinematic은 자유도를 막지 않는다(7.1.16절 — Jolt 허용 자유도는 MoveKinematic 속도도
         // 막는다).
@@ -525,8 +538,12 @@ void JoltPhysicsScene::SetBodyMotion(PhysicsBodyHandle body, BodyMotion motion,
         return;
     }
 
-    bodies.SetMotionType(slot.body, JPH::EMotionType::Dynamic,
-                         wake ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+    // 전환의 깨움은 이벤트가 아니고 쌓인 이벤트를 지운다(UE SetInstanceSimulatePhysics →
+    // WakeInstance — 7.1.19절).
+    WithoutWakeEvents(slot, wake, [&]() noexcept {
+        bodies.SetMotionType(slot.body, JPH::EMotionType::Dynamic,
+                             wake ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+    });
     ApplyDegreesOfFreedom(slot);
 }
 
@@ -637,8 +654,9 @@ void JoltPhysicsScene::SetBodyCollision(PhysicsBodyHandle body,
     // (BodyInstance.cpp:1125-1126 — Static은 깨울 것이 없다).
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
     bodies.SetObjectLayer(slot.body, ObjectLayerFor(collision, slot.motion, responseSet));
+    // 깨움 이벤트는 없고 쌓인 이벤트를 지운다(UE WakeUp_AssumesLocked — 7.1.19절).
     if (slot.motion != BodyMotion::Static) {
-        bodies.ActivateBody(slot.body);
+        WithoutWakeEvents(slot, true, [&]() noexcept { bodies.ActivateBody(slot.body); });
     }
 
     if (acquired) {
@@ -668,8 +686,12 @@ Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, const BodyGeometry& 
     // UE UpdateBodyScale: 형상을 바꾸고 깨우며, updateMassWhenScaleChanges면 질량을 다시 계산한다
     // (BodyInstance.cpp:2545-2575). 질량은 Jolt 기본 계산 대신 UE 규칙으로 넣는다(7.1.15절). Jolt는
     // Static을 깨우지 않는다.
-    system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
-                                        JPH::EActivation::Activate);
+    // 형상 변경의 깨움은 이벤트가 아니고 쌓인 이벤트를 지운다(UE UpdateBodyScale →
+    // WakeUp_AssumesLocked — 7.1.19절).
+    WithoutWakeEvents(slot, true, [&]() noexcept {
+        system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
+                                            JPH::EActivation::Activate);
+    });
     if (slot.updateMassOnShapeChange && slot.motion != BodyMotion::Static) {
         JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
         if (lock.Succeeded()) {
@@ -735,6 +757,12 @@ Result<BodyKinematics> JoltPhysicsScene::ReadKinematics(PhysicsBodyHandle body) 
     return Result<BodyKinematics>::Success(kinematics);
 }
 
+void JoltPhysicsScene::ActivationListener::OnBodyActivated(const JPH::BodyID&,
+                                                           JPH::uint64 userData) {
+    platform::LockGuard lock(mutex_);
+    RecordTransition(userData, true);
+}
+
 void JoltPhysicsScene::ActivationListener::OnBodyDeactivated(const JPH::BodyID&,
                                                              JPH::uint64 userData) {
     platform::LockGuard lock(mutex_);
@@ -744,11 +772,59 @@ void JoltPhysicsScene::ActivationListener::OnBodyDeactivated(const JPH::BodyID&,
     } else {
         ++dropped_;
     }
+
+    RecordTransition(userData, false);
+}
+
+void JoltPhysicsScene::ActivationListener::RecordTransition(JPH::uint64 userData,
+                                                            bool awake) noexcept {
+    // mutex_ 아래에서 부른다. 할당하지 않는다(용량이 모자라면 센다).
+    if (!recordTransitions_) {
+        return;
+    }
+
+    if (transitionData_.Size() < transitionData_.Capacity() &&
+        transitionAwake_.Size() < transitionAwake_.Capacity()) {
+        (void)transitionData_.TryPushBack(userData);
+        (void)transitionAwake_.TryPushBack(awake);
+    } else {
+        ++droppedTransitions_;
+    }
+}
+
+void JoltPhysicsScene::ActivationListener::SetRecordTransitions(bool record) noexcept {
+    platform::LockGuard lock(mutex_);
+    recordTransitions_ = record;
+}
+
+uint64 JoltPhysicsScene::ActivationListener::TakeTransitionsInto(Array<JPH::uint64>& userData,
+                                                                 Array<bool>& awake) noexcept {
+    platform::LockGuard lock(mutex_);
+    for (usize index = 0; index < transitionData_.Size(); ++index) {
+        if (!userData.TryPushBack(transitionData_[index]) ||
+            !awake.TryPushBack(transitionAwake_[index])) {
+            ++droppedTransitions_;
+        }
+    }
+
+    transitionData_.Clear();
+    transitionAwake_.Clear();
+    const uint64 dropped = droppedTransitions_;
+    droppedTransitions_ = 0;
+    return dropped;
 }
 
 Result<void> JoltPhysicsScene::ActivationListener::Reserve(usize capacity) noexcept {
     platform::LockGuard lock(mutex_);
-    return deactivated_.TryReserve(capacity);
+    if (auto reserved = deactivated_.TryReserve(capacity); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = transitionData_.TryReserve(capacity); !reserved) {
+        return reserved;
+    }
+
+    return transitionAwake_.TryReserve(capacity);
 }
 
 uint64 JoltPhysicsScene::ActivationListener::TakeInto(Array<JPH::uint64>& out) noexcept {
@@ -1144,6 +1220,8 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
         RecordStepStartVelocities();
     }
 
+    // step 전 게임 thread 전이(힘의 깨움 등)를 먼저 칸에 옮긴다(마지막 전이 순서 — 7.1.19절).
+    CollectWakeTransitions();
     stepping_ = true;
     if (platform::RunWithDeterministicFloatingPoint(
             [](void* context) noexcept {
@@ -1164,6 +1242,7 @@ Result<void> JoltPhysicsScene::Step(float seconds) noexcept {
     // 쓸 job 칸이 언제나 남게 한다(타이밍과 무관한 상한 — 7.1.1절).
     jobs_.WaitForOutstandingTasks();
     CollectMovedBodies();
+    CollectWakeTransitions();
     CollectContactHits();
     ++steps_;
     if (error != JPH::EPhysicsUpdateError::None) {

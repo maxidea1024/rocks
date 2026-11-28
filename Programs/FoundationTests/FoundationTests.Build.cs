@@ -57,7 +57,8 @@ public abstract class TestsModule : ModuleRules
         "Engine/Source/Runtime/Physics/Tests/PhysicsContactSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsDofSceneTests.cpp",
         "Engine/Source/Runtime/Physics/Tests/PhysicsForceSceneTests.cpp",
-        "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp"
+        "Engine/Source/Runtime/Physics/Tests/PhysicsSceneTests.cpp",
+        "Engine/Source/Runtime/Physics/Tests/PhysicsSleepSceneTests.cpp"
     ];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace

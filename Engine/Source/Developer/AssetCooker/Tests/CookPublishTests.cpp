@@ -14,7 +14,9 @@
 // 쓰지 않음·손상은 CorruptEntry 뒤 교체 — 시나리오 27), 부분 병합(새 항목·재사용 항목의 byte 밖 칸
 // 재계산·사라진 항목 빼기·남은 항목 유지·IncompatibleCook — 게시본 불변), 실패 시 게시본
 // 불변(Finish 없음·매니페스트 검증 위반), 거부와 IO 고장(경고·오류), 재사용 판정(cookKey·파일
-// 크기·SHA-256·머리 대조), 할당 실패.
+// 크기·SHA-256·머리 대조), 할당 실패, sidecar(AS 20.5 4–6 — 먼저 게시·같은 이름 대조·손상 교체·
+// 매니페스트 칸·재사용의 sidecar 대조·전체 쿠킹 정리·부분 쿠킹 보존·패키지 단계 실패 시 게시본
+// 불변).
 using namespace rocks;
 
 namespace cook_publish_tests_file {
@@ -36,7 +38,8 @@ Sha256Digest DigestOf(const char* text) noexcept {
 // 합성 쿠킹 패키지다(byte는 id·revision으로 만든 무늬 — 게시기는 내용을 해석하지 않는다).
 struct FakePackage {
     FakePackage(Allocator& allocator, uint64 id, uint32 revision, StringView pathText) noexcept
-        : bytes(allocator), path(allocator), dependencies(allocator), bundles(allocator) {
+        : bytes(allocator), sidecar(allocator), path(allocator), dependencies(allocator),
+          bundles(allocator) {
         asset = FixedId(id);
         ready = bytes.TryResize(FakeBytes + id % 7) && path.TryAssign(pathText);
         for (usize index = 0; index < bytes.Size(); ++index) {
@@ -45,6 +48,22 @@ struct FakePackage {
 
         sha256 = Sha256::Hash(bytes.View());
         cookKey = Sha256::Hash(Span<const uint8>(bytes.Data(), 8));
+    }
+
+    // revision 무늬의 sidecar byte를 붙인다(크기 SidecarHeaderBytes보다 크다 — 게시기는 내용을
+    // 해석하지 않는다).
+    bool AddSidecar(uint32 revision) noexcept {
+        constexpr usize SidecarFakeBytes = 300;
+        if (!sidecar.TryResize(SidecarFakeBytes)) {
+            return false;
+        }
+
+        for (usize index = 0; index < sidecar.Size(); ++index) {
+            sidecar[index] = static_cast<uint8>(asset.value.low * 13 + revision * 5 + index);
+        }
+
+        sidecarSha256 = Sha256::Hash(sidecar.View());
+        return true;
     }
 
     CookedPackage View() const noexcept {
@@ -58,12 +77,16 @@ struct FakePackage {
         package.bytes = bytes.View();
         package.sha256 = sha256;
         package.bulkRawBytes = 3;
+        package.sidecar = sidecar.View();
+        package.sidecarSha256 = sidecarSha256;
         package.cookKey = cookKey;
         return package;
     }
 
     AssetId asset{};
     Array<uint8> bytes;
+    Array<uint8> sidecar;
+    Sha256Digest sidecarSha256{};
     String path;
     Array<CookedManifestDependency> dependencies;
     Array<CookTargetBundle> bundles;
@@ -133,6 +156,12 @@ struct PublishScene {
     String PackageName(const FakePackage& package) noexcept {
         StringBuilder<256> path(env.allocator);
         CHECK(AppendCookedPackagePath(path, package.asset, package.sha256));
+        return Relative(path.View());
+    }
+
+    String SidecarName(const FakePackage& package) noexcept {
+        StringBuilder<256> path(env.allocator);
+        CHECK(AppendCookedSidecarPath(path, package.asset, package.sidecarSha256));
         return Relative(path.View());
     }
 
@@ -789,6 +818,8 @@ TEST(CookPublish_PlanReuse) {
         FakePackage(env.allocator, 10, 1, "/Game/A"), FakePackage(env.allocator, 20, 1, "/Game/B"),
         FakePackage(env.allocator, 30, 1, "/Game/C"), FakePackage(env.allocator, 40, 1, "/Game/D"),
         FakePackage(env.allocator, 50, 1, "/Game/E"), FakePackage(env.allocator, 60, 1, "/Game/F")};
+    // A는 sidecar가 있다(재사용 판정의 sidecar 대조 할당 지점도 아래 할당 실패가 지난다).
+    REQUIRE(packages[0].AddSidecar(1));
     {
         CookPublisher first(env.allocator, scene.Config());
         REQUIRE(first.Begin(scene.lock));
@@ -902,6 +933,192 @@ TEST(CookPublish_PlanReuse) {
     CHECK(failures >= 3);
 }
 
+// sidecar 게시(AS 20.5 4–6): sidecar는 `Packages/<a>/<A>-<h>.rbsc`(h = sidecar SHA-256)에 놓이고
+// 매니페스트 항목에 크기·SHA-256이 들어가며 새로 쓴 byte에 든다. 같은 내용은 다시 쓰지 않고, 같은
+// 이름의 손상 파일은 CorruptEntry 뒤 교체한다. 패키지 단계에서 실패하면(sidecar는 이미 놓임)
+// 게시본 매니페스트는 옛 sidecar를 가리킨다. 전체 쿠킹은 새 매니페스트가 가리키지 않는 `.rbsc`만
+// 지우고, 부분 쿠킹은 옛 `.rbsc`를 남긴다. 병합은 sidecar 칸을 옮기고 재사용 항목도 옮긴다.
+TEST(CookPublish_Sidecar) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    PublishScene scene(env, "publish-sidecar");
+    REQUIRE(scene.ready);
+    FakePackage a(env.allocator, 10, 1, "/Game/A");
+    FakePackage plain(env.allocator, 20, 1, "/Game/Plain");
+    REQUIRE(a.ready && plain.ready && a.AddSidecar(1));
+    {
+        CookPublisher first(env.allocator, scene.Config());
+        REQUIRE(first.Begin(scene.lock) && first.Put(a.View()) && first.Put(plain.View()));
+        REQUIRE(first.Finish(nullptr, {}));
+        CHECK(first.Published() && first.Diagnostics().IsEmpty());
+        CHECK(first.BytesWritten() == a.bytes.Size() + a.sidecar.Size() + plain.bytes.Size());
+    }
+
+    CHECK(Same(scene.files.Bytes(scene.SidecarName(a).View()), a.sidecar.View()));
+    auto manifest = scene.Manifest();
+    REQUIRE(manifest);
+    const CookedManifestEntry* aEntry = manifest.Value().Find(a.asset);
+    const CookedManifestEntry* plainEntry = manifest.Value().Find(plain.asset);
+    REQUIRE(aEntry != nullptr && plainEntry != nullptr);
+    CHECK(aEntry->sidecarBytes == a.sidecar.Size() && aEntry->sidecarSha256 == a.sidecarSha256);
+    CHECK(plainEntry->sidecarBytes == 0 && plainEntry->sidecarSha256 == Sha256Digest{});
+
+    // 같은 내용은 쓰지 않는다. 같은 이름의 손상 sidecar는 경고 뒤 교체한다.
+    {
+        CookPublisher again(env.allocator, scene.Config());
+        REQUIRE(again.Begin(scene.lock) && again.Put(a.View()) && again.Put(plain.View()));
+        CHECK(again.BytesWritten() == 0);
+        REQUIRE(again.Finish(nullptr, {}));
+    }
+
+    Array<uint8> damaged(env.allocator);
+    REQUIRE(damaged.TryAppend(a.sidecar.View()));
+    damaged[7] ^= 1;
+    REQUIRE(scene.Place(scene.SidecarName(a).View(), damaged.View()));
+    {
+        CookPublisher repair(env.allocator, scene.Config());
+        REQUIRE(repair.Begin(scene.lock) && repair.Put(a.View()) && repair.Put(plain.View()));
+        CHECK(HasWarning(repair, AssetDiagnosticCode::CorruptEntry));
+        CHECK(repair.BytesWritten() == a.sidecar.Size());
+        REQUIRE(repair.Finish(nullptr, {}));
+    }
+
+    CHECK(Same(scene.files.Bytes(scene.SidecarName(a).View()), a.sidecar.View()));
+
+    // 패키지 단계 실패: 새 sidecar는 놓였지만 매니페스트는 그대로다(옛 sidecar를 가리킨다).
+    const String manifestName = scene.Relative(CookedManifestFileName);
+    Array<uint8> before(env.allocator);
+    REQUIRE(before.TryAppend(scene.files.Bytes(manifestName.View())));
+    FakePackage a2(env.allocator, 10, 2, "/Game/A");
+    REQUIRE(a2.ready && a2.AddSidecar(2));
+    {
+        CookPublisher failing(env.allocator, scene.Config());
+        REQUIRE(failing.Begin(scene.lock));
+        // sidecar 쓰기(다음 Write) 뒤의 패키지 쓰기가 실패한다.
+        scene.files.faults.failWriteCall = scene.files.WriteCalls() + 2;
+        CHECK(!failing.Put(a2.View()));
+        scene.files.faults.failWriteCall = 0;
+    }
+
+    CHECK(Same(scene.files.Bytes(manifestName.View()), before.View()));
+    CHECK(scene.files.Has(scene.SidecarName(a2).View()));
+    CHECK(Same(scene.files.Bytes(scene.SidecarName(a).View()), a.sidecar.View()));
+
+    // sidecar 쓰기 자체가 실패하면 패키지는 쓰지 않고 임시 파일은 남지 않는다(매니페스트 그대로).
+    FakePackage a3(env.allocator, 10, 3, "/Game/A");
+    REQUIRE(a3.ready && a3.AddSidecar(3));
+    {
+        CookPublisher failing(env.allocator, scene.Config());
+        REQUIRE(failing.Begin(scene.lock));
+        scene.files.faults.failWriteCall = scene.files.WriteCalls() + 1;
+        CHECK(!failing.Put(a3.View()));
+        scene.files.faults.failWriteCall = 0;
+    }
+
+    CHECK(!scene.files.Has(scene.SidecarName(a3).View()));
+    CHECK(!scene.files.Has(scene.PackageName(a3).View()));
+    CHECK(Same(scene.files.Bytes(manifestName.View()), before.View()));
+    for (usize index = 0; index < scene.files.NodeCount(); ++index) {
+        CHECK(!scene.files.NodeName(index).EndsWith(".tmp", StringComparison::CaseSensitive));
+    }
+
+    // 부분 쿠킹: a2 게시, 옛 sidecar는 남는다(병합한 plain 항목도 그대로).
+    {
+        auto existing = scene.Manifest();
+        REQUIRE(existing);
+        CookPublisher partial(env.allocator, scene.Config());
+        REQUIRE(partial.Begin(scene.lock) && partial.Put(a2.View()));
+        REQUIRE(partial.Finish(&existing.Value(), {}));
+        CHECK(partial.Published());
+    }
+
+    CHECK(scene.files.Has(scene.SidecarName(a).View()));
+    CHECK(Same(scene.files.Bytes(scene.SidecarName(a2).View()), a2.sidecar.View()));
+    auto merged = scene.Manifest();
+    REQUIRE(merged);
+    const CookedManifestEntry* a2Entry = merged.Value().Find(a.asset);
+    REQUIRE(a2Entry != nullptr && merged.Value().Find(plain.asset) != nullptr);
+    CHECK(a2Entry->sidecarBytes == a2.sidecar.Size() && a2Entry->sidecarSha256 == a2.sidecarSha256);
+
+    // 재사용 항목은 sidecar 칸을 옮긴다. 전체 쿠킹은 옛 sidecar만 지운다.
+    {
+        CookTarget target(env.allocator);
+        target.id = a.asset;
+        CookPublisher full(env.allocator, scene.Config());
+        REQUIRE(full.Begin(scene.lock));
+        REQUIRE(full.Reuse(*a2Entry, target, "/Game/A"));
+        REQUIRE(full.Put(plain.View()));
+        REQUIRE(full.Finish(nullptr, {}));
+        CHECK(full.Published());
+    }
+
+    CHECK(!scene.files.Has(scene.SidecarName(a).View()));
+    CHECK(scene.files.Has(scene.SidecarName(a2).View()));
+    auto reused = scene.Manifest();
+    REQUIRE(reused);
+    const CookedManifestEntry* reusedEntry = reused.Value().Find(a.asset);
+    REQUIRE(reusedEntry != nullptr);
+    CHECK(reusedEntry->sidecarBytes == a2.sidecar.Size() &&
+          reusedEntry->sidecarSha256 == a2.sidecarSha256);
+}
+
+// 재사용 판정의 sidecar(AS 20.5 5): 패키지가 같아도 sidecar가 없거나 바뀌면 다시 쿠킹하고, 같으면
+// 재사용한다. sidecar가 없는 항목은 sidecar를 보지 않는다.
+TEST(CookPublish_PlanReuseSidecar) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    PublishScene scene(env, "publish-reuse-sidecar");
+    REQUIRE(scene.ready);
+    FakePackage packages[] = {
+        FakePackage(env.allocator, 10, 1, "/Game/A"), FakePackage(env.allocator, 20, 1, "/Game/B"),
+        FakePackage(env.allocator, 30, 1, "/Game/C"), FakePackage(env.allocator, 40, 1, "/Game/D")};
+    REQUIRE(packages[0].AddSidecar(1) && packages[1].AddSidecar(1) && packages[2].AddSidecar(1));
+    {
+        CookPublisher first(env.allocator, scene.Config());
+        REQUIRE(first.Begin(scene.lock));
+        for (const FakePackage& package : packages) {
+            REQUIRE(package.ready && first.Put(package.View()));
+        }
+
+        REQUIRE(first.Finish(nullptr, {}));
+    }
+
+    auto existing = scene.Manifest();
+    REQUIRE(existing);
+    // A: 그대로, B: sidecar 지움, C: sidecar 한 byte 바꿈, D: sidecar 없음.
+    scene.files.Remove(scene.SidecarName(packages[1]).View());
+    Array<uint8> damaged(env.allocator);
+    REQUIRE(damaged.TryAppend(packages[2].sidecar.View()));
+    damaged[0] ^= 1;
+    REQUIRE(scene.Place(scene.SidecarName(packages[2]).View(), damaged.View()));
+    CookTargetSet targets(env.allocator);
+    CookKeySet keys(env.allocator);
+    for (const FakePackage& package : packages) {
+        REQUIRE(targets.targets.TryEmplaceBack(env.allocator));
+        targets.targets[targets.targets.Size() - 1].id = package.asset;
+        CookKey key;
+        key.asset = package.asset;
+        key.cookKey = package.cookKey;
+        key.hasKey = true;
+        REQUIRE(keys.keys.TryPushBack(key));
+    }
+
+    StringBuilder<256> root(env.allocator);
+    REQUIRE(AppendCookedRoot(root, scene.layout.SavedDirectory(), Profile));
+    CookReuseRequest request;
+    request.files = &scene.files;
+    request.cookedRoot = root.View();
+    request.existing = &existing.Value();
+    request.targets = &targets;
+    request.keys = &keys;
+    request.profileId = Profile;
+    request.profileSettings = DigestOf("profile");
+    CookReusePlan plan(env.allocator);
+    REQUIRE(PlanCookReuse(env.allocator, request, plan));
+    CHECK(plan.count == 2 && plan.reuse[0] == 1 && plan.reuse[1] == 0 && plan.reuse[2] == 0 &&
+          plan.reuse[3] == 1);
+}
+
 // 할당 실패: 게시 흐름(Begin·Put·Reuse·Finish 전체·부분 병합·정리)의 모든 지점에서 OutOfMemory이고
 // 게시본은 그대로이거나(실패) 기준과 같다(성공). 경고 다섯 자리의 push와 게시하지 않는 오류 진단의
 // push도 OutOfMemory다.
@@ -913,7 +1130,8 @@ TEST(CookPublish_AllocationFailures) {
     FakePackage a(env.allocator, 10, 1, "/Game/A");
     FakePackage b(env.allocator, 20, 1, "/Game/B");
     FakePackage c(env.allocator, 30, 1, "/Game/C");
-    REQUIRE(a.ready && b.ready && c.ready);
+    // A·B2는 sidecar가 있다(sidecar 게시·병합·재사용·정리의 할당 지점 — AS 20.5).
+    REQUIRE(a.ready && b.ready && c.ready && a.AddSidecar(1));
     REQUIRE(
         a.dependencies.TryPushBack(CookedManifestDependency{b.asset, PackageDependencyKind::Soft}));
     REQUIRE(AddBundle(env.allocator, c, a.asset));
@@ -929,7 +1147,7 @@ TEST(CookPublish_AllocationFailures) {
     Array<uint8> baseline(env.allocator);
     REQUIRE(baseline.TryAppend(scene.files.Bytes(manifestName.View())));
     FakePackage b2(env.allocator, 20, 2, "/Game/B");
-    REQUIRE(b2.ready && AddBundle(env.allocator, b2, a.asset));
+    REQUIRE(b2.ready && b2.AddSidecar(2) && AddBundle(env.allocator, b2, a.asset));
     CookTarget aTarget(env.allocator);
     aTarget.id = a.asset;
     aTarget.primary = true;
@@ -980,6 +1198,7 @@ TEST(CookPublish_AllocationFailures) {
     uint32 cleanupFailures = 0;
     for (uint64 attempt = 1;; ++attempt) {
         REQUIRE(scene.Place(scene.Relative("Packages/zz/Stale.rpkg").View(), junk));
+        REQUIRE(scene.Place(scene.Relative("Packages/zz/Stale.rbsc").View(), junk));
         CookPublisher publisher(failing, scene.Config());
         failing.FailOnAttempt(attempt);
         Result<void> step = publisher.Begin(scene.lock);
@@ -1000,6 +1219,8 @@ TEST(CookPublish_AllocationFailures) {
         if (!hit) {
             REQUIRE(step);
             CHECK(!scene.files.Has(scene.Relative("Packages/zz/Stale.rpkg").View()));
+            CHECK(!scene.files.Has(scene.Relative("Packages/zz/Stale.rbsc").View()));
+            CHECK(scene.files.Has(scene.SidecarName(a).View()));
             break;
         }
 

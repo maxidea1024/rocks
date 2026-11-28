@@ -46,6 +46,19 @@ inline uint32 UserDataGeneration(JPH::uint64 userData) noexcept {
     return static_cast<uint32>(userData);
 }
 
+// 칸에 쌓인 깨움·잠듦 전이다(7.1.19절 — 프레임마다 마지막 하나, UE EWakeEventEntry).
+enum class WakeTransition : uint8 {
+    None,
+    Awake,
+    Sleep
+};
+
+// 깨움·잠듦 이벤트 한 건이다(7.1.19절): body를 가진 컴포넌트와 마지막 전이(깨움이면 참).
+struct WakeEvent {
+    ObjectHandle component;
+    bool awake = false;
+};
+
 // 결과 반영 한 건이다(3.4절): body를 가진 컴포넌트와 Jolt가 계산한 월드 위치(cm)·회전이다.
 struct MovedBody {
     ObjectHandle component;
@@ -90,6 +103,7 @@ public:
                                 bool addToCurrent) noexcept override;
     void UpdateBodySettings(PhysicsBodyHandle body, const BodySettings& settings,
                             BodySettingsChange change) noexcept override;
+    void SetBodyAwake(PhysicsBodyHandle body, bool awake) noexcept override;
     double DefaultMaxAngularVelocityDegrees() const noexcept override {
         return maxAngularVelocityDegrees_;
     }
@@ -138,6 +152,11 @@ public:
     // 두어 다음 호출이 다시 꺼낸다).
     Result<Span<const MovedBody>> TakeMovedBodies() noexcept;
 
+    // 지난 꺼냄 뒤 쌓인 깨움·잠듦 이벤트(Dynamic body마다 마지막 전이 하나)를 칸 번호 순으로
+    // 꺼낸다(7.1.19절 — PhysicsResults가 결과 반영 뒤 부른다). 돌려준 Span은 다음 호출까지
+    // 유효하다. 할당 실패면 빈 Span이고 이벤트는 칸에 남아 다음 호출이 꺼낸다.
+    Span<const WakeEvent> TakeWakeEvents() noexcept;
+
     // 지난 꺼냄 뒤 step들이 쌓은 시뮬레이션 접촉 hit를 스텝 순서대로 꺼낸다(7.1.12절 —
     // PhysicsResults가 부른다). 돌려준 Span은 다음 호출까지 유효하다(발행 중 hook이 장면을 바꿔도
     // 그대로다).
@@ -179,6 +198,10 @@ private:
         JPH::Ref<JPH::Constraint> dofConstraint;
         // 결과 목록에 이미 있는지다(중복 방지).
         bool pendingResult = false;
+        // 발행할 깨움·잠듦 이벤트다(7.1.19절 — 0 없음, 마지막 전이). queuedWakeEvent면
+        // wakeEventBodies_에 있다.
+        WakeTransition wakeEvent = WakeTransition::None;
+        bool queuedWakeEvent = false;
         // 시뮬레이션 접촉 hit를 모으는지다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
         // step 동안 접촉 listener가 worker에서 읽는다(쓰기는 step 밖).
         bool notifyContacts = false;
@@ -215,13 +238,21 @@ private:
     // thread)에서 부르므로 할당하지 않는다: 용량은 CreateBody가 Reserve로 미리 잡고, 넘치면 센다.
     class ActivationListener final : public JPH::BodyActivationListener {
     public:
-        explicit ActivationListener(Allocator& allocator) noexcept : deactivated_(allocator) {
+        explicit ActivationListener(Allocator& allocator) noexcept
+            : deactivated_(allocator), transitionData_(allocator), transitionAwake_(allocator) {
         }
 
-        void OnBodyActivated(const JPH::BodyID&, JPH::uint64) override {
-        }
+        void OnBodyActivated(const JPH::BodyID&, JPH::uint64 userData) override;
 
         void OnBodyDeactivated(const JPH::BodyID&, JPH::uint64 userData) override;
+
+        // 깨움·잠듦 전이 기록을 끄거나 켠다(게임 thread, step 밖 — 이벤트를 내지 않는 Jolt 호출을
+        // 감싼다, 7.1.19절). 잠듦 결과 목록 기록은 늘 한다.
+        void SetRecordTransitions(bool record) noexcept;
+
+        // 쌓인 전이(user data, 깨움 여부)를 out 끝에 옮기고 비운다(step 밖). 돌려주는 값은 용량이
+        // 모자라 놓친 수다.
+        uint64 TakeTransitionsInto(Array<JPH::uint64>& userData, Array<bool>& awake) noexcept;
 
         // 용량을 capacity 이상으로 잡는다(게임 thread, step 밖). 오류: 할당 실패.
         Result<void> Reserve(usize capacity) noexcept;
@@ -230,9 +261,16 @@ private:
         uint64 TakeInto(Array<JPH::uint64>& out) noexcept;
 
     private:
+        void RecordTransition(JPH::uint64 userData, bool awake) noexcept;
+
         platform::Mutex mutex_;
         Array<JPH::uint64> deactivated_;
         uint64 dropped_ = 0;
+        // 깨움·잠듦 전이다(순서대로 — 용량은 deactivated_와 같이 잡는다).
+        Array<JPH::uint64> transitionData_;
+        Array<bool> transitionAwake_;
+        uint64 droppedTransitions_ = 0;
+        bool recordTransitions_ = true;
     };
 
     // step 안에서 모은 접촉 하나다(7.1.12절 — Jolt 순서: body 1 ID < body 2 ID). 위치는 Jolt 좌표,
@@ -383,6 +421,13 @@ private:
     void RebuildMass(BodySlot& slot, const BodyMassValues& mass) noexcept;
     // 칸의 자유도와 gyroscopic 표지(gyroscopicTorque && 회전 bit 잠금 없음)를 body에 넣는다.
     void ApplyGyroscopic(BodySlot& slot, bool requested) noexcept;
+    // 쌓인 전이 기록을 칸의 깨움·잠듦 이벤트로 옮긴다(7.1.19절 — 살아 있는 같은 세대의 Dynamic
+    // 칸만, 마지막 전이가 이긴다).
+    void CollectWakeTransitions() noexcept;
+    // 이벤트를 내지 않는 Jolt 호출(call)을 전이 기록 없이 한다. clearPending이면 칸의 쌓인
+    // 이벤트도 지운다(UE ClearEvents).
+    template <class Call>
+    void WithoutWakeEvents(BodySlot& slot, bool clearPending, Call&& call) noexcept;
     // 칸의 대기 충격량 몫·프레임 힘을 버린다(body 삭제·Kinematic 전환).
     static void DropPendingImpulse(BodySlot& slot) noexcept;
     // step 직전 대기 충격량 몫을 Dynamic body 속도에 더하고 프레임 힘을 누적 힘에 넣는다(결정적 FP
@@ -428,6 +473,11 @@ private:
     Array<PhysicsBodyHandle> pendingResults_;
     Array<uint32> kinematicTargets_;
     Array<uint32> kinematicMoving_;
+    // 깨움·잠듦 이벤트가 있는 body와 꺼낸 이벤트·전이 임시 목록이다(7.1.19절).
+    Array<PhysicsBodyHandle> wakeEventBodies_;
+    Array<WakeEvent> wakeEvents_;
+    Array<JPH::uint64> transitionData_;
+    Array<bool> transitionAwake_;
     // 대기 충격량 몫·프레임 힘이 있는 칸이다(7.1.17절).
     Array<uint32> pendingImpulses_;
     Array<uint32> frameForces_;
@@ -465,6 +515,18 @@ private:
     // Step의 Update·Kinematic 목표 적용 중이다(AssertNotStepping).
     bool stepping_ = false;
 };
+
+template <class Call>
+void JoltPhysicsScene::WithoutWakeEvents(BodySlot& slot, bool clearPending, Call&& call) noexcept {
+    // 앞선 전이를 먼저 칸에 옮겨 순서를 지킨다.
+    CollectWakeTransitions();
+    activations_.SetRecordTransitions(false);
+    call();
+    activations_.SetRecordTransitions(true);
+    if (clearPending) {
+        slot.wakeEvent = WakeTransition::None;
+    }
+}
 
 } // namespace physics
 
