@@ -1060,6 +1060,13 @@ private:
     Result<ObjectLifecycle> InspectSelf(ObjectHandle, const Object*) const noexcept;
     Result<void> DestroySelf(ObjectHandle, const Object*) noexcept;
     Result<TypeLease> AcquireTypeSelf(ObjectHandle, const Object*) noexcept;
+    // Object::NotifyChanged·생성 setter의 통지다(ChangeNotification CN-D9): 접근 문맥은 Destroy와
+    // 같은 규칙(ScopedAccess)이고, 게시 전(Reserved) 객체는 통지하지 않고 Success다. 그 밖은
+    // NotifyChecked와 같다(대상이 아닌 id는 InvalidArgument — 생성 NotifyId가 컴파일 때 막는다).
+    Result<void> NotifySelf(ObjectHandle handle, const Object* object, Guid id) noexcept;
+    // 통지할 쓰기(생성 setter·SetAndNotify)의 대입 전 검사다: 접근 문맥(ScopedAccess)·스레드와 종료
+    // (ShuttingDown). 대입 뒤 NotifySelf의 실패는 Busy(처리 표시·묶음 게시)만 남는다.
+    Result<void> CheckSelfAccess() const noexcept;
     Result<void> AddRoot(const ObjectAccessContext&, ObjectHandle, const void*) noexcept;
     // rejectEncodePinned면 encode 고정 중인 객체를 Busy로 거부한다(ResolveForWrite).
     Result<void> AddBorrow(const ObjectAccessContext&, ObjectHandle, const void*,

@@ -98,6 +98,20 @@ public:
     //   auto copy = text.DeepClone(registry.ObjectAllocator());
     Result<Text> DeepClone(Allocator& allocator, TextResolveLimits limits = {}) const noexcept;
 
+    // other와 이력 구조가 같은지 본다(값 같음 — Docs/Design/ChangeNotification.ko.md CN-D15, UE
+    // FText::IdenticalTo의 깊은 비교와 같은 자리). 같은 노드를 공유하면 바로 같다. 아니면
+    // 형태(Invariant· Localized·Format·Integer)·원문 byte·ID·source revision을 비교하고, Format은
+    // 패턴과 인자(이름 byte· 값)를 순서대로 재귀 비교한다. 둘 다 비어 있으면 같고 하나만 비어
+    // 있으면 다르다. 같은 원문을 가진 Invariant와 Localized는 다르다(저장 형태가 다르다).
+    // limits.maxDepth(root = 1)나 limits.maxWork(노드 방문 + 비교 byte — DeepClone과 같은 단위)를
+    // 넘으면, 그리고 maxDepth가 64를 넘으면 다르다로 본다 (보수적 — 같은데 다르다고 하면 한 번 더
+    // 알릴 뿐이다). 할당하지 않는다. 노드는 불변이라 다른 스레드의 Clone·Reset과 함께 불러도
+    // 된다(같은 래퍼의 변경과는 동기화한다).
+    //
+    // 사용 예:
+    //   if (!current.IsIdentical(next)) { /* 바뀌었다 */ }
+    bool IsIdentical(const Text& other, TextResolveLimits limits = {}) const noexcept;
+
 private:
     explicit Text(detail::TextNode* node) noexcept : node_(node) {
     }

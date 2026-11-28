@@ -46,6 +46,15 @@ internal static class MetaProbeIdentity
             "probe::Thing::edited", "probe::Bell::rang", "probe::Quiet::rang", "probe::Thing::opened", "probe::Thing::pinged2",
             "probe::Note::rang"];
 
+    // 생성 setter 시험(MetaTests.Setters)의 타입·필드·함수다.
+    private static readonly string[] SetterTypes = ["probe::Shade", "probe::Cached"];
+
+    private static readonly string[] SetterFields =
+        ["probe::Value::note", "probe::Value::shade", "probe::Value::cached", "probe::Value::partner", "probe::Value::partners",
+            "probe::Shade::tone", "probe::Shade::hint", "probe::Cached::value", "probe::Base::inherited"];
+
+    private static readonly string[] SetterFunctions = ["probe::Value::Total"];
+
     // 선언 subobject 시험(MetaTests.Subobjects)의 타입·필드·subobject다. legacy는 field로 등록해 kind 변경 거부를 본다.
     private static readonly string[] SubobjectTypes = ["probe::Part", "probe::ScenePart", "probe::Owner", "probe::Sub", "probe::EdPart", "probe::AbsPart"];
 
@@ -71,7 +80,7 @@ internal static class MetaProbeIdentity
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
                 "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow", "probe::Cell",
                 "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags", "probe::Tool" }
-                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes).Concat(FunctionTypes).Concat(SubobjectTypes))
+                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes).Concat(FunctionTypes).Concat(SubobjectTypes).Concat(SetterTypes))
             {
                 manifest.Register("type", name);
             }
@@ -131,12 +140,12 @@ internal static class MetaProbeIdentity
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
                 "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
-                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields).Concat(EventFields).Concat(SubobjectFields))
+                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields).Concat(EventFields).Concat(SubobjectFields).Concat(SetterFields))
             {
                 manifest.Register("field", name);
             }
 
-            foreach (string name in FunctionNames)
+            foreach (string name in FunctionNames.Concat(SetterFunctions))
             {
                 manifest.Register("function", name);
             }

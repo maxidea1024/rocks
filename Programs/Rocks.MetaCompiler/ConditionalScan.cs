@@ -9,8 +9,8 @@ namespace Rocks.MetaCompiler;
 /// <c>#if</c>·<c>#ifdef</c>·<c>#ifndef</c>·<c>#elif</c>·<c>#elifdef</c>·<c>#elifndef</c>·<c>#else</c>·<c>#endif</c> 중첩을 따른다.
 /// <list type="bullet">
 /// <item>리플렉션 매크로(<see cref="Macros"/>)가 조건 블록 안에 있으면 RMC2501이다. 예외는 깊이 1인 블록의 첫 가지 둘이다:
-/// <c>#if ROCKS_WITH_EDITOR_DATA</c> 안 <c>ROCKS_PROPERTY</c>, <c>#if ROCKS_WITH_EDITOR</c> 안 <c>ROCKS_FUNCTION</c>(조건식은 공백을 정규화한
-/// 정확한 철자).</item>
+/// <c>#if ROCKS_WITH_EDITOR_DATA</c> 안 <c>ROCKS_PROPERTY</c>·<c>ROCKS_SETTER</c>·<c>ROCKS_GETTER</c>(EditorOnly 필드의 setter·getter —
+/// Docs/Design/ChangeNotification.ko.md CN-D13), <c>#if ROCKS_WITH_EDITOR</c> 안 <c>ROCKS_FUNCTION</c>(조건식은 공백을 정규화한 정확한 철자).</item>
 /// <item><see cref="InEditorDataBlock"/>은 필드 줄이 허용된 에디터 데이터 블록 안인지 답한다(양방향 일치 RMC2502가 쓴다).</item>
 /// </list>
 /// 사용 예: <c>ConditionalScan scan = ConditionalScan.Scan(options.Inputs);</c>
@@ -20,7 +20,8 @@ internal sealed class ConditionalScan
     /// <summary>조건 블록 안에 둘 수 없는 리플렉션 매크로다(예외 둘은 위).</summary>
     public static readonly IReadOnlyList<string> Macros =
     [
-        "ROCKS_CLASS", "ROCKS_STRUCT", "ROCKS_ENUM", "ROCKS_ENUMERATOR", "ROCKS_PROPERTY", "ROCKS_FUNCTION", "ROCKS_NATIVE", "ROCKS_GENERATED_BODY"
+        "ROCKS_CLASS", "ROCKS_STRUCT", "ROCKS_ENUM", "ROCKS_ENUMERATOR", "ROCKS_PROPERTY", "ROCKS_FUNCTION", "ROCKS_NATIVE", "ROCKS_GENERATED_BODY",
+        "ROCKS_SETTER", "ROCKS_GETTER"
     ];
 
     /// <summary>에디터 전용 필드 블록의 조건 철자다.</summary>
@@ -143,12 +144,14 @@ internal sealed class ConditionalScan
                 string macro = use.Groups[1].Value;
                 Block top = stack[^1];
                 bool allowed = stack.Count == 1 && top.FirstBranch &&
-                    ((macro == "ROCKS_PROPERTY" && top.Kind == BlockKind.EditorData) || (macro == "ROCKS_FUNCTION" && top.Kind == BlockKind.Editor));
+                    ((macro is "ROCKS_PROPERTY" or "ROCKS_SETTER" or "ROCKS_GETTER" && top.Kind == BlockKind.EditorData) ||
+                     (macro == "ROCKS_FUNCTION" && top.Kind == BlockKind.Editor));
                 if (!allowed)
                 {
                     throw new MetadataException($"{macro} is inside a preprocessor conditional block (opened at line {top.Line})", "RMC2501",
-                        "Declare reflected types, enumerators and native members outside conditional blocks; only ROCKS_PROPERTY(EditorOnly, ...) may " +
-                        "sit directly in '#if ROCKS_WITH_EDITOR_DATA' and ROCKS_FUNCTION(EditorOnly, ...) directly in '#if ROCKS_WITH_EDITOR' " +
+                        "Declare reflected types, enumerators and native members outside conditional blocks; only ROCKS_PROPERTY(EditorOnly, ...) and " +
+                        "the ROCKS_SETTER/ROCKS_GETTER of such a field may sit directly in '#if ROCKS_WITH_EDITOR_DATA' and ROCKS_FUNCTION(EditorOnly, ...) " +
+                        "directly in '#if ROCKS_WITH_EDITOR' " +
                         "(Docs/Design/BuildTargets section 3.4).").At(new SourceSite(path, lineNumber));
                 }
             }
