@@ -54,15 +54,16 @@
 // 않는다. ForEach·EraseIf predicate·FindOrAddWith factory 안의 구조 변경은 삽입·예약·
 // 압축·EraseIf가 Busy, 삭제·Clear·Reset·이동이 Fatal이다(HashMap과 같다).
 //
-// 해시(hash flooding 방어): 기본 정책은 SeededHash<K>(Core/Hash.h — seed를 넣은 SipHash-2-4,
-// 기본 seed는 프로세스마다 OS 난수)다. 순서가 해시와 무관하므로 seed가 바뀌어도 순회·직렬화·
-// 같음이 그대로이고, 파일에서 온 키로도 상대가 색인 칸 충돌을 미리 고를 수 없다. 시험·재현은
-// SeededHash<K>(HashSeed{...})를 넘긴다. 다른 해시 정책을 넘기면 이 보장은 그 정책의 몫이다.
+// 해시(hash flooding 방어): 기본 정책은 SeededHash<K>(Core/Hash/TypeHash.h — seed를 넣은
+// SipHash-2-4, 기본 seed는 프로세스마다 OS 난수)다. 순서가 해시와 무관하므로 seed가 바뀌어도
+// 순회·직렬화· 같음이 그대로이고, 파일에서 온 키로도 상대가 색인 칸 충돌을 미리 고를 수 없다.
+// 시험·재현은 SeededHash<K>(HashSeed{...})를 넘긴다. 다른 해시 정책을 넘기면 이 보장은 그 정책의
+// 몫이다.
 
 #include <Base/TypeTraits.h>
 #include <Core/Containers/InsertOutcome.h>
 #include <Core/Containers/OrderedEntryTable.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 
 namespace rocks {
 

@@ -2,7 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <NodeGraph/GraphDocument.h>

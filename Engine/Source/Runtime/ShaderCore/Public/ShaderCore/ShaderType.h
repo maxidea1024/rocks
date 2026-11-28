@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderFormatTypes.h>
 #include <ShaderCore/ShaderParameterLayout.h>

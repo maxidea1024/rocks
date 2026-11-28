@@ -390,7 +390,7 @@ internal static partial class ModuleMetaTests
         {
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
-                "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Encoding/Sha256.h>\nnamespace probe {\n" +
+                "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Hash/Sha256.h>\nnamespace probe {\n" +
                 "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : icon(allocator), any(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::AssetId source;\nROCKS_PROPERTY() rocks::Sha256Digest hash;\n" +

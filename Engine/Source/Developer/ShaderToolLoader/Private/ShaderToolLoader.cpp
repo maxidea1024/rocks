@@ -1,4 +1,4 @@
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Platform/File.h>
 #include <Platform/Path.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>

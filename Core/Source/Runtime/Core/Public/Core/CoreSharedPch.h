@@ -29,9 +29,9 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/ContainerDetail.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Error.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Move.h>

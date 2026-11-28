@@ -1,6 +1,6 @@
 #include "ShaderPreprocessorInternal.h"
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Platform/Memory.h>
 
 // 전처리 진행이다: 파일 읽기·include 폐포, 지시문, 조건 상태, 출력(#line). 규칙은 공개 헤더

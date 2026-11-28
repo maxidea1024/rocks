@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Guid.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 
 namespace rocks {
 

@@ -38,7 +38,10 @@ public:
     CollisionShape GetCollisionShape(double inflation) const noexcept override;
 
     // 반폭 boxExtent의 상자다(Docs/Design/PhysicsModule 2.4절 — scale은 Physics가 굽는다).
-    bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+    Result<void> BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+
+    // UE UBoxComponent::IsZeroExtent.
+    bool IsZeroExtent() const noexcept override;
 
 protected:
     // 지역 (0, E, |E|)다(UE BoxComponent.cpp:122).

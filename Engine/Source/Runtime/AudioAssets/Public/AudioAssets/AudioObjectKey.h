@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Object/ObjectHandle.h>
 
 // 재생 스냅숏의 동시 발음 키(Docs/Design/AudioSystem 3.41.2절)다. 객체 handle 전체(Registry·slot·

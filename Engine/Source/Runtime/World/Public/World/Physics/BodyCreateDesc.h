@@ -16,8 +16,9 @@ struct BodyCreateDesc {
     ObjectHandle component;
     // 그 컴포넌트의 소유 Actor다(질의 hit의 actor·무시 목록 — 7.1.7절).
     ObjectHandle actor;
-    // scale 전 형상(cm)이다.
-    BodyGeometry geometry;
+    // scale 전 형상 원소(cm — 7.1.21절)다. CreateBody 호출 동안만 읽는다. 비어 있으면 body를 만들지
+    // 않는다(InvalidArgument).
+    Span<const BodyShapeElement> geometry;
     // 월드 transform(cm·scale 포함)이다. scale은 형상 크기에 굽는다.
     Transform worldTransform;
     BodyMotion motion = BodyMotion::Static;

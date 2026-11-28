@@ -6,7 +6,7 @@
 #include <Core/Containers/SlotArray.h>
 #include <Core/Containers/Span.h>
 #include <Core/Diagnostics/AccessOverlapChecker.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Platform/PlatformMath.h>

@@ -52,10 +52,12 @@ Result<VolumeShape> SphereComponent::TryWorldVolumeShape() const noexcept {
     return VolumeShape::TrySphere(WorldLocation(), static_cast<double>(ScaledSphereRadius()));
 }
 
-bool SphereComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
-    geometry.kind = BodyGeometryKind::Sphere;
-    geometry.radius = static_cast<double>(sphereRadius_);
-    return true;
+Result<void> SphereComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    return geometry.Add(BodyShapeElement::Sphere(static_cast<double>(sphereRadius_)));
+}
+
+bool SphereComponent::IsZeroExtent() const noexcept {
+    return sphereRadius_ == 0.0f;
 }
 
 } // namespace rocks

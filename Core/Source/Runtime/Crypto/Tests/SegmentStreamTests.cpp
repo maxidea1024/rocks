@@ -1,7 +1,7 @@
 #include <Compression/Compression.h>
 #include <Compression/CompressionStream.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
 #include <Crypto/Aead.h>

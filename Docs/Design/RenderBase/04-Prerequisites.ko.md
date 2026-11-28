@@ -19,7 +19,7 @@
 | 설정 | 콘솔 변수·Config 계층 코드 없음(UnrealCoreFeatureAudit UE-C21·C29 **후속**). 계획 24.2절에 Config 우선순위만 있다 | CP4·CP8 |
 | 계측 | TraceCapture(다중 스레드 trace, [trace 설계](../TraceSystem.ko.md)) TR1·TR2 구현: 채널·`CpuScope`·카운터·표지. 옛 `ProfileScope`는 지웠다. GPU 상관은 RB7(UE-C23 **부분**) | CP5 |
 | 리플렉션 | MetaSchema `TypeOf<T>()`(`Core/Source/Runtime/MetaSchema/Public/Meta/GeneratedType.h`), ObjectRuntime TypeRegistry. 객체 쪽 지연 회수 `BackendLease`(저장소 회수만 늦춘다. 주석에 "현재 실제 GPU/IO 작업과 연결되지는 않는다", `Core/Source/Runtime/ObjectRuntime/Public/Object/ObjectRefs.h:216–220`) | RB4(스키마), RB2(완료 통지) |
-| 그 밖 | `Delegate`·`MulticastDelegate`(`Core/Delegate.h:88,567`), JSON(`Core/Text/Json.h`), SHA-256, `Core/Hash.h`, Archive·Record, `Name`(`Core/Text/Name.h:22`, 엔진 전역 pool 미정) | CP7 |
+| 그 밖 | `Delegate`·`MulticastDelegate`(`Core/Delegate.h:88,567`), JSON(`Core/Text/Json.h`), SHA-256, `Core/Hash/TypeHash.h`, Archive·Record, `Name`(`Core/Text/Name.h:22`, 엔진 전역 pool 미정) | CP7 |
 
 ### 4.2 선행 작업 목록
 
@@ -77,7 +77,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 **CP6 엔진 종료 단계 hook.** 렌더 lane 종료(5.5절)는 계획 3.2절 Shutdown 순서의 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지에 걸친다. 새 이벤트 체계를 만들지 않고 기존 `EngineSubsystem`·`EngineLoopHooks`(`Engine.h:27–69`)에 그 단계를 드러내는 hook을 더한다. **구현(2026-11-17).** `EngineLoopHooks`에 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`, `EngineSubsystem`에 `BeginShutdown`·`CompleteInFlightWork`를 더했다. `Engine::Shutdown` 순서는 차단 → client 종료·World 파괴 → 진행 중 작업 완료 → Subsystem 정리 → [최종 GC → 정리 drain]을 둘 다 0이 될 때까지(`MaxShutdownCollectPasses` = 8, 넘으면 `Busy`) → closure 확인 → 실행기 종료 → Registry·타입 정리다. 정리 drain·closure·실행기 hook은 실행 파일 hook에만 둔다. Subsystem은 정리(`Deinitialize`) 뒤에는 불리지 않기 때문이다. 실패한 단계도 뒤 단계를 건너뛰지 않고 첫 오류를 돌려준다. 계약은 [렌더 기반 구현](../../Implementation/RenderBase.ko.md) 3절.
 
 **CP7 Name pool.** 셰이더 타입·형식·pass 이름을 `Name`으로 다룰지, 정적 문자열과 SHA-256으로 다룰지 정한다. 셰이더 시스템은 키에 이름 정렬·SHA-256을 쓰므로(12.2절) 런타임 조회만 정하면 된다. **결정(2026-11-18, 권장안).** 엔진 전역 `Name` pool을 두지 않는다.
-- 렌더 런타임의 셰이더 타입·셰이더 형식·pass·정점 입력 타입·파라미터 구조체 이름은 정적 등록 항목의 문자열 리터럴(프로그램 수명)과 그 이름의 64 bit 해시로 다룬다. 해시는 Core `HashStringBytesIgnoringAsciiCase`(`Core/Hash.h`, constexpr)이고, 런타임 조회 표의 키다.
+- 렌더 런타임의 셰이더 타입·셰이더 형식·pass·정점 입력 타입·파라미터 구조체 이름은 정적 등록 항목의 문자열 리터럴(프로그램 수명)과 그 이름의 64 bit 해시로 다룬다. 해시는 Core `HashStringBytesIgnoringAsciiCase`(`Core/Hash/TypeHash.h`, constexpr)이고, 런타임 조회 표의 키다.
 - 등록 때 같은 해시에 다른 이름이 있으면 등록이 실패한다(충돌을 조용히 넘기지 않는다, 오류 문구는 영어). 같은 이름을 두 번 등록해도 실패다.
 - 해시는 실행 중 조회용일 뿐이다. 저장·쿠킹 형식(셰이더 라이브러리 항목, job 키)은 셰이더 시스템 12.2절대로 이름 문자열 정렬과 SHA-256을 쓴다. 그래서 해시 함수를 바꿔도 쿠킹 결과는 바뀌지 않는다.
 - 이유: `Name`은 pool 세션 domain과 lease를 가진 실행 중 토큰이다(`Core/Text/Name.h`, `NamePool.h`). 정적 등록과 여러 스레드 조회에 pool 수명 관리가 끼어든다. 렌더 이름은 코드가 정하는 닫힌 집합이라 pool이 필요 없다. UE도 셰이더 타입 표를 `FName`이 아니라 64 bit 해시 `FHashedName`으로 찾는다(`Runtime/RenderCore/Public/Shader.h:1277` `GetNameToTypeMap`, 해시는 대문자 이름의 CityHash64 `Runtime/Core/Private/Serialization/MemoryImage.cpp:1210–1252`).

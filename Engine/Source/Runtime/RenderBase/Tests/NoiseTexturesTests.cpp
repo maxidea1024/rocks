@@ -1,4 +1,4 @@
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <RenderBase/NoiseTextures.h>
 #include <TestSupport/Test.h>
 

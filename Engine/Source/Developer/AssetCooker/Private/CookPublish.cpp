@@ -1,7 +1,7 @@
 #include <AssetCooker/CookPublish.h>
 #include <AssetDatabase/AtomicFileWrite.h>
 #include <Core/Algorithms.h>
-#include <Core/Encoding/Sha256File.h>
+#include <Core/Hash/Sha256File.h>
 #include <Core/FileError.h>
 
 namespace rocks {

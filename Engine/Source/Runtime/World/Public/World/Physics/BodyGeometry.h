@@ -1,20 +1,48 @@
 #pragma once
 
-#include <Core/Math/Vector3.h>
-#include <World/Physics/BodyGeometryKind.h>
+#include <Core/Containers/Array.h>
+#include <Core/Containers/Span.h>
+#include <Core/Result.h>
+#include <World/Physics/BodyShapeElement.h>
 
 namespace rocks {
 
-// 컴포넌트가 주는 scale 전 형상 값(cm)이다. scale은 BodyCreateDesc의 transform이 가지며 Physics가
-// UE 규칙으로 형상 크기에 굽는다(어댑터 경계 4절).
-// - Box: halfExtent(축별 반폭).
-// - Sphere: radius.
-// - Capsule: radius와 halfHeight(**반구 포함** — UE CapsuleHalfHeight와 같은 뜻, 로컬 +Z 축).
-struct BodyGeometry {
-    BodyGeometryKind kind = BodyGeometryKind::None;
-    Vec3d halfExtent = Vec3d::Zero();
-    double radius = 0.0;
-    double halfHeight = 0.0;
+// 컴포넌트가 주는 body 형상이다(UE FKAggregateGeom 대응 — Docs/Design/PhysicsModule 2.4절,
+// 7.1.21절). 원소 순서가 원소 번호(HitResult::elementIndex)다. 원소 0개는 형상 없음(body를 만들지
+// 않는다)이다.
+//
+// 사용 예:
+//   BodyGeometry geometry(allocator);
+//   if (auto added = geometry.Add(BodyShapeElement::Sphere(50.0)); !added) { ... }
+//   desc.geometry = geometry.View();
+class BodyGeometry {
+public:
+    explicit BodyGeometry(Allocator& allocator) noexcept : elements_(allocator) {
+    }
+
+    // 원소를 끝에 더한다. 오류: 할당 실패.
+    Result<void> Add(const BodyShapeElement& element) noexcept {
+        return elements_.TryPushBack(element);
+    }
+
+    void Clear() noexcept {
+        elements_.Clear();
+    }
+
+    bool IsEmpty() const noexcept {
+        return elements_.IsEmpty();
+    }
+
+    usize Size() const noexcept {
+        return elements_.Size();
+    }
+
+    Span<const BodyShapeElement> View() const noexcept {
+        return elements_.View();
+    }
+
+private:
+    Array<BodyShapeElement> elements_;
 };
 
 } // namespace rocks

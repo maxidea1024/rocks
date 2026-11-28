@@ -1,7 +1,7 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Platform/Memory.h>
 
 // 세션 전역 이름 표다(Docs/Design/TraceSystem.ko.md 결정 T4). 같은 이름은 세션 안에서 id 하나다.

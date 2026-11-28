@@ -1,7 +1,7 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Platform/Memory.h>
 #include <TraceCapture/TraceLogSink.h>
 

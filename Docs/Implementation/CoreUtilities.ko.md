@@ -76,7 +76,7 @@ auto points = name.TryCodePoints();          // for (char32_t point : points.Val
 
 | 헤더 | 내용 | 계약 |
 |---|---|---|
-| `Core/Encoding/Crc32.h` | zlib 호환 CRC-32(`"123456789"` → `0xCBF43926`), 분할 계산 | 256개 상수 표, 표는 테스트가 다항식 독립 생성 결과와 전부 대조. 비암호 |
+| `Core/Hash/Crc32.h` | zlib 호환 CRC-32(`"123456789"` → `0xCBF43926`), 분할 계산 | 256개 상수 표, 표는 테스트가 다항식 독립 생성 결과와 전부 대조. 비암호 |
 | `Core/Encoding/Base64.h` | RFC 4648 Base64 인코딩·디코딩 | 엄격 디코딩(패딩·알파벳·비정규 bit 거부), 실패 시 출력 불변, 호출자 버퍼 |
 | `Core/Encoding/ByteReader.h` | 외부 binary 형식(PNG·PSD·TrueType BE, BMP·TGA·WAV·DDS LE) 읽기 cursor. 읽기마다 byte 순서 명시, `Take`·`Peek`·`Sub`(chunk 본문 독립 reader)·`ReadInto`, 정수·부동소수 bit 보존. UE FMemoryReader(FArchive::IsError 방식) 대응 | 이어지는(sticky) 실패: 범위 밖 읽기는 0·빈 범위, 위치는 마지막 성공 위치, 이후 읽기 전부 실패, 형식 오류는 `MarkFailed`로 합류. 할당 없음, 원본을 빌림, `Base/Endian.h` 위에 구현. Rocks 자체 형식은 예산·한도가 있는 Serialization `ArchiveReader`를 쓴다 |
 | `Core/Encoding/ByteWriter.h` | `Array<uint8>` 끝에 덧붙이는 외부 형식 writer. 폭·순서별 쓰기, `WriteZeros`, 뒤에서 길이 채우기(`PatchLittleEndian`·`PatchBigEndian`). UE FMemoryWriter·FArrayWriter 대응 | 이어지는 실패: 할당 실패·크기 넘침·범위 밖 Patch는 그 호출이 target을 바꾸지 않고 이후 쓰기는 무시되어 target은 항상 성공한 쓰기의 결과, `Status()`로 첫 오류 확인. target 자신의 범위를 써도 된다 |

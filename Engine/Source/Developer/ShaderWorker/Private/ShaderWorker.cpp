@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Text/String.h>
 #include <DeterministicMath/DeterministicMath.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
@@ -35,6 +36,10 @@ constexpr usize MaxDecimalDigits = 10;
 constexpr usize ControlReplyBytes = 32;
 // 처리기 임시 디렉터리 이름(<work-dir> 아래, SH1e E1)이다.
 constexpr char ScratchDirectoryName[] = "Backend";
+// worker.log 시간 줄의 버퍼다.
+constexpr usize TimingLineBytes = 160;
+// ns → ms 변환이다.
+constexpr uint64 NanosecondsPerMillisecond = 1000000;
 
 bool ParseUnsigned(StringView text, uint64 limit, uint64& value) noexcept {
     if (text.IsEmpty() || text.ByteCount() > MaxDecimalDigits) {
@@ -141,6 +146,19 @@ private:
         }
     }
 
+    // worker.log에 "<what> in <ms> ms" 한 줄을 남긴다. 시작 비용·첫 컴파일 비용을 구간별로 재는
+    // 진단이다(Docs/Design/ShaderSystem 16.4절 시작 비용).
+    void LogElapsed(const char* what, uint64 startNanoseconds) noexcept {
+        char text[TimingLineBytes];
+        const uint64 elapsed = platform::MonotonicNanoseconds() - startNanoseconds;
+        const int written =
+            snprintf(text, sizeof(text), "%s in %llu ms", what,
+                     static_cast<unsigned long long>(elapsed / NanosecondsPerMillisecond));
+        if (written > 0 && static_cast<usize>(written) < sizeof(text)) {
+            Log(text);
+        }
+    }
+
     // <work-dir>/<name>이다.
     bool Path(const char* name, char (&out)[MaxShaderWorkerPathBytes]) const noexcept {
         const StringView directory = arguments_.workDirectory;
@@ -233,6 +251,7 @@ private:
             return Exit(ShaderWorkerExit::BadMessageVersion);
         }
 
+        const uint64 decodeStart = platform::MonotonicNanoseconds();
         ShaderWorkerRequest request(allocator_);
         if (const Result<void> decoded = DecodeShaderWorkerRequest(bytes.View(), request);
             !decoded) {
@@ -245,6 +264,8 @@ private:
             checked != Exit(ShaderWorkerExit::Success)) {
             return checked;
         }
+
+        LogElapsed("request decoded and checked", decodeStart);
 
         ShaderWorkerResponse response(allocator_);
         if (request.kind == ShaderWorkerRequestKind::ToolQuery) {
@@ -269,7 +290,16 @@ private:
                     continue;
                 }
 
+                // 도구는 처음 쓸 때 연다. job 시간에 도구 적재가 섞이지 않도록 먼저 연다(실패는
+                // CompileJob이 같은 상태로 보고한다).
+                if (!toolsTried_) {
+                    String ignored(allocator_);
+                    (void)Tools(ignored);
+                }
+
+                const uint64 jobStart = platform::MonotonicNanoseconds();
                 CompileJob(job, *result.Value());
+                LogElapsed("job compiled", jobStart);
                 // job 하나가 끝날 때마다 진행 줄을 쓴다(SC4 — 결과는 출력 파일로만 받는다).
                 if (!ReplyPair("job", sequence, response.jobs.Size() - 1)) {
                     return Exit(ShaderWorkerExit::GeneralFailure);
@@ -395,7 +425,9 @@ private:
             if (!GetShaderToolStoreRoot(root, sizeof(root), rootBytes)) {
                 toolStatus_.code = ShaderToolLoadCode::UnsupportedHost;
             } else {
+                const uint64 openStart = platform::MonotonicNanoseconds();
                 toolStatus_ = tools_.Open(root, rootBytes);
+                LogElapsed("shader tools verified and loaded", openStart);
             }
         }
 
