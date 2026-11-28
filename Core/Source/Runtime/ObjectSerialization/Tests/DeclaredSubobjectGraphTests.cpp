@@ -8,6 +8,9 @@
 #include <Serialization/Archive.h>
 #include <TestSupport/Test.h>
 
+#include "GraphTestSupport.h"
+#include <Serialization/Record.h>
+
 // 선언 subobject의 graph 형식 3 시험이다(Docs/Design/Prefab 10.4·10.8절 PF1c): 저장이 선언
 // subobject를 NodeTable 종류 1 노드로 쓰고, 복원이 새로 만들지 않고 소유 노드가 만든 subobject에
 // 묶으며(이름·생성 출처·소유 구조가 그대로), 저장된 값(덮은 기본값)과 실행 중 더한 원소가 남는지,
@@ -198,7 +201,7 @@ TEST(DefaultSubobject_MissingSubobjectRejected) {
     // arm 항목(종류 1)의 SubobjectGuid를 클래스 표에 없는 값으로 바꾼다.
     const Guid arm = GeneratedType<SubobjectOwner>::Schema().subobjects[1].id;
     uint8 needle[1 + sizeof(Guid)];
-    needle[0] = 1;
+    needle[0] = test::graph::NodeKindDeclaredSubobject;
     ArchiveWriter guidWriter(allocator);
     REQUIRE(guidWriter.WriteGuid(arm));
     for (usize index = 0; index < sizeof(Guid); ++index) {
@@ -213,6 +216,136 @@ TEST(DefaultSubobject_MissingSubobjectRejected) {
     auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
                                   corrupted.View());
     CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(DefaultSubobject_EditorBaselineRoundTrip) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    RootRef<Object> owner = fixture.SpawnOwner();
+    REQUIRE(!owner.Handle().IsNull());
+    ObjectGraphSaveOptions options;
+    options.baseline = GraphBaseline::Editor;
+    auto bytes =
+        SaveObjectGraph(allocator, fixture.registry, fixture.access, owner.Handle(), options);
+    REQUIRE(bytes);
+    auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                  bytes.Value().View());
+    REQUIRE(loaded);
+    const Fixture::View after = fixture.Read(loaded.Value().Handle());
+    CHECK(after.parts == 3 && after.root == after.body);
+    CHECK(fixture.CountOf(after.body) == 1 && fixture.CountOf(after.arm) == 2);
+}
+
+TEST(DefaultSubobject_DestroyedSubobjectIsNotSaved) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    RootRef<Object> owner = fixture.SpawnOwner();
+    REQUIRE(!owner.Handle().IsNull());
+    {
+        auto view =
+            fixture.registry.ResolveForWrite<SubobjectOwner>(fixture.access, owner.Handle());
+        REQUIRE(view);
+        REQUIRE(fixture.registry.SetReference(fixture.access, owner.Handle(),
+                                              view.Value().Get().Value()->ArmField(),
+                                              ObjectHandle{}));
+    }
+
+    // 전부 저장(소유 필드 null을 쓴다)해도 복원은 그 subobject로 되돌린다(UE default subobject처럼
+    // 선언 subobject의 파괴는 저장하지 않는다).
+    auto bytes = SaveObjectGraph(allocator, fixture.registry, fixture.access, owner.Handle());
+    REQUIRE(bytes);
+    auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                  bytes.Value().View());
+    REQUIRE(loaded);
+    const Fixture::View after = fixture.Read(loaded.Value().Handle());
+    CHECK(!after.arm.IsNull() && fixture.IsClassSubobject(after.arm));
+    CHECK(after.parts == 3);
+}
+
+TEST(DefaultSubobject_MalformedNodesRejected) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    const TypeSchema& ownerSchema = GeneratedType<SubobjectOwner>::Schema();
+    RecordBuilder ownerBuilder(allocator, ownerSchema.id, ownerSchema.version);
+    RecordBuilder sceneBuilder(allocator, GeneratedType<SubobjectScenePart>::Schema().id,
+                               GeneratedType<SubobjectScenePart>::Schema().version);
+    auto ownerRecord = ownerBuilder.Build();
+    auto sceneRecord = sceneBuilder.Build();
+    REQUIRE(ownerRecord && sceneRecord);
+    const Guid body = ownerSchema.subobjects[0].id;
+    const auto node = [&](uint8 kind, TypeId type, uint32 outer, StringView name,
+                          Span<const uint8> record) noexcept {
+        test::graph::Node value{type, outer, name, record};
+        value.kind = kind;
+        return value;
+    };
+    const test::graph::Node ownerNode =
+        node(test::graph::NodeKindObject, ownerSchema.id, 0, {}, ownerRecord.Value().View());
+    const auto load = [&](Span<const test::graph::Node> nodes) noexcept {
+        auto bytes = test::graph::Build(allocator, nodes);
+        if (!bytes) {
+            return bytes.Error();
+        }
+
+        auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                      bytes.Value().View());
+        return loaded ? ErrorCode::None : loaded.Error();
+    };
+
+    // 양성 대조: 소유 노드 + body 종류 1 항목.
+    const test::graph::Node valid[] = {ownerNode, node(test::graph::NodeKindDeclaredSubobject, body,
+                                                       1, {}, sceneRecord.Value().View())};
+    CHECK(load(valid) == ErrorCode::None);
+    // 알 수 없는 종류 byte.
+    const test::graph::Node unknownKind[] = {ownerNode,
+                                             node(2, body, 1, {}, sceneRecord.Value().View())};
+    CHECK(load(unknownKind) == ErrorCode::CorruptData);
+    // 종류 1에 이름이 있다, 소유 노드가 없다.
+    const test::graph::Node named[] = {ownerNode, node(test::graph::NodeKindDeclaredSubobject, body,
+                                                       1, "x", sceneRecord.Value().View())};
+    CHECK(load(named) == ErrorCode::CorruptData);
+    const test::graph::Node orphan[] = {ownerNode, node(test::graph::NodeKindDeclaredSubobject,
+                                                        body, 0, {}, sceneRecord.Value().View())};
+    CHECK(load(orphan) == ErrorCode::CorruptData);
+    // 소유 노드가 종류 1 노드다.
+    const test::graph::Node nested[] = {
+        ownerNode,
+        node(test::graph::NodeKindDeclaredSubobject, body, 1, {}, sceneRecord.Value().View()),
+        node(test::graph::NodeKindDeclaredSubobject, ownerSchema.subobjects[1].id, 2, {},
+             sceneRecord.Value().View())};
+    CHECK(load(nested) == ErrorCode::CorruptData);
+    // 같은 (소유 노드, SubobjectGuid) 두 번(형제 유일성).
+    const test::graph::Node twice[] = {
+        ownerNode,
+        node(test::graph::NodeKindDeclaredSubobject, body, 1, {}, sceneRecord.Value().View()),
+        node(test::graph::NodeKindDeclaredSubobject, body, 1, {}, sceneRecord.Value().View())};
+    CHECK(load(twice) == ErrorCode::CorruptData);
+    // 표 이름(arm)과 같은 이름의 객체 노드는 선언 subobject 생성과 겹친다(2a AlreadyExists).
+    // 도달하도록 소유 노드의 root 필드가 그 노드(local ID 2)를 가리킨다.
+    ArchiveWriter rootValue(allocator);
+    REQUIRE(rootValue.WriteU32(2));
+    RecordBuilder clashOwnerBuilder(allocator, ownerSchema.id, ownerSchema.version);
+    REQUIRE(clashOwnerBuilder.AddField(ownerSchema.subobjectRootField, WireType::U32,
+                                       rootValue.View()));
+    auto clashOwner = clashOwnerBuilder.Build();
+    REQUIRE(clashOwner);
+    const test::graph::Node clash[] = {
+        node(test::graph::NodeKindObject, ownerSchema.id, 0, {}, clashOwner.Value().View()),
+        node(test::graph::NodeKindObject, GeneratedType<SubobjectScenePart>::Schema().id, 1, "arm",
+             sceneRecord.Value().View())};
+    CHECK(load(clash) == ErrorCode::AlreadyExists);
+
+    // NodeTable 없이(writeNodeTable 거짓) 소유 객체와 선언 subobject를 함께 저장할 수 없다.
+    RootRef<Object> owner = fixture.SpawnOwner();
+    REQUIRE(!owner.Handle().IsNull());
+    ObjectGraphSaveOptions options;
+    options.externals = GraphExternalPolicy::Include;
+    const ObjectHandle set[] = {owner.Handle()};
+    auto saved = SaveObjectGraphSet(allocator, fixture.registry, fixture.access, set, options);
+    CHECK(!saved && saved.Error() == ErrorCode::InvalidArgument);
 }
 
 } // namespace declared_subobject_graph_tests_file

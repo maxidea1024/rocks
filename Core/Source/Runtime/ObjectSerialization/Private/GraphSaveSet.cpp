@@ -315,8 +315,7 @@ Result<void> ClassifyDeclaredSubobjects(Array<SaveNode>& nodes, const GraphEncod
                     continue;
                 }
 
-                const Span<const char> fieldName =
-                    field.toolName.Size() != 0 ? field.toolName : field.name;
+                const Span<const char> fieldName = EffectiveToolName(field);
                 if (StringView(fieldName.Data(), fieldName.Size()) == name) {
                     nodes[index].subobjectId = entry.id;
                 }

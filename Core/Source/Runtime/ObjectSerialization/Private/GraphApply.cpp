@@ -299,8 +299,10 @@ Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& node
         return reserved;
     }
 
-    // 노드 표의 정체성 규칙은 1단계와 사전 확인이 끝냈으므로 Create는 할당·슬롯
-    // 상한·종료·재진입으로만 실패한다. Outer는 언제나 앞 노드이거나 기준 Outer다.
+    // 노드 표의 정체성 규칙은 1단계와 사전 확인이 끝냈으므로 객체 노드의 Create는 할당·슬롯
+    // 상한·종료·재진입으로만 실패한다. 선언 subobject 생성은 그 밖에도 기본값 덮기 hook 실패와 표
+    // 이름과 같은 이름의 객체 노드(AlreadyExists)로 실패한다. Outer는 언제나 앞 노드이거나 기준
+    // Outer다. 실패는 모두 트랜잭션을 그 오류로 고정한다.
     // 객체 노드는 만든 직후 클래스 선언 subobject를 만든다(Docs/Design/Prefab 10.4절 — 그래프에
     // 항목이 없는 새 subobject도 생긴다). 선언 subobject 노드는 새로 만들지 않고 소유 노드가 만든
     // subobject에 묶인다(소유 노드는 앞 노드다). 선언 subobject 생성은 기본값 덮기 hook 실패로도
@@ -312,9 +314,13 @@ Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& node
         Result<ObjectHandle> created = Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
         if (nodes[index].kind == NodeKindDeclaredSubobject) {
             created = transaction.DeclaredSubobject(outer, nodes[index].subobjectIndex);
+            if (!created) {
+                (void)transaction.Fail(created.Error());
+            }
         } else {
             created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
-            if (created) {
+            // 선언 subobject가 있는 타입만 만든다(에셋 타입 등 표가 없는 노드는 lease 조회도 없다).
+            if (created && nodes[index].lease.Schema().subobjects.Size() != 0) {
                 if (auto made = transaction.CreateDeclaredSubobjects(created.Value(), declared);
                     !made) {
                     return Result<void>::Failure(made.Error());

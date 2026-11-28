@@ -622,6 +622,8 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
     // 남은 파일 byte(이 노드의 Record 길이 prefix와 NodeTable 항목, 지금까지의 위치 표를 뺀 것)라
     // 넘칠 Record를 끝까지 만들지 않고, 노드 Record들의 합이 maxBytes로 묶인다(필드 writer도 같은
     // 한도로 연다).
+    // 선언 subobject 노드(종류 1)는 이름을 비워 쓰지만 가리기가 encode 뒤라 이름 byte를 그대로
+    // 청구한다(조금 넉넉하다 — maxBytes 경계에서만 차이).
     const usize entryBytes = nodeTable ? NodeEntryBytes + nodes[nodeIndex].nameBytes : 0;
     const usize firstPosition = context.PositionCount();
     usize reserved = 0;

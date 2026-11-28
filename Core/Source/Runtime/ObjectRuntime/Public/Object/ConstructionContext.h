@@ -95,11 +95,12 @@ public:
     // index가 표 밖(InvalidArgument). 트랜잭션 상태를 바꾸지 않는다.
     Result<ObjectHandle> DeclaredSubobject(ObjectHandle owner, usize index) noexcept;
 
-    // owner 소유 목록(SubobjectList)을 "선언 subobject(표 순서) + 나머지 원소(지금 순서)"로 다시
-    // 짠다 — graph 복원 2b가 Record의 목록을 적용한 뒤 부른다(저장 뒤 클래스에 새로 생긴
-    // subobject가 목록에 들고, 저장된 선언 subobject 원소는 한 번만 남는다 —
-    // Docs/Design/Prefab 10.4절). 표가 없는 타입은 무동작이다. 오류(트랜잭션을 고정한다): owner
-    // 규칙, 할당(OutOfMemory), 참조 쓰기.
+    // graph 복원 2b 뒤 owner의 선언 subobject 상태를 맞춘다(Docs/Design/Prefab 10.4절): 소유 필드가
+    // null이면 2a가 만든 subobject(Outer = owner, 이름 = 필드 도구 이름)로 되돌리고(선언
+    // subobject의 파괴는 저장하지 않는다), 소유 목록을 "선언 subobject(표 순서) + 나머지 원소(지금
+    // 순서, 한 번씩)"로 다시 짠다(저장 뒤 클래스에 새로 생긴 subobject도 든다). 표가 없는 타입은
+    // 무동작이다. 오류(트랜잭션을 고정한다): owner 규칙, 소유 필드가 그 subobject가 아닌 다른
+    // 객체·subobject가 없음(CorruptData), 할당(OutOfMemory), 참조 쓰기.
     Result<void> RestoreDeclaredSubobjectList(ObjectHandle owner) noexcept;
 
     // outer를 Outer로 쓸 때의 요약이다(ObjectRegistry::DescribeOuter와 같고 이 트랜잭션의 공개 전

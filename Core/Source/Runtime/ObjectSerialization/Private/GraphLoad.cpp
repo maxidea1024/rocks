@@ -601,9 +601,9 @@ Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget&
 
 // 1단계: 선언 subobject 노드(graph 형식 3 — Docs/Design/Prefab 10.4절)의 타입·이름을 소유 노드
 // 타입의 펼친 subobject 표에서 채운다. 소유 노드는 앞의 객체 노드여야 하고(아니면 CorruptData),
-// 표에 SubobjectGuid가 없으면(클래스에서 사라졌다 — 하위호환 없음, 다시 저장한다) InvalidArgument,
-// 같은 (소유 노드, SubobjectGuid)가 두 번이면 CorruptData다. 이름은 소유 필드 도구 이름이다(소유
-// 노드의 lease가 Stage 수명 동안 그 byte를 붙잡는다). 객체 노드는 무동작이다.
+// 표에 SubobjectGuid가 없으면(클래스에서 사라졌다 — 하위호환 없음, 다시 저장한다) InvalidArgument다
+// (같은 (소유 노드, SubobjectGuid) 두 번은 형제 유일성이 CorruptData로 거부한다). 이름은 소유 필드
+// 도구 이름이다(소유 노드의 lease가 Stage 수명 동안 그 byte를 붙잡는다). 객체 노드는 무동작이다.
 Result<void> ResolveDeclaredSubobjectNode(Array<LoadNode>& nodes, usize index) noexcept {
     LoadNode& node = nodes[index];
     if (node.kind != NodeKindDeclaredSubobject) {
@@ -615,13 +615,8 @@ Result<void> ResolveDeclaredSubobjectNode(Array<LoadNode>& nodes, usize index) n
         return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
-    for (usize previous = 0; previous < index; ++previous) {
-        if (nodes[previous].kind == NodeKindDeclaredSubobject &&
-            nodes[previous].outer == node.outer &&
-            nodes[previous].subobjectId == node.subobjectId) {
-            return Result<void>::Failure(ErrorCode::CorruptData);
-        }
-    }
+    // 같은 (소유 노드, SubobjectGuid)는 같은 (Outer, 이름)이라 DecodeNode의 형제 유일성 검사가
+    // CorruptData로 거부한다.
 
     const TypeSchema& owner = nodes[node.outer - 1].lease.Schema();
     for (usize entry = 0; entry < owner.subobjects.Size(); ++entry) {
@@ -633,8 +628,7 @@ Result<void> ResolveDeclaredSubobjectNode(Array<LoadNode>& nodes, usize index) n
         node.subobjectIndex = static_cast<uint32>(entry);
         for (const FieldSchema& field : owner.fields) {
             if (field.id == node.subobjectId) {
-                const Span<const char> name =
-                    field.toolName.Size() != 0 ? field.toolName : field.name;
+                const Span<const char> name = EffectiveToolName(field);
                 node.name = StringView(name.Data(), name.Size());
             }
         }
@@ -1020,6 +1014,7 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
 
     usize references = 0;
     usize nameBytes = 0;
+    usize declaredSubobjects = 0;
     for (usize index = 0; index < nodes.Size(); ++index) {
         if (auto resolved = ResolveDeclaredSubobjectNode(nodes, index); !resolved) {
             return Output::Failure(resolved.Error());
@@ -1033,6 +1028,11 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
 
         references += nodes[index].tokens.Size();
         nameBytes += nodes[index].name.ByteCount();
+        // 2a가 객체 노드마다 만드는 선언 subobject(그래프에 항목이 없는 새 subobject 포함)도 2단계
+        // 생성 몫이다(노드마다 MaxClassSubobjects 이하).
+        if (nodes[index].kind == NodeKindObject) {
+            declaredSubobjects += nodes[index].lease.Schema().subobjects.Size();
+        }
     }
 
     if (auto typed = ValidateReferenceTypes(allocator, types, data, input.importTypes); !typed) {
@@ -1046,7 +1046,8 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
     if (!TryAdd(static_cast<uint64>(nodes.Size()) + 1, static_cast<uint64>(references), phaseTwo) ||
         !TryAdd(phaseTwo, static_cast<uint64>(nameBytes), phaseTwo) ||
         !TryAdd(phaseTwo, static_cast<uint64>(externalCount), phaseTwo) ||
-        !TryAdd(phaseTwo, static_cast<uint64>(data.importChecks.Size()), phaseTwo)) {
+        !TryAdd(phaseTwo, static_cast<uint64>(data.importChecks.Size()), phaseTwo) ||
+        !TryAdd(phaseTwo, static_cast<uint64>(declaredSubobjects), phaseTwo)) {
         return Output::Failure(ErrorCode::Overflow);
     }
 

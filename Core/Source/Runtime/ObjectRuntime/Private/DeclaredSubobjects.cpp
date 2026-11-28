@@ -73,7 +73,7 @@ const FieldSchema* FindField(const TypeSchema& schema, Guid id) noexcept {
 // 필드 schema의 실효 도구 이름(Name= 또는 C++ 이름)이다 — 선언 subobject의 객체 이름이다.
 StringView SubobjectName(const TypeSchema& schema, Guid id) noexcept {
     if (const FieldSchema* field = FindField(schema, id)) {
-        const Span<const char> name = field->toolName.Size() != 0 ? field->toolName : field->name;
+        const Span<const char> name = EffectiveToolName(*field);
         return StringView(name.Data(), name.Size());
     }
 
@@ -328,6 +328,7 @@ Result<void> ConstructionContext::RestoreDeclaredSubobjectList(ObjectHandle owne
     }
 
     const TypeLease& lease = ownerType.Value();
+    const TypeSchema& schema = lease.Schema();
     const Span<const RuntimeSubobjectOps> ops = lease.Ops().subobjects;
     if (ops.Size() == 0) {
         return Result<void>::Success();
@@ -341,6 +342,13 @@ Result<void> ConstructionContext::RestoreDeclaredSubobjectList(ObjectHandle owne
         return failWith(!listAccess ? listAccess.Error() : ErrorCode::InvalidArgument);
     }
 
+    if (auto writable = CheckStagedWrite(); !writable) {
+        return failWith(writable.Error());
+    }
+
+    // 소유 필드는 2a가 만든 subobject(Outer = owner, 이름 = 필드 도구 이름)여야 한다. Record가
+    // null을 썼으면(선언 subobject의 파괴는 저장하지 않는다 — UE default subobject처럼) 그
+    // subobject로 되돌리고, 다른 객체를 가리키면 손상이다(CorruptData).
     auto& list =
         *static_cast<detail::ObjectRefArrayStorage*>(listAccess.Value()(*ownerObject.Value()));
     Array<ObjectHandle> rebuilt(ObjectAllocator());
@@ -348,11 +356,27 @@ Result<void> ConstructionContext::RestoreDeclaredSubobjectList(ObjectHandle owne
         return failWith(reserved.Error());
     }
 
-    for (const RuntimeSubobjectOps& entry : ops) {
-        (void)rebuilt.TryPushBack(
-            *static_cast<const ObjectHandle*>(entry.field(*ownerObject.Value())));
+    for (usize index = 0; index < ops.Size(); ++index) {
+        auto child = FindChild(owner, SubobjectName(schema, ops[index].id));
+        if (!child) {
+            return failWith(ErrorCode::CorruptData);
+        }
+
+        auto* field = static_cast<ObjectHandle*>(ops[index].field(*ownerObject.Value()));
+        if (field->IsNull()) {
+            if (auto set =
+                    registry_.SetEdge(access_, owner, *field, child.Value(), transaction_, nullptr);
+                !set) {
+                return failWith(set.Error());
+            }
+        } else if (*field != child.Value()) {
+            return failWith(ErrorCode::CorruptData);
+        }
+
+        (void)rebuilt.TryPushBack(child.Value());
     }
 
+    // 나머지 원소는 지금 순서로 한 번씩(저장된 선언 subobject 원소는 앞에 이미 있다).
     for (uint32 index = 0; index < list.size; ++index) {
         bool declared = false;
         for (usize scan = 0; scan < ops.Size(); ++scan) {
@@ -362,10 +386,6 @@ Result<void> ConstructionContext::RestoreDeclaredSubobjectList(ObjectHandle owne
         if (!declared) {
             (void)rebuilt.TryPushBack(list.data[index]);
         }
-    }
-
-    if (auto writable = CheckStagedWrite(); !writable) {
-        return failWith(writable.Error());
     }
 
     if (auto assigned =
