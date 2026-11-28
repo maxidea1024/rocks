@@ -25,10 +25,18 @@
 
 ### 24.4 단위(`NumericUnit` — UE `EUnit`·`FUnitConversion`·`TNumericUnitTypeInterface`)
 
-- 단위 목록은 UE `EUnit` 전체(길이·각·속도·각속도·가속도·온도·질량·밀도·힘·토크·충격량·소리·주파수·데이터 크기·광속·광도·조도·휘도·노출·시간·픽셀 밀도·백분율·배수·응력)와 종류 `NumericUnitType`이다. 표시 글자·입력 별칭은 UE `UnitConversion.cpp` 표를 따른다(예: cm·m·km, °·deg·rad, %·x).
-- 계수는 UE 표의 값이다. 길이 cm↔m처럼 Core `UnitConversion.h`에 있는 상수(`CentimetersPerMeter` 등)는 그것을 쓴다(중복 금지). 온도는 오프셋 변환이다.
-- **단위 입력**(UE `TNumericUnitTypeInterface`): 칸은 기본 단위(값이 저장된 단위)를 가진다. 글자 끝 단위가 같은 종류면 기본 단위로 바꾼다("1m" → cm 칸에 100). 종류가 다르면 실패. 단위가 없으면 표시 단위로 본다. 수식 안의 단위("1m + 20cm")도 UE처럼 받는다(숫자 토큰마다 단위).
-- **표시 단위**: 고정 표시 단위(`SetDisplayUnit`)이거나 가장 알맞은 단위(UE `QuantizeUnitsToBestFit` — 크기에 맞춰 mm·cm·m·km)다. 기본은 기본 단위 그대로다. 표시 글자는 "100 cm"처럼 값 뒤 공백 + 기호다.
+- 단위 목록·순서는 UE `EUnit` 전체(길이·각·속도·각속도·가속도·온도·질량·밀도·힘·토크·충격량·위치 충격량·소리·주파수·데이터 크기·광속·광도·조도·휘도·노출·시간·픽셀 밀도·배수·응력)와 `Unspecified`이고, 종류는 `NumericUnitType`이다. 표시 글자(UE `DisplayStrings` — µm·°·cm/s²·°C·KiB 등, UTF-8)와 입력 별칭(UE `ParseCandidates` — 이름·기호·µ/² 대체 글자)은 UE 표 그대로다.
+- **계수**(UE `*UnificationFactor`): 종류마다 기준 단위로 곱했다가 대상 기준의 역수를 곱한다. 온도는 켈빈을 거치는 오프셋 변환이다. 소리·충격량·광도·조도·휘도·픽셀 밀도·노출은 같은 종류 안에서도 바꾸지 않는다(UE와 같다). UE가 float 리터럴이나 근사로 둔 값은 정확한 값으로 둔다: 인치 0.0254 m(UE `1/39.3700787`), cm/s² 0.01(UE `0.01f`). cm↔m 계수는 Core `UnitConversion.h`의 `CentimetersPerMeter`를 쓴다(중복 금지).
+- **가장 알맞은 단위**(UE `QuantizeUnitsToBestFit`·`GetQuantizationBounds`): 미터 길이·영국식 길이·미터 질량·영국식 질량·밀도·주파수·데이터 크기·시간(µs부터)·응력 묶음 안에서, 절댓값이 1보다 크면 위 단위로, 1 이하면 아래 단위로 옮긴다. UE는 rpm이 주파수 묶음 계산에서 잘못된 자리를 읽는다 — Rocks는 rpm을 옮기지 않는다.
+- **단위 수식**(UE `FUnitExpressionParser` — 24.3절 수식과 다른 문법): 숫자(+ 공백 + 단위), `( )`, 단항 `+ -`, `* /`, `+ -`, 처음 `+= -= *= /=`(지금 값은 기본 단위 값). 단위 글자는 숫자 뒤에서 대소문자 무시로 가장 긴 별칭과 맞춘다("5min"은 분, "5m"은 미터).
+  - 더하기·빼기: 한쪽만 단위가 없으면 그쪽을 기본 단위로 보고, 호환되면 왼쪽 단위로 바꿔 더한다. 호환되지 않으면 오류다.
+  - 곱하기: 둘 다 단위면 오류, 결과는 단위 있는 쪽. 나누기: 오른쪽이 단위면 오류, 0이면 오류.
+  - UE 단위 수식은 이항 연산이 오른쪽 결합이라("10 - 4 - 3" → 9) 결함이다 — Rocks는 왼쪽 결합이다. `^ % sqrt`는 단위 수식에 없다(UE와 같다).
+  - 결과에 단위가 없으면 기본 단위다(UE `TryParseExpression`).
+- **칸의 단위**(UE `TNumericUnitTypeInterface`): `NumericUnitOptions` — 값이 저장된 단위(`underlying`, 기본 `Unspecified`), 고정 표시 단위(`display`, Optional), 가장 알맞은 단위로 표시(`bestFit`).
+  - 글자로: 단위가 `Unspecified`면 24.2절 그대로. 아니면 표시 단위(고정 → 가장 알맞은 → 저장 단위 순)로 바꿔 "값 + 공백 + 기호"다("100 cm"). 정수 형식이라도 다른 단위로 바꿔 보이면 소수를 남긴다(500 m를 km로 → "0.5 km". UE는 정수로 잘라 "0 km" — `ToString`이 형식 값으로 바꾼다).
+  - 글자에서: 단위가 `Unspecified`면 24.2절. 아니면 단위 수식을 표시 단위(고정 또는 저장 단위)를 기본으로 계산하고, 결과를 저장 단위로 바꾼다. 호환되지 않으면 실패다. 정수 형식에도 double로 계산한 뒤 반올림한다("0.5km"를 m 정수 칸에 → 500).
+  - 칠 수 있는 글자는 탭 말고 모두다(UE `IsCharacterValid` — 단위 글자).
 - 전역 단위 설정(UE `FUnitSettings` — 표시 여부·종류별 표시 단위)은 에디터 설정과 함께 둔다(UW4h 이후). 지금은 칸마다 정한다.
 
 ### 24.5 스핀 상자(`SpinBox` 다시 만들기 — UE `SSpinBox`)
