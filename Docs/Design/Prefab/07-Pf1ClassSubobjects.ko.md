@@ -39,7 +39,7 @@ protected:
 - 접근 지정은 protected 이상이다(private이면 오류 — 파생 클래스가 `InitSubobjectDefaults`에서 `&Base::field_`로 상속 subobject를 덮을 수 있어야 한다).
 - **객체 이름 = 필드의 실효 도구 이름**(`Name=` 또는 C++ 이름). MetaCompiler가 `ValidateNameComponent` 규칙(첫 글자·64 byte·예약어)으로 검사한다.
 - `Root`: `SubobjectRoot`가 있어야 하고 `T`는 그 필드 타입의 파생이다. 클래스 계층 전체에서 하나뿐이다. `Root`와 `AttachParent`를 함께 쓰면 오류다.
-- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다.
+- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
 - `Transient`·`EditorOnly`·`Required`·`Notify`·Sparks 지정자와 함께 쓰면 오류다.
 - 진단 번호는 MetaCompiler 다음 빈 RMC 번호를 쓴다(구현 때 정한다).
 
@@ -77,7 +77,7 @@ struct RuntimeSubobjectOps {
     void* (*field)(Object& owner) noexcept;   // 소유 필드(ObjectRef<T>) 주소
 };
 // RuntimeTypeOps에 더한다:
-Span<const RuntimeSubobjectOps> subobjectOps{};
+Span<const RuntimeSubobjectOps> subobjects{};
 Result<void> (*initSubobjectDefaults)(SubobjectDefaultsContext&) noexcept = nullptr;  // 자기 선언만
 ```
 
@@ -96,8 +96,8 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 }
 ```
 
-- MetaCompiler가 클래스 본문에서 이 이름의 static 멤버 함수를 찾는다(`CheckValidateHook` RMC2309와 같은 방식 — `ClangAstParser.cs:928-931`, 서명이 다르면 오류, 생성 `VerifyGenerated`에 서명 static_assert). 생성 코드는 자기 함수 포인터만 싣고 base를 부르지 않는다. **런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다** — 모듈 경계를 넘는 생성 호출을 피한다.
-- `SubobjectDefaultsContext::With(ObjectRef<T> Owner::* field, fn)`: 소유 객체가 `Owner`의 파생인지(`IsNativeA(NativeTypeKey<Owner>())`) 확인한 뒤 `&(owner.*field)`를 펼친 표 `subobjectOps[k].field(owner)`와 비교해 항목을 고른다. 없는 필드·subobject 아닌 필드·타입 불일치는 `InvalidArgument`다.
+- MetaCompiler가 클래스 본문에서 이 이름의 static 멤버 함수를 찾는다(`CheckValidateHook` RMC2309와 같은 방식 — `ClangAstParser.cs:928-931`, 서명이 다르면 오류, 생성 `Ops()` 본문에 서명 static_assert). 생성 코드는 자기 함수 포인터만 싣고 base를 부르지 않는다. **런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다** — 모듈 경계를 넘는 생성 호출을 피한다.
+- `SubobjectDefaultsContext::With(ObjectRef<T> Owner::* field, fn)`: 소유 객체가 `Owner`의 파생인지(`IsNativeA(NativeTypeKey<Owner>())`) 확인한 뒤 `&(owner.*field)`를 펼친 표 `subobjects[k].field(owner)`와 비교해 항목을 고른다. 없는 필드·subobject 아닌 필드·타입 불일치는 `InvalidArgument`다.
 - 두 모드가 같은 함수를 쓴다: **기록 모드**(레코드 생성 — Registry 밖 임시 소유 인스턴스와 임시 subobject 인스턴스, 소유 필드는 비어 있어도 주소 비교는 된다)와 **instancing 모드**(staged 소유 객체와 staged subobject).
 - **World 없는 hook**: 두 모드 모두 World 장부 밖에서 돈다(`HasWorld()` 거짓). 값 설정만 하고 World·Registry·다른 객체를 건드리지 않는다 — 생성자 결정성 계약(RCM 59행)과 같다. 두 번 실행해 인코딩을 비교한다. 등록 때 해석이 필요한 값(예: 충돌 profile 이름)은 `OnRegister`가 다시 해석하므로 그대로 쓴다(`PrimitiveComponent.cpp:1238-1257`).
 
@@ -129,7 +129,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 **저장**:
 
-- **Include**: `AddNode(owner)` 직후 그 선언 subobject를 표 순서로 넣는다. 호출자가 준 집합의 owner에 딸린 subobject는 집합 끝에 덧붙인다. `IncludeNode`가 subobject를 대상으로 받으면 조상 사슬(owner)을 더한 뒤 `locals_`를 다시 확인해 중복을 막는다(`GraphSaveSet.cpp:9-34·117-201`). subobject의 SubobjectGuid는 owner의 `subobjectOps[k].field(owner)`가 그 handle을 담은 항목에서 얻는다.
+- **Include**: `AddNode(owner)` 직후 그 선언 subobject를 표 순서로 넣는다. 호출자가 준 집합의 owner에 딸린 subobject는 집합 끝에 덧붙인다. `IncludeNode`가 subobject를 대상으로 받으면 조상 사슬(owner)을 더한 뒤 `locals_`를 다시 확인해 중복을 막는다(`GraphSaveSet.cpp:9-34·117-201`). subobject의 SubobjectGuid는 owner의 `subobjects[k].field(owner)`가 그 handle을 담은 항목에서 얻는다.
 - 소유 필드(`Subobject`)는 값으로 쓰지 않는다.
 - `SubobjectList` 목록은 선언 subobject를 뺀 나머지만 쓴다. `FieldEncodeContext`에 원소 생략 질의를 두고 배열 codec이 개수를 먼저 센 뒤 쓴다(원소 수가 앞에 오므로 — `ArrayFieldCodec.h:127`).
 - `SubobjectRoot` 필드(종류 0 owner)와 `SubobjectAttach` 필드(종류 1 노드)는 **encode 전에 표 대상과 비교**한다. 같으면 쓰지 않고, 다르면 null이어도 기준 비교(`OmitCurrent` — `GraphSave.cpp:478-485`)를 거치지 않고 **강제로 쓴다**(레코드의 이 필드는 null이라, 그대로 두면 사용자가 지운 null이 기준과 같아 사라지고 복원이 표 대상을 다시 써 넣는다).

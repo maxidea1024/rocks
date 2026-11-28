@@ -89,7 +89,24 @@ internal static partial class MetaTests
             // 상속한 소유 목록 지정자를 다시 쓴다.
             SubobjectOwner("", "ROCKS_CLASS(SubobjectList = \"parts\")\nclass Sub : public Owner {\nROCKS_GENERATED_BODY()\npublic:\nusing Owner::Owner;\n};\n"),
             // 이름이 글자·숫자로 시작하지 않는다.
-            SubobjectOwner("ROCKS_PROPERTY(Subobject, Name = \"_body\") rocks::ObjectRef<ScenePart> body;")],
+            SubobjectOwner("ROCKS_PROPERTY(Subobject, Name = \"_body\") rocks::ObjectRef<ScenePart> body;"),
+            // 장치 예약어 이름.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject, Name = \"com0\") rocks::ObjectRef<ScenePart> body;"),
+            // EditorOnly 타입.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject) rocks::ObjectRef<EdPart> body;").Replace("ROCKS_CLASS(SubobjectList",
+                "ROCKS_CLASS(EditorOnly)\nclass EdPart : public Part {\nROCKS_GENERATED_BODY()\n};\nROCKS_CLASS(SubobjectList", StringComparison.Ordinal),
+            // Abstract 타입.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject) rocks::ObjectRef<AbsPart> body;").Replace("ROCKS_CLASS(SubobjectList",
+                "ROCKS_CLASS(Abstract)\nclass AbsPart : public Part {\nROCKS_GENERATED_BODY()\npublic:\nvirtual void Tick() noexcept = 0;\n};\nROCKS_CLASS(SubobjectList",
+                StringComparison.Ordinal),
+            // Root 타입이 root 필드 타입의 파생이 아니다.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject, Root) rocks::ObjectRef<Part> body;"),
+            // SubobjectRoot 필드 자신을 Subobject로.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject) rocks::ObjectRef<ScenePart> body;",
+                ownerSpecifiers: "SubobjectList = \"parts\", SubobjectRoot = \"body\""),
+            // 소유 구조 지정자가 EditorOnly 필드를 가리킨다.
+            SubobjectOwner(EditorDataOpen + "ROCKS_PROPERTY(EditorOnly) rocks::ObjectRef<ScenePart> edRoot;\n#endif",
+                ownerSpecifiers: "SubobjectList = \"parts\", SubobjectRoot = \"edRoot\"")],
             "RMC3002", "ubobject");
         // hook 모양(RMC3003): 비정적, 매개변수 형식이 다름.
         AddRejectGroup(context, "Meta.SubobjectDefaultsHook", [

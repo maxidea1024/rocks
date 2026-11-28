@@ -449,14 +449,16 @@ internal static partial class CppEmitter
 
     // 선언 subobject 연산(소유 필드 주소 — 펼친 표 순서)과 자기 InitSubobjectDefaults를 함수표에 싣는다(Docs/Design/Prefab 10.2절). base 필드는
     // protected 이상이라(RMC3002) 파생 GeneratedType(파생의 friend)이 파생 객체를 통해 접근한다.
-    private static void EmitSubobjectOps(ClassModel type, string native, Action<string> Body)
+    private static void EmitSubobjectOps(SchemaModel schema, ClassModel type, string native, Action<string> Body)
     {
         if (type.Subobjects.Count != 0)
         {
             Body("static const RuntimeSubobjectOps subobjects[] = {");
             foreach (SubobjectModel entry in type.Subobjects)
             {
-                Body($"{{{GuidValue(entry.Id)}, [](Object& owner) noexcept -> void* {{ return &static_cast<{native}&>(owner).{entry.Field}; }}}},");
+                // 선언 클래스로 한정한다(파생에 같은 C++ 이름 멤버가 있어도 base 항목이 base 필드를 가리키게).
+                string declaring = "::" + schema.Find(entry.Owner).NativeName;
+                Body($"{{{GuidValue(entry.Id)}, [](Object& owner) noexcept -> void* {{ return &static_cast<{native}&>(owner).{declaring}::{entry.Field}; }}}},");
             }
 
             Body("};");
@@ -465,6 +467,9 @@ internal static partial class CppEmitter
 
         if (type.HasInitSubobjectDefaults)
         {
+            // 서명 대조다(Ops 본문 안 — GeneratedType은 friend라 private hook도 본다).
+            Body($"static_assert(IsSameV<decltype(&{native}::InitSubobjectDefaults), Result<void> (*)(SubobjectDefaultsContext&) noexcept>, " +
+                $"\"{type.Name}::InitSubobjectDefaults must be static Result<void>(SubobjectDefaultsContext&) noexcept (RMC3003)\");");
             Body($"ops.initSubobjectDefaults = &{native}::InitSubobjectDefaults;");
         }
     }
@@ -695,7 +700,7 @@ internal static partial class CppEmitter
         }
 
         EmitFunctionOps(type, self, Body);
-        EmitSubobjectOps(type, native, Body);
+        EmitSubobjectOps(schema, type, native, Body);
         Body("ops.completeFieldLayout = true;");
         // 모든 필드 encode thunk가 생성 코드다(클래스 기본값 레코드의 원본 모드 — Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드').
         Body("ops.generatedFieldCodecs = true;");

@@ -232,6 +232,57 @@ TEST(DefaultSubobject_RegistrationChecksBasePrefix) {
     CHECK(attempt(dropped, droppedParents) == ErrorCode::TypeMismatch);
 }
 
+TEST(DefaultSubobject_RegistrationLimitAndSpecifierInheritance) {
+    SystemAllocator allocator;
+    const TypeSchema& owner = GeneratedType<SubobjectOwner>::Schema();
+    const TypeSchema& child = GeneratedType<SubobjectOwnerChild>::Schema();
+
+    // 표가 MaxClassSubobjects를 넘으면 CapacityExceeded다(모양 검사보다 먼저).
+    {
+        static SubobjectSchema many[MaxClassSubobjects + 1];
+        for (SubobjectSchema& entry : many) {
+            entry = owner.subobjects[2];
+        }
+
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterParts(types));
+        TypeSchema schema = Alias(owner, AliasType);
+        schema.subobjects = Span<const SubobjectSchema>(many, MaxClassSubobjects + 1);
+        CHECK(ErrorOf(types.Register(schema, GeneratedType<SubobjectOwner>::Ops())) ==
+              ErrorCode::CapacityExceeded);
+    }
+
+    // base가 정한 소유 구조 지정자는 파생이 같은 값으로 이어받아야 한다. base 별칭은 표 없이 root
+    // 지정자만 두고, 파생 별칭은 그 지정자를 지우면 TypeMismatch, 그대로 두면 받는다.
+    const auto attempt = [&](bool keepRoot) noexcept {
+        TypeRegistry types(allocator);
+        if (!RegisterParts(types)) {
+            return SetupFailed;
+        }
+
+        TypeSchema base = Alias(owner, AliasType);
+        base.subobjects = {};
+        RuntimeTypeOps baseOps = GeneratedType<SubobjectOwner>::Ops();
+        baseOps.subobjects = {};
+        if (!types.Register(base, Move(baseOps))) {
+            return SetupFailed;
+        }
+
+        TypeSchema derived = Alias(child, AliasChildType);
+        derived.baseType = AliasType;
+        derived.subobjects = {};
+        if (!keepRoot) {
+            derived.subobjectRootField = Guid{};
+        }
+
+        RuntimeTypeOps derivedOps = GeneratedType<SubobjectOwnerChild>::Ops();
+        derivedOps.subobjects = {};
+        return ErrorOf(types.Register(derived, Move(derivedOps)));
+    };
+    CHECK(attempt(true) == ErrorCode::None);
+    CHECK(attempt(false) == ErrorCode::TypeMismatch);
+}
+
 TEST(DefaultSubobject_StructRejectsSubobjectData) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);

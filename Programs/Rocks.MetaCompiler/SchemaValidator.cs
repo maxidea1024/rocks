@@ -1425,8 +1425,9 @@ internal static partial class SchemaValidator
     {
         const string hint = "Declare ROCKS_PROPERTY(Subobject[, Root | AttachParent = \"<subobject field>\"]) ObjectRef<T> fields in a class whose hierarchy " +
             "has ROCKS_CLASS(SubobjectList = \"…\") (an Actor), with T a concrete, non-EditorOnly element type of that list (Docs/Design/Prefab 10.2).";
-        string[] reserved = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+        // Core NameComponent의 장치 예약어(COM0–9·LPT0–9 포함)와 같다.
+        string[] reserved = ["CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
         foreach (ClassModel model in ordered.Where(type => !type.IsEnum))
         {
             if (model.IsStruct)
@@ -1454,9 +1455,10 @@ internal static partial class SchemaValidator
 
                 FieldModel field = model.Fields.FirstOrDefault(candidate => candidate.EffectiveToolName == spelling) ??
                     throw new MetadataException($"{model.Name}: {key} = \"{spelling}\" does not name a reflected field of this class", "RMC3002", hint).At(model.Site);
-                if (!shape(field))
+                // EditorOnly 필드는 에디터 데이터 없는 빌드의 스키마에서 빠지므로 소유 구조 지정자가 가리킬 수 없다.
+                if (!shape(field) || field.Spec.EditorOnly)
                 {
-                    throw new MetadataException($"{model.Name}: {key} field {field.Name} must be {shapeText}", "RMC3002", hint).At(model.Site);
+                    throw new MetadataException($"{model.Name}: {key} field {field.Name} must be {shapeText} and not EditorOnly", "RMC3002", hint).At(model.Site);
                 }
 
                 return field.Id;
@@ -1475,6 +1477,12 @@ internal static partial class SchemaValidator
         {
             ClassModel? baseModel = model.Base == "rocks::Object" ? null : find(model.Base);
             List<SubobjectModel> table = [.. baseModel?.Subobjects ?? []];
+            // 상속 subobject의 소유 필드(protected)는 생성 접근자가 이 클래스의 friend로 읽는다(GENERATED_BODY 필요).
+            if (table.Count != 0 && !model.HasGeneratedBody)
+            {
+                throw new MetadataException($"{model.Name}: a class that inherits subobjects must contain ROCKS_GENERATED_BODY()", "RMC3002", hint).At(model.Site);
+            }
+
             // 자기 Root가 자기 항목의 맨 앞이다(생략한 AttachParent가 앞쪽 index만 가리키도록).
             IEnumerable<FieldModel> own = model.OwnFields.Where(field => field.Spec.Subobject).OrderBy(field => field.Spec.SubobjectRoot ? 0 : 1);
             foreach (FieldModel field in own)
@@ -1489,6 +1497,12 @@ internal static partial class SchemaValidator
                 if (field.Kind != "ObjectReference" || field.Reference is not string target)
                 {
                     throw new MetadataException($"{symbol}: a Subobject field must be ObjectRef<T>", "RMC3002", hint).At(field.Site);
+                }
+
+                if (field.Id == model.SubobjectRootId)
+                {
+                    throw new MetadataException($"{symbol}: the SubobjectRoot field itself cannot be a Subobject (mark a separate field Root)", "RMC3002", hint)
+                        .At(field.Site);
                 }
 
                 ClassModel targetModel = find(target);

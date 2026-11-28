@@ -47,10 +47,10 @@ internal static class MetaProbeIdentity
             "probe::Note::rang"];
 
     // 선언 subobject 시험(MetaTests.Subobjects)의 타입·필드·subobject다. legacy는 field로 등록해 kind 변경 거부를 본다.
-    private static readonly string[] SubobjectTypes = ["probe::Part", "probe::ScenePart", "probe::Owner", "probe::Sub"];
+    private static readonly string[] SubobjectTypes = ["probe::Part", "probe::ScenePart", "probe::Owner", "probe::Sub", "probe::EdPart", "probe::AbsPart"];
 
     private static readonly string[] SubobjectFields = ["probe::Part::count", "probe::ScenePart::parent", "probe::Owner::parts", "probe::Owner::root",
-        "probe::Owner::legacy"];
+        "probe::Owner::legacy", "probe::Owner::edRoot"];
 
     private static readonly string[] SubobjectNames = ["probe::Owner::arm", "probe::Owner::body", "probe::Owner::plain", "probe::Sub::hand_",
         "probe::Sub::hand"];

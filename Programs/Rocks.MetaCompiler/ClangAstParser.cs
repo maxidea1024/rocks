@@ -910,6 +910,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 JsonElement[] members = Children(node).ToArray();
                 currentAliases.Clear();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
+                model.HasGeneratedBody = generatedBody;
                 // 표지 규칙(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절): 리플렉션 클래스·struct는 ROCKS_GENERATED_BODY()를 둔다.
                 // Binds 미러는 실제 타입이 따로 있으므로 대상이 아니다. C++ 관문(Meta/GeneratedType.h의 ReflectedDeclarationV)이 읽는
                 // 자기 타입 표지도 함께 본다 — 매크로가 둘을 같이 내므로 접근 표지만 있으면 매크로 정의가 어긋난 것이다.

@@ -740,10 +740,6 @@ struct RuntimeEventOps {
     const FrameLayout* frameLayout = nullptr;
 };
 
-// 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
-// Trace는 읽기만 수행한다. 콜백 중 생성·간선 변경·수집 재진입은 Busy로 거부한다.
-// lease 반환과 통계 조회는 허용한다. 활성 ConstructionContext의 롤백/소멸 재진입은 금지한다.
-// 동적 모듈의 함수 포인터를 제공한다면 module로 코드 수명도 유지해야 한다.
 // 선언 subobject 하나의 연산이다(Docs/Design/Prefab 10.2절 — TypeSchema::subobjects와 같은 수·순서,
 // 펼친 표). field는 소유 객체 안 소유 필드(ObjectRef<T>)의 주소를 돌려준다 — ObjectRuntime이 소유
 // 타입을 모른 채 배선하고(ConstructionContext::CreateDeclaredSubobjects), 기본값 덮기 문맥이 멤버
@@ -753,6 +749,10 @@ struct RuntimeSubobjectOps {
     void* (*field)(Object& owner) noexcept = nullptr;
 };
 
+// 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.
+// Trace는 읽기만 수행한다. 콜백 중 생성·간선 변경·수집 재진입은 Busy로 거부한다.
+// lease 반환과 통계 조회는 허용한다. 활성 ConstructionContext의 롤백/소멸 재진입은 금지한다.
+// 동적 모듈의 함수 포인터를 제공한다면 module로 코드 수명도 유지해야 한다.
 struct RuntimeTypeOps {
     usize size = 0;
     usize alignment = 0;

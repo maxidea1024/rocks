@@ -39,6 +39,11 @@ bool IsObjectReferenceArray(const FieldSchema& field) noexcept {
            field.element.kind == ValueKind::ObjectReference;
 }
 
+// 소유 구조 지정자가 가리킬 수 없는 필드다(EditorOnly는 에디터 데이터 없는 빌드에서 빠진다).
+bool IsEditorOnlyField(const FieldSchema& field) noexcept {
+    return HasFlag(field.flags, FieldFlags::EditorOnly);
+}
+
 bool IsWeakObjectReference(const FieldSchema& field) noexcept {
     return field.value.kind == ValueKind::WeakObjectReference;
 }
@@ -74,21 +79,21 @@ Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,
     const FieldSchema* root = nullptr;
     if (schema.subobjectListField != Guid{}) {
         list = FindField(schema.fields, schema.subobjectListField);
-        if (list == nullptr || !IsObjectReferenceArray(*list)) {
+        if (list == nullptr || !IsObjectReferenceArray(*list) || IsEditorOnlyField(*list)) {
             return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
         }
     }
 
     if (schema.subobjectRootField != Guid{}) {
         root = FindField(schema.fields, schema.subobjectRootField);
-        if (root == nullptr || !IsSingleObjectReference(*root)) {
+        if (root == nullptr || !IsSingleObjectReference(*root) || IsEditorOnlyField(*root)) {
             return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
         }
     }
 
     if (schema.subobjectAttachField != Guid{}) {
         const FieldSchema* attach = FindField(schema.fields, schema.subobjectAttachField);
-        if (attach == nullptr || !IsWeakObjectReference(*attach)) {
+        if (attach == nullptr || !IsWeakObjectReference(*attach) || IsEditorOnlyField(*attach)) {
             return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
         }
     }

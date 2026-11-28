@@ -841,6 +841,10 @@ internal sealed class ClassModel
     // descriptor에서 온다.
     public List<SubobjectModel> Subobjects { get; set; } = [];
 
+    // 클래스 본문에 ROCKS_GENERATED_BODY가 있는지다(상속 subobject의 protected 소유 필드를 생성 접근자가 이 클래스의 friend로 읽는다 —
+    // Docs/Design/Prefab 10.2절, RMC3002).
+    public bool HasGeneratedBody { get; set; }
+
     // static Result<void> InitSubobjectDefaults(SubobjectDefaultsContext&) noexcept를 선언했는지다(Prefab 10.2절 — 자기 선언만).
     public bool HasInitSubobjectDefaults { get; set; }
 
