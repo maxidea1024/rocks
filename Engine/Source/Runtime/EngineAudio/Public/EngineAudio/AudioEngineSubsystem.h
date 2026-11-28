@@ -37,7 +37,10 @@
 // 스레드: 공개 함수는 모두 게임 스레드에서 부른다.
 namespace rocks {
 
+class AssetLease;
+class AssetManager;
 class AudioDeviceContext;
+class Package;
 struct ControlBatch;
 struct ControlCommand;
 struct OcclusionRequest;
@@ -227,6 +230,18 @@ public:
     // 쿠킹 clip 로드(SoundClip::LoadCooked)의 엔진 설정 값이다(audio.stream.defaultloading —
     // 3.40.3절). 설정 문맥이 없으면 기본값이다.
     SoundCookedLoadOptions CookedLoadOptions() const noexcept;
+
+    // 쿠킹 clip을 올리는 엔진 로드 도우미다(3.46.3절 — 쿠킹 clip을 쓰는 호스트는 이것 하나를
+    // 부른다). 순서: 이미 같은 쿠킹 데이터면 아무것도 하지 않는다(sidecar를 열지 않는다) →
+    // streamedPayload가 있으면 assets.OpenStreamedBulk(lease, ...)로 sidecar를 연다(Unsupported —
+    // 그 bulk가 패키지 안이거나 범위 IO가 없음 — 이면 상주 경로) → SoundClip::LoadCooked(reader는
+    // package.BulkBytes, 디코더 표·로드 옵션은 엔진 값). package는 lease가 가리키는 clip의
+    // 패키지다. 예:
+    //   auto loaded = audio->LoadCookedClip(*clip, *package, assets, lease);
+    // 오류: OpenStreamedBulk의 그 밖 오류(StaleHandle 등), LoadCooked 오류. 실패하면 clip의 앞
+    // 원본을 둔다. 게임 스레드 전용이다.
+    Result<void> LoadCookedClip(SoundClip& clip, const Package& package, AssetManager& assets,
+                                const AssetLease& lease) noexcept;
 
     // 스트림 디코드 서비스다(장치가 없으면 null — 진단·시험).
     audio::AudioStreamService* StreamService() noexcept {

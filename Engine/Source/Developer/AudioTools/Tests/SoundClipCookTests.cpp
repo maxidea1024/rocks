@@ -220,9 +220,10 @@ struct CookScene {
         return made ? Move(made.Value()) : SharedPtr<SoundPcm>{};
     }
 
+    // sidecar가 있으면 Sidecar 배치 bulk를 그 sink에 쓴다(없으면 패키지 안 — 서버 프로필).
     Result<void> Cook(const SoundClipCookProcessor& processor, CookOut& out,
                       NuggetCache* nuggets = nullptr, bool verify = false,
-                      PackageSink* sink = nullptr) noexcept {
+                      PackageSink* sink = nullptr, PackageSink* sidecar = nullptr) noexcept {
         entry.id = asset;
         CookContext context;
         context.allocator = &allocator;
@@ -236,6 +237,7 @@ struct CookScene {
         context.nuggets = nuggets;
         context.verifyNuggets = verify;
         context.sink = sink != nullptr ? sink : &out.sink;
+        context.sidecar = sidecar;
         context.failure = &out.failure;
         context.warnings = &out.warnings;
         return processor.Cook(context);
@@ -1291,6 +1293,424 @@ TEST(SoundClipCook_LoadCookedStreamErrors) {
     // 통째 PCM을 올리면 스트림 원본을 놓는다.
     REQUIRE(cooked->LoadCookedPcm(scene.allocator, &ReadPackageBulk, owner, scene.decoders));
     CHECK(cooked->Pcm() && !cooked->Stream());
+}
+
+// 메모리 byte를 가진 가짜 sidecar payload다(AU6b1 로드는 읽지 않는다 — Read는 세기만 하고
+// 거부한다).
+class MemoryPayload final : public SoundStreamedPayload {
+public:
+    explicit MemoryPayload(Allocator& allocator) noexcept : bytes(allocator) {
+    }
+
+    uint64 Bytes() const noexcept override {
+        return bytes.Size() + extraBytes;
+    }
+
+    Result<SoundPayloadRead> Read(uint64, Span<uint8>, SoundReadPriority, SoundReadCallback,
+                                  void*) noexcept override {
+        ++reads;
+        return Result<SoundPayloadRead>::Failure(ErrorCode::Unsupported);
+    }
+
+    Array<uint8> bytes;
+    // Bytes()에 더한다(크기 불일치 시험).
+    uint64 extraBytes = 0;
+    uint32 reads = 0;
+};
+
+// 가장 큰 할당 크기를 기록한다(sidecar 로드가 payload 전체를 메모리에 두지 않음).
+class PeakAllocator final : public Allocator {
+public:
+    explicit PeakAllocator(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag) noexcept override {
+        largest = bytes > largest ? bytes : largest;
+        return inner_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return inner_.Deallocate(address);
+    }
+
+    usize largest = 0;
+
+private:
+    Allocator& inner_;
+};
+
+// 청크가 둘 이상인 PCM clip 길이다(48 kHz mono PCM16 4 s = 384000 byte > 목표 청크 256 KiB).
+constexpr uint32 SidecarClipFrames = Rate48 * 4;
+
+// 스트리밍 clip을 sidecar 출력과 함께 쿠킹해 로드한다(PCM 압축 — 청크 수가 길이로 정해진다).
+struct SidecarCook {
+    explicit SidecarCook(CookScene& cookScene) noexcept
+        : scene(cookScene), out(cookScene.allocator), sidecar(cookScene.allocator) {
+    }
+
+    bool Run(uint64 id, uint32 frames, bool withSidecar = true,
+             SoundCompression compression = SoundCompression::Pcm) noexcept {
+        if (!scene.Make(id, 1, frames, Rate48) ||
+            !scene.Edit([compression](SoundClip& clip) noexcept {
+                clip.compression = compression;
+                return true;
+            })) {
+            return false;
+        }
+
+        return Cook(withSidecar);
+    }
+
+    bool Cook(bool withSidecar = true) noexcept {
+        SoundClipCookProcessor processor;
+        return scene.Cook(processor, out, nullptr, false, nullptr,
+                          withSidecar ? &sidecar : nullptr) &&
+               scene.Load(out.sink.Bytes(), loaded);
+    }
+
+    SoundClip* Clip() noexcept {
+        return scene.LoadedClip(loaded);
+    }
+
+    Package* Owner() noexcept {
+        return const_cast<Package*>(scene.LoadedPackage(loaded));
+    }
+
+    CookScene& scene;
+    CookOut out;
+    MemoryPackageSink sidecar;
+    Loaded loaded;
+};
+
+// 쿠킹 배치(3.46.2절): 청크가 둘 이상인 스트리밍 clip은 패키지 bulk = 메타 + 청크 0, sidecar bulk =
+// payload 영역 전체다(청크 0 포함 — 위치·SHA가 나누기 전과 같다). 패키지의 sidecar bulk는 메모리에
+// 없다(BulkBytes Unsupported). sidecar 출력이 없는 쿠킹(서버)은 같은 두 bulk를 패키지 안에 둔다 —
+// 메타 + payload가 전체 플랫폼 데이터다. 같은 쿠킹은 패키지·sidecar byte가 같다.
+TEST(SoundClipCook_SidecarPlacement) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    SidecarCook first(scene);
+    REQUIRE(first.Run(90, SidecarClipFrames));
+    SoundClip* clip = first.Clip();
+    REQUIRE(clip != nullptr);
+    CHECK(clip->StreamsFromSidecar());
+    REQUIRE(!clip->streamedPayload.IsEmpty());
+    CHECK(!first.sidecar.Bytes().IsEmpty());
+    Package* owner = first.Owner();
+    auto prefix = owner->BulkBytes(clip->platformData);
+    REQUIRE(prefix);
+    CHECK(owner->BulkBytes(clip->streamedPayload).Error() == ErrorCode::Unsupported);
+    auto view = audio::AudioPlatformDataView::Parse(prefix.Value());
+    REQUIRE(view);
+    REQUIRE(view.Value().Header().chunkCount > 1);
+    const audio::AudioChunkEntry chunk0 = view.Value().Chunk(0);
+    const usize metaBytes = view.Value().MetaBytes();
+    CHECK(prefix.Value().Size() ==
+          metaBytes + static_cast<usize>(chunk0.payloadOffset) + chunk0.payloadBytes);
+    CHECK(!view.Value().HasAllPayload());
+    Array<uint8> packageBytes(scene.allocator);
+    REQUIRE(packageBytes.TryAppend(first.out.sink.Bytes()));
+    Array<uint8> sidecarBytes(scene.allocator);
+    REQUIRE(sidecarBytes.TryAppend(first.sidecar.Bytes()));
+
+    // 같은 처리기로 다시 쿠킹하면 패키지·sidecar byte가 같다.
+    SidecarCook again(scene);
+    REQUIRE(again.Run(90, SidecarClipFrames));
+    CHECK(SameBytes(again.out.sink.Bytes(), packageBytes.View()));
+    CHECK(SameBytes(again.sidecar.Bytes(), sidecarBytes.View()));
+
+    // sidecar 출력이 없으면(서버) 두 bulk 다 패키지 안이다: 앞부분은 같고 메타 + payload가 검증되는
+    // 전체 플랫폼 데이터다.
+    SidecarCook server(scene);
+    REQUIRE(server.Run(90, SidecarClipFrames, false));
+    CHECK(server.sidecar.Bytes().IsEmpty());
+    SoundClip* serverClip = server.Clip();
+    REQUIRE(serverClip != nullptr && !serverClip->streamedPayload.IsEmpty());
+    auto serverPrefix = server.Owner()->BulkBytes(serverClip->platformData);
+    auto payload = server.Owner()->BulkBytes(serverClip->streamedPayload);
+    REQUIRE(serverPrefix && payload);
+    CHECK(SameBytes(serverPrefix.Value(), prefix.Value()));
+    CHECK(payload.Value().Size() == view.Value().Header().payloadBytes);
+    Array<uint8> joined(scene.allocator);
+    REQUIRE(joined.TryAppend(prefix.Value().Slice(0, metaBytes)));
+    REQUIRE(joined.TryAppend(payload.Value()));
+    auto whole = audio::AudioPlatformDataView::Parse(joined.View());
+    REQUIRE(whole);
+    CHECK(whole.Value().HasAllPayload());
+    CHECK(audio::VerifyAllAudioChunks(whole.Value()).IsOk());
+    CHECK(SameBytes(
+        payload.Value().Slice(static_cast<usize>(chunk0.payloadOffset), chunk0.payloadBytes),
+        prefix.Value().Slice(metaBytes + static_cast<usize>(chunk0.payloadOffset),
+                             chunk0.payloadBytes)));
+    // 상주 로드는 두 bulk를 이어 읽는다(서버 경로 — 통째·실시간 모두).
+    REQUIRE(serverClip->LoadCookedStream(scene.allocator, &ReadPackageBulk, server.Owner(),
+                                         scene.decoders));
+    CHECK(serverClip->Stream()->HasAllPayload() &&
+          serverClip->Stream()->ByteCount() == joined.Size());
+    REQUIRE(serverClip->LoadCookedPcm(scene.allocator, &ReadPackageBulk, server.Owner(),
+                                      scene.decoders));
+    CHECK(serverClip->Pcm() && serverClip->Pcm()->FrameCount() == SidecarClipFrames);
+    REQUIRE(serverClip->LoadCooked(scene.allocator, &ReadPackageBulk, server.Owner(),
+                                   scene.decoders, SoundCookedLoadOptions{}));
+    CHECK(serverClip->Stream() && serverClip->Stream()->HasAllPayload());
+}
+
+// ADPCM 분할(3.46.2절 — codec 머리가 메타에 든다): 패키지 bulk = 메타 + 청크 0, 서버 쿠킹의 메타 +
+// payload가 검증되는 전체 플랫폼 데이터다.
+TEST(SoundClipCook_SidecarPlacementAdpcm) {
+    // 48 kHz mono ADPCM 약 24 KB/s — 15 s면 청크가 둘 이상이다.
+    constexpr uint32 AdpcmFrames = Rate48 * 15;
+    CookScene scene;
+    REQUIRE(scene.ready);
+    SidecarCook split(scene);
+    REQUIRE(split.Run(98, AdpcmFrames, true, SoundCompression::Adpcm));
+    SoundClip* clip = split.Clip();
+    REQUIRE(clip != nullptr && !clip->streamedPayload.IsEmpty());
+    auto prefix = split.Owner()->BulkBytes(clip->platformData);
+    REQUIRE(prefix);
+    auto view = audio::AudioPlatformDataView::Parse(prefix.Value());
+    REQUIRE(view);
+    CHECK(view.Value().Header().codec == AudioCodecId::Adpcm);
+    REQUIRE(view.Value().Header().chunkCount > 1);
+    const audio::AudioChunkEntry chunk0 = view.Value().Chunk(0);
+    const usize metaBytes = view.Value().MetaBytes();
+    CHECK(prefix.Value().Size() ==
+          metaBytes + static_cast<usize>(chunk0.payloadOffset) + chunk0.payloadBytes);
+    SidecarCook server(scene);
+    REQUIRE(server.Run(98, AdpcmFrames, false, SoundCompression::Adpcm));
+    auto payload = server.Owner()->BulkBytes(server.Clip()->streamedPayload);
+    REQUIRE(payload);
+    Array<uint8> joined(scene.allocator);
+    REQUIRE(joined.TryAppend(prefix.Value().Slice(0, metaBytes)));
+    REQUIRE(joined.TryAppend(payload.Value()));
+    auto whole = audio::AudioPlatformDataView::Parse(joined.View());
+    REQUIRE(whole);
+    CHECK(whole.Value().HasAllPayload() && audio::VerifyAllAudioChunks(whole.Value()).IsOk());
+    REQUIRE(server.Clip()->LoadCooked(scene.allocator, &ReadPackageBulk, server.Owner(),
+                                      scene.decoders, SoundCookedLoadOptions{}));
+    CHECK(server.Clip()->Stream() && server.Clip()->Stream()->HasAllPayload());
+}
+
+// 쿠킹 판정은 쿠킹 값(인코딩 rate·옮긴 loop)으로 런타임과 같은 식이다(3.46.2절): 44.1 kHz 원본을
+// 32 kHz로 리샘플하는 PCM clip에서 loop 길이가 원본 1 s 경계 근처여도 sidecar
+// 여부(streamedPayload)가 쿠킹된 clip의 UsesWholeDecode와 늘 맞고, 그 판정대로 로드된다(sidecar면
+// 가짜 payload, 아니면 상주).
+TEST(SoundClipCook_SidecarDecisionUsesCookedValues) {
+    constexpr uint32 DeviceRate = 32000;
+    // 32 kHz mono PCM16 6 s = 384000 byte — 청크가 둘 이상이다.
+    constexpr uint32 SourceFrames = Rate44 * 6;
+    CookScene scene;
+    REQUIRE(scene.ready);
+    scene.profile.audioCook.resampleForDevice = true;
+    scene.profile.audioCook.lowSampleRate = DeviceRate;
+    bool sawSidecar = false;
+    bool sawWhole = false;
+    const uint32 lengths[] = {Rate44 - 2, Rate44 - 1, Rate44, Rate44 + 1, Rate44 + 2};
+    uint64 id = 100;
+    for (const uint32 length : lengths) {
+        SidecarCook cook(scene);
+        REQUIRE(scene.Make(id++, 1, SourceFrames, Rate44));
+        REQUIRE(scene.Edit([length](SoundClip& clip) noexcept {
+            clip.compression = SoundCompression::Pcm;
+            clip.sampleRateQuality = SoundSampleRateQuality::Low;
+            clip.looping = true;
+            clip.loopOverride.enabled = true;
+            clip.loopOverride.begin = Rate44;
+            clip.loopOverride.end = Rate44 + length;
+            return true;
+        }));
+        REQUIRE(cook.Cook());
+        SoundClip* clip = cook.Clip();
+        REQUIRE(clip != nullptr && clip->sampleRate == DeviceRate);
+        const bool sidecar = !clip->streamedPayload.IsEmpty();
+        CHECK(sidecar == !clip->UsesWholeDecode());
+        sawSidecar = sawSidecar || sidecar;
+        sawWhole = sawWhole || !sidecar;
+        SharedPtr<SoundStreamedPayload> payload;
+        if (sidecar) {
+            auto bytes = cook.Owner()->BulkBytes(clip->platformData);
+            REQUIRE(bytes);
+            auto view = audio::AudioPlatformDataView::Parse(bytes.Value());
+            REQUIRE(view);
+            auto made = SharedPtr<MemoryPayload>::TryMake(scene.allocator, scene.allocator);
+            REQUIRE(made);
+            REQUIRE(made.Value()->bytes.TryResize(
+                static_cast<usize>(view.Value().Header().payloadBytes)));
+            payload = made.Value();
+        }
+
+        CHECK(clip->LoadCooked(scene.allocator, &ReadPackageBulk, cook.Owner(), scene.decoders,
+                               SoundCookedLoadOptions{}, payload)
+                  .IsOk());
+        CHECK(clip->HasCookedData());
+    }
+
+    CHECK(sawSidecar && sawWhole);
+}
+
+// 패키지만인 clip(3.46.2절): ForceInline, 1 s 미만 loop 구간(통째 디코드), 청크 하나(짧은 clip)는
+// sidecar 출력이 있어도 플랫폼 데이터 전체를 platformData 하나에 둔다(streamedPayload 비어 있음,
+// sidecar 출력 없음). 로드는 AU6a 경로다.
+TEST(SoundClipCook_PackageOnlyClips) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    struct Case {
+        uint64 id;
+        uint32 frames;
+        void (*edit)(SoundClip& clip) noexcept;
+    };
+    const Case cases[] = {{91, SidecarClipFrames,
+                           [](SoundClip& clip) noexcept {
+                               clip.loadingBehavior = SoundLoadingBehavior::ForceInline;
+                           }},
+                          {92, SidecarClipFrames,
+                           [](SoundClip& clip) noexcept {
+                               clip.looping = true;
+                               clip.loopOverride.enabled = true;
+                               clip.loopOverride.begin = Rate48;
+                               clip.loopOverride.end = Rate48 + Rate48 / 2;
+                           }},
+                          {93, Rate48, [](SoundClip&) noexcept {}}};
+    for (const Case& entry : cases) {
+        SidecarCook cook(scene);
+        REQUIRE(scene.Make(entry.id, 1, entry.frames, Rate48));
+        REQUIRE(scene.Edit([&](SoundClip& clip) noexcept {
+            clip.compression = SoundCompression::Pcm;
+            entry.edit(clip);
+            return true;
+        }));
+        REQUIRE(cook.Cook());
+        SoundClip* clip = cook.Clip();
+        REQUIRE(clip != nullptr);
+        CHECK(clip->streamedPayload.IsEmpty());
+        CHECK(cook.sidecar.Bytes().IsEmpty());
+        auto bytes = cook.Owner()->BulkBytes(clip->platformData);
+        REQUIRE(bytes);
+        auto view = audio::AudioPlatformDataView::Parse(bytes.Value());
+        REQUIRE(view);
+        CHECK(view.Value().HasAllPayload());
+        REQUIRE(clip->LoadCooked(scene.allocator, &ReadPackageBulk, cook.Owner(), scene.decoders,
+                                 SoundCookedLoadOptions{}));
+        CHECK(static_cast<bool>(clip->Pcm()) == clip->UsesWholeDecode());
+        CHECK(clip->Pcm() || clip->Stream()->HasAllPayload());
+    }
+}
+
+// sidecar 로드(3.46.3절 — 가짜 payload): 메타 + 청크 0만 메모리에 둔다(가장 큰 할당 < 플랫폼 데이터
+// 크기, 읽기 없음). 청크 0 손상 CorruptData, Bytes() 불일치·null streamed·패키지만 clip·통째 디코드
+// clip에 streamed InvalidArgument, 실패는 앞 원본을 둔다. 같은 키면 streamed를 쓰지 않는다
+// (HasCookedData). sidecar clip을 streamed 없이 올리면 패키지 reader가 payload를 주지 못한다
+// (Unsupported).
+TEST(SoundClipCook_LoadCookedSidecar) {
+    CookScene scene;
+    REQUIRE(scene.ready);
+    SidecarCook cook(scene);
+    REQUIRE(cook.Run(94, SidecarClipFrames));
+    SoundClip* clip = cook.Clip();
+    REQUIRE(clip != nullptr && !clip->streamedPayload.IsEmpty());
+    Package* owner = cook.Owner();
+    auto prefix = owner->BulkBytes(clip->platformData);
+    REQUIRE(prefix);
+    auto view = audio::AudioPlatformDataView::Parse(prefix.Value());
+    REQUIRE(view);
+    const uint64 payloadBytes = view.Value().Header().payloadBytes;
+    const usize platformBytes = view.Value().MetaBytes() + static_cast<usize>(payloadBytes);
+    const SoundCookedLoadOptions options;
+    // 할당 실패면 null이다(그 경우 받는 쪽 검사가 실패한다).
+    const auto makePayload = [&](uint64 extra) noexcept {
+        auto made = SharedPtr<MemoryPayload>::TryMake(scene.allocator, scene.allocator);
+        if (!made || !made.Value()->bytes.TryResize(static_cast<usize>(payloadBytes))) {
+            return SharedPtr<MemoryPayload>{};
+        }
+
+        made.Value()->extraBytes = extra;
+        return Move(made.Value());
+    };
+
+    // streamed 없이: sidecar bulk는 패키지 메모리에 없다.
+    CHECK(clip->LoadCooked(scene.allocator, &ReadPackageBulk, owner, scene.decoders, options)
+              .Error() == ErrorCode::Unsupported);
+    CHECK(!clip->Stream() && !clip->Pcm() && !clip->HasCookedData());
+    // 크기 불일치·null payload.
+    CHECK(clip->LoadCooked(scene.allocator, &ReadPackageBulk, owner, scene.decoders, options,
+                           makePayload(1))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(SoundStreamData::TryCreateStreamed(scene.allocator, prefix.Value(), nullptr).Error() ==
+          ErrorCode::InvalidArgument);
+    // 청크 0 손상(그 청크 SHA가 다르다).
+    Array<uint8> damaged(scene.allocator);
+    REQUIRE(damaged.TryAppend(prefix.Value()));
+    damaged[damaged.Size() - 1] ^= 0x5Au;
+    CHECK(clip->LoadCooked(scene.allocator, &ReadFixedBytes, &damaged, scene.decoders, options,
+                           makePayload(0))
+              .Error() == ErrorCode::CorruptData);
+    CHECK(!clip->Stream() && !clip->HasCookedData());
+    // prefix 모양: 쿠킹이 나눈 그대로(메타 + 청크 0 끝)가 아니면 CorruptData다 — 모자라거나(청크 0
+    // 잘림) 더 길면(sidecar 형태가 HasAllPayload를 가질 수 없다).
+    CHECK(SoundStreamData::TryCreateStreamed(
+              scene.allocator, prefix.Value().Slice(0, prefix.Value().Size() - 1), makePayload(0))
+              .Error() == ErrorCode::CorruptData);
+    Array<uint8> longer(scene.allocator);
+    REQUIRE(longer.TryAppend(prefix.Value()));
+    REQUIRE(longer.TryPushBack(0));
+    CHECK(SoundStreamData::TryCreateStreamed(scene.allocator, longer.View(), makePayload(0))
+              .Error() == ErrorCode::CorruptData);
+
+    // 정상: 메타 + 청크 0 사본, payload 공유 참조, 읽기 없음.
+    SharedPtr<MemoryPayload> payload = makePayload(0);
+    PeakAllocator peak(scene.allocator);
+    REQUIRE(clip->LoadCooked(peak, &ReadPackageBulk, owner, scene.decoders, options, payload));
+    CHECK(peak.largest > 0 && peak.largest < platformBytes);
+    REQUIRE(clip->Stream());
+    const SoundStreamData& data = *clip->Stream();
+    CHECK(!clip->Pcm() && !data.HasAllPayload());
+    CHECK(data.Streamed().Get() == payload.Get() && payload->reads == 0);
+    CHECK(data.ByteCount() == prefix.Value().Size());
+    CHECK(data.Chunk0().Size() == view.Value().Chunk(0).payloadBytes);
+    CHECK(data.FrameCount() == SidecarClipFrames && data.Serial() != 0);
+    CHECK(clip->HasCookedData());
+
+    // 같은 키: 다른 payload를 줘도 쓰지 않는다.
+    const uint64 revision = clip->PcmRevision();
+    SharedPtr<MemoryPayload> other = makePayload(1);
+    REQUIRE(
+        clip->LoadCooked(scene.allocator, &ReadPackageBulk, owner, scene.decoders, options, other));
+    CHECK(clip->PcmRevision() == revision && clip->Stream()->Streamed().Get() == payload.Get());
+    // 재생 스냅숏은 sidecar 형태 스트림을 담는다(재생은 청크 캐시 — AU6b2).
+    auto sound = clip->MakePlayable(scene.allocator, *scene.cooked, scene.cooked->OwnerAccess());
+    REQUIRE(sound);
+    CHECK(sound.Value().Get()->stream.Get() == &data);
+
+    // 다른 SoundStreamData는 다른 번호다.
+    SidecarCook second(scene);
+    REQUIRE(second.Run(95, SidecarClipFrames));
+    REQUIRE(second.Clip()->LoadCooked(scene.allocator, &ReadPackageBulk, second.Owner(),
+                                      scene.decoders, options, makePayload(0)));
+    CHECK(second.Clip()->Stream()->Serial() != data.Serial());
+
+    // 패키지만인 clip(streamedPayload 없음)과 통째 디코드 clip에는 streamed를 줄 수 없다.
+    SidecarCook forced(scene);
+    REQUIRE(scene.Make(96, 1, SidecarClipFrames, Rate48));
+    REQUIRE(scene.Edit([](SoundClip& value) noexcept {
+        value.compression = SoundCompression::Pcm;
+        value.loadingBehavior = SoundLoadingBehavior::ForceInline;
+        return true;
+    }));
+    REQUIRE(forced.Cook());
+    CHECK(forced.Clip()
+              ->LoadCooked(scene.allocator, &ReadPackageBulk, forced.Owner(), scene.decoders,
+                           options, makePayload(0))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!forced.Clip()->Stream());
+    SidecarCook looped(scene);
+    REQUIRE(looped.Run(97, SidecarClipFrames));
+    looped.Clip()->looping = true;
+    looped.Clip()->loopOverride.enabled = true;
+    looped.Clip()->loopOverride.end = Rate48 / 2;
+    CHECK(looped.Clip()
+              ->LoadCooked(scene.allocator, &ReadPackageBulk, looped.Owner(), scene.decoders,
+                           options, makePayload(0))
+              .Error() == ErrorCode::InvalidArgument);
 }
 
 // 인코딩 rate·실효 품질(3.39.3절): 끔이면 원본, 켬이면 min(등급 rate, 원본)(원본보다 높이지 않는다,

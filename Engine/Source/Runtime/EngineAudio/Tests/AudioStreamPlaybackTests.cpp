@@ -130,8 +130,8 @@ private:
     audio::AudioDecoderRegistry registry_;
 };
 
-// mono Opus 플랫폼 데이터(순음)와 그 스트림 데이터다.
-SharedPtr<const SoundStreamData> MakeStreamData(Allocator& allocator, uint32 frames) noexcept {
+// mono Opus 플랫폼 데이터(순음) byte다.
+Array<uint8> MakeStreamBytes(Allocator& allocator, uint32 frames) noexcept {
     Array<float> samples(allocator);
     if (!samples.TryResize(frames)) {
         platform::Fatal("Audio stream playback test signal allocation failed");
@@ -157,6 +157,12 @@ SharedPtr<const SoundStreamData> MakeStreamData(Allocator& allocator, uint32 fra
         platform::Fatal("Audio stream playback test encode failed");
     }
 
+    return bytes;
+}
+
+// 그 스트림 데이터다(상주 — 플랫폼 데이터 전체).
+SharedPtr<const SoundStreamData> MakeStreamData(Allocator& allocator, uint32 frames) noexcept {
+    const Array<uint8> bytes = MakeStreamBytes(allocator, frames);
     auto made = SoundStreamData::TryCreate(allocator, bytes.View());
     if (!made) {
         platform::Fatal("Audio stream playback test stream data was rejected");
@@ -568,6 +574,67 @@ TEST(EngineAudio_StreamShutdownWhilePlaying) {
         // 엔진이 내려간 뒤 스트림 데이터 참조는 시험 것만 남는다.
         CHECK(data.UseCount() == 1);
     }
+}
+
+namespace {
+
+// 읽지 않는 sidecar payload다(크기만 맞춘다 — 재생이 읽기 전에 거부되는지 본다).
+class UnreadPayload final : public SoundStreamedPayload {
+public:
+    explicit UnreadPayload(uint64 bytes) noexcept : bytes_(bytes) {
+    }
+
+    uint64 Bytes() const noexcept override {
+        return bytes_;
+    }
+
+    Result<SoundPayloadRead> Read(uint64, Span<uint8>, SoundReadPriority, SoundReadCallback,
+                                  void*) noexcept override {
+        ++reads;
+        return Result<SoundPayloadRead>::Failure(ErrorCode::Unsupported);
+    }
+
+    uint32 reads = 0;
+
+private:
+    uint64 bytes_ = 0;
+};
+
+} // namespace
+
+// sidecar 형태 스트림(청크 0만 상주 — 3.46.3절)은 청크 캐시(AU6b2) 전까지 재생하지 않는다: 시작
+// 없이 Ended(Failed)이고 payload를 읽지 않으며 voice·슬롯이 남지 않는다.
+TEST(EngineAudio_StreamSidecarFormRejectedUntilCache) {
+    OpusRegistryScope opus;
+    AudioEngine fixture(DeterministicOptions(true));
+    REQUIRE(fixture.initialized);
+    const Array<uint8> bytes = MakeStreamBytes(fixture.allocator, audio::OpusPlatformSampleRate);
+    auto view = audio::AudioPlatformDataView::Parse(bytes.View());
+    REQUIRE(view && view.Value().Header().chunkCount > 1);
+    const audio::AudioChunkEntry chunk0 = view.Value().Chunk(0);
+    const usize prefixBytes =
+        view.Value().MetaBytes() + static_cast<usize>(chunk0.payloadOffset) + chunk0.payloadBytes;
+    auto payload =
+        SharedPtr<UnreadPayload>::TryMake(fixture.allocator, view.Value().Header().payloadBytes);
+    REQUIRE(payload);
+    auto made = SoundStreamData::TryCreateStreamed(
+        fixture.allocator, bytes.View().Slice(0, prefixBytes), payload.Value());
+    REQUIRE(made);
+    REQUIRE(!made.Value()->HasAllPayload());
+    const SoundSourceRef sound =
+        StreamSound(fixture.allocator, SharedPtr<const SoundStreamData>(Move(made.Value())));
+    REQUIRE(sound.IsValid());
+    EventLog log(fixture.allocator);
+    PlayOptions play;
+    play.onEvent = log.Callback(fixture.allocator);
+    REQUIRE(fixture.audio->Play2D(sound, Move(play)));
+    REQUIRE(RunUntilEnded(fixture, AudioControlMode::Inline, log));
+    REQUIRE(log.events.Size() == 1);
+    CHECK(log.events[0].kind == PlaybackEventKind::Ended &&
+          log.events[0].reason == PlaybackEndReason::Failed);
+    CHECK(payload.Value()->reads == 0);
+    REQUIRE(RunUntilStreamsIdle(fixture));
+    CHECK(fixture.audio->StreamService()->AcquiredSlots() == 0);
 }
 
 } // namespace audio_stream_playback_tests_file

@@ -1,8 +1,11 @@
 #include "AudioDeviceContext.h"
 #include "AudioEngineSettingsInternal.h"
 #include "ControlBatch.h"
+#include "StreamedBulkPayload.h"
 #include "ValueRange.h"
 
+#include <AssetRuntime/AssetManager.h>
+#include <AssetRuntime/Package.h>
 #include <AudioAssets/AudioObjectKey.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -1639,6 +1642,40 @@ SoundCookedLoadOptions AudioEngineSubsystem::CookedLoadOptions() const noexcept 
     }
 
     return options;
+}
+
+Result<void> AudioEngineSubsystem::LoadCookedClip(SoundClip& clip, const Package& package,
+                                                  AssetManager& assets,
+                                                  const AssetLease& lease) noexcept {
+    if (clip.HasCookedData()) {
+        return Result<void>::Success();
+    }
+
+    SharedPtr<SoundStreamedPayload> streamed;
+    if (!clip.streamedPayload.IsEmpty()) {
+        auto bulk = assets.OpenStreamedBulk(lease, clip.streamedPayload);
+        if (bulk) {
+            auto made =
+                engine_audio_detail::MakeStreamedBulkPayload(allocator_, Move(bulk.Value()));
+            if (!made) {
+                return Result<void>::Failure(made.Error());
+            }
+
+            streamed = Move(made.Value());
+        } else if (bulk.Error() != ErrorCode::Unsupported) {
+            return Result<void>::Failure(bulk.Error());
+        } else {
+            // payload가 패키지 안(sidecar 출력이 없는 쿠킹)이거나 범위 IO가 없다 — 상주 경로다.
+            Log::Info(LogEngineAudio, "Sound clip payload has no streamed source (Unsupported); "
+                                      "trying the resident path");
+        }
+    }
+
+    const auto readBulk = [](void* context, const BulkDataRef& ref) noexcept {
+        return static_cast<const Package*>(context)->BulkBytes(ref);
+    };
+    return clip.LoadCooked(allocator_, readBulk, const_cast<Package*>(&package), decoders_,
+                           CookedLoadOptions(), Move(streamed));
 }
 
 bool IsOutputTailPlayed(const audio::AudioOutputRingCounters& counters,

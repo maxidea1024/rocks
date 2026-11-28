@@ -130,6 +130,8 @@ struct ClipFacts {
     uint32 frames = 0;
     uint32 sourceLoopBegin = 0;
     uint32 sourceLoopEnd = 0;
+    // payload를 sidecar에 둘 수 있는 clip이다(ForceInline·통째 디코드가 아님 — 3.46.2절).
+    bool sidecar = false;
 };
 
 // 코덱의 인코더다(Opus는 allocator로 libopus 상태를 잡는다).
@@ -374,6 +376,7 @@ struct CookedFields {
     uint32 overrideEnd = 0;
     Array<SoundCuePoint> cues;
     BulkDataRef platformData;
+    BulkDataRef streamedPayload;
 };
 
 template <class T>
@@ -393,6 +396,52 @@ void SwapCookedFields(SoundClip& clip, CookedFields& fields) noexcept {
     SwapValue(clip.loopOverride.end, fields.overrideEnd);
     SwapValue(clip.cues, fields.cues);
     SwapValue(clip.platformData, fields.platformData);
+    SwapValue(clip.streamedPayload, fields.streamedPayload);
+}
+
+// 플랫폼 데이터 bulk를 더한다(3.46.2절). sidecar clip이고 청크가 둘 이상이면 패키지 bulk =
+// 메타 + 청크 0(앞부분), sidecar bulk = payload 영역 전체다(위치·SHA가 나누기 전과 같다
+// — 3.30.1절). 아니면 플랫폼 데이터 전체를 패키지 bulk 하나로 둔다. sidecar 출력이 없는 쿠킹(서버
+// 프로필)은 쓰기가 Sidecar 배치를 패키지 안으로 돌린다(AssetSystem 20.5 2).
+Result<void> AddPlatformBulks(const CookContext& context, CookChainedBulkSource& bulk,
+                              Span<const uint8> platformBytes, bool sidecar,
+                              CookedFields& fields) noexcept {
+    // 나누는 자리(메타 + 청크 0 끝)와 payload 영역 시작(메타 끝)이다. 나누지 않으면 둘 다 전체다.
+    usize prefixBytes = platformBytes.Size();
+    usize metaBytes = platformBytes.Size();
+    if (sidecar) {
+        auto view = audio::AudioPlatformDataView::Parse(platformBytes);
+        if (!view) {
+            return CookFail(context, AssetDiagnosticCode::None, view.Error());
+        }
+
+        if (view.Value().Header().chunkCount > 1) {
+            const audio::AudioChunkEntry chunk0 = view.Value().Chunk(0);
+            metaBytes = view.Value().MetaBytes();
+            prefixBytes =
+                metaBytes + static_cast<usize>(chunk0.payloadOffset) + chunk0.payloadBytes;
+        }
+    }
+
+    auto added = bulk.Add(platformBytes.Slice(0, prefixBytes));
+    if (!added) {
+        return CookFail(context, AssetDiagnosticCode::None, added.Error());
+    }
+
+    fields.platformData = added.Value();
+    fields.streamedPayload = BulkDataRef{};
+    if (prefixBytes == platformBytes.Size()) {
+        return Result<void>::Success();
+    }
+
+    auto streamed = bulk.Add(platformBytes.Slice(metaBytes, platformBytes.Size() - metaBytes),
+                             PackageBulkPlacement::Sidecar);
+    if (!streamed) {
+        return CookFail(context, AssetDiagnosticCode::None, streamed.Error());
+    }
+
+    fields.streamedPayload = streamed.Value();
+    return Result<void>::Success();
 }
 
 // 쓰기 Borrow 안에서 교환한다.
@@ -663,6 +712,22 @@ Result<void> SoundClipCookProcessor::Cook(CookContext& context) const noexcept {
             !computed) {
             return CookFail(context, AssetDiagnosticCode::InvalidSetting, computed.Error());
         }
+
+        // sidecar 여부는 쿠킹 값(인코딩 rate·옮긴 loop)으로 런타임 UsesWholeDecode와 같은 식이다
+        // (3.46.2절 — EffectiveLoop와 같은 우선순위: override, 파일 loop, 전체).
+        uint32 cookedLoopBegin = 0;
+        uint32 cookedLoopEnd = 0;
+        if (clip.loopOverride.enabled) {
+            cookedLoopBegin = layout.overrideBegin;
+            cookedLoopEnd = layout.overrideEnd;
+        } else if (clip.hasFileLoop) {
+            cookedLoopBegin = layout.fileLoopBegin;
+            cookedLoopEnd = layout.fileLoopEnd;
+        }
+
+        facts.sidecar = clip.loadingBehavior != SoundLoadingBehavior::ForceInline &&
+                        !SoundClip::IsWholeDecodeLoop(clip.looping, cookedLoopBegin, cookedLoopEnd,
+                                                      layout.frames, layout.sampleRate);
     }
 
     CookedFields fields(*objectAllocator);
@@ -775,12 +840,11 @@ Result<void> SoundClipCookProcessor::Cook(CookContext& context) const noexcept {
     const Span<const uint8> platformBytes =
         built.IsEmpty() ? got.values[0].bytes.View() : built.View();
     CookChainedBulkSource bulk(allocator, context.bulkSource);
-    auto added = bulk.Add(platformBytes);
-    if (!added) {
-        return CookFail(context, AssetDiagnosticCode::None, added.Error());
+    if (auto placed = AddPlatformBulks(context, bulk, platformBytes, facts.sidecar, fields);
+        !placed) {
+        return placed;
     }
 
-    fields.platformData = added.Value();
     if (auto swapped = SwapInObject(registry, access, asset.Value(), fields); !swapped) {
         return CookFail(context, AssetDiagnosticCode::None, swapped.Error());
     }

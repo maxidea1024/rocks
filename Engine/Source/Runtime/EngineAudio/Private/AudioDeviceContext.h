@@ -737,6 +737,8 @@ private:
     Array<BusModifier> busModifiers_;
     Array<uint64> loggedBusFallbacks_;
     bool busFallbackLogFull_ = false;
+    // sidecar 형태 재생 거부를 알렸는지다(AU6b2 전 가드 — 한 번만 알린다).
+    bool sidecarPlaybackLogged_ = false;
     Array<audio::AudioBusLink> busLinks_;
     MixBusRef masterBus_;
     MixBusRef baseDefaultBus_;
