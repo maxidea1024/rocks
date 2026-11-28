@@ -1,6 +1,6 @@
 # 콘텐츠 해시 BLAKE3 전환 설계
 
-기준일: 2026-11-28, 개정 2(초안, 설계만).
+기준일: 2026-11-28, 개정 3(초안, 설계만 — 개정 3: UE 교환 fixture 재생성 단계 CH-B3c, rocks-10 담당).
 
 개정 1은 같은 날 사용자 지시로 썼다: "BLAKE3 전환 스펙으로 잡아둬", "왜 Encoding이라는 폴더에 있는거지". 개정 2는 교차 리뷰(막는 문제 3, 중요 9, 경미 7)를 모두 반영했다.
 
@@ -82,6 +82,7 @@
 | CH-B2 | Core `ContentHash`·`SeededHash`, `BuildFingerprint`, 모듈 `ContentHashing`(`ContentHasher`·`HashFileContent`·`ActiveKernelName`), 리플렉션 타입 교체(CH13) | API 시험, 리플렉션 왕복, MetaCompiler 형식 표·시험 |
 | CH-B3a | 일괄 A: 3절 모든 영역의 타입·이름 교체(출력 byte 동일), UE 플러그인 포함 | 전체 빌드·영역 시험(골든 변화 없음) |
 | CH-B3b | 일괄 B: `ContentHasher`를 BLAKE3로 바꾸고, 형식 버전·골든·manifest `blake3`(CH11) 갱신 | 영역 시험, 형식 버전 시험(옛 버전 `UnsupportedVersion`) |
+| CH-B3c | UE 교환(rocks-10 담당, 일괄 B push 직후): 플러그인 `FRocksSha256` → UE `FBlake3` 전환, `Tests/Bundles`의 Golden·GoldenSubstrate·GoldenBaked `.rxbundle`을 UE 5.8 플러그인으로 다시 내보냄(GoldenBaked는 GPU 굽기라 UE 작업 환경 필요), Basic(손으로 만든 fixture)은 해시만 다시 계산 | UnrealExchange 시험. 일괄 B와 이 커밋 사이에는 교환 fixture 시험이 실패한다(공지에 적는다) |
 | CH-B5 | 소스 에셋 다시 import(TestContent 20개 포함), 엔진·TestContent 재쿠킹, Sandbox self-test, 정책 `sha256-usage` | 여덟 장치 self-test, 정책 통과 |
 | CH-L1 | 큰 입력 병렬 해시(Task subtree) | 측정 뒤 |
 | CH-L2 | Rockpile C#·Rocks.Build BLAKE3 구현(Rockpile R0 코드 단계에 포함) | C++ ↔ C# 골든 byte 일치(RT01) |
