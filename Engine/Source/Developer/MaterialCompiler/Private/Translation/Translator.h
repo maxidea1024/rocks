@@ -3,7 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>

@@ -11,7 +11,7 @@
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Base/InitializerList.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Time/DateTime.h>
 #include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>

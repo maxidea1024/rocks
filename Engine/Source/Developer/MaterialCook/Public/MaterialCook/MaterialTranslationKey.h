@@ -1,7 +1,7 @@
 #pragma once
 
 #include <AssetNugget/NuggetKey.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <MaterialCook/MaterialTranslationKeyDesc.h>
 

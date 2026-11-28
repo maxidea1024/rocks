@@ -157,7 +157,7 @@ enum class ValueKind : uint8 {
     AssetId,             // rocks::AssetId(Object/AssetId.h), wire Guid
     SoftObjectReference, // rocks::SoftObjectRef<T>(Object/SoftObjectRef.h), wire
                          // SoftObjectReference
-    Digest256,           // rocks::Sha256Digest(Core/Encoding/Sha256.h), wire Bytes(정확히 32 byte)
+    Digest256,           // rocks::Sha256Digest(Core/Hash/Sha256.h), wire Bytes(정확히 32 byte)
     // 리플렉션 B9 이후의 값 종류다(Docs/Design/ReflectionExtensions.ko.md 1.1절).
     Int8,  // int8(Clang 철자 signed char — 평범한 char는 받지 않는다), wire I64(범위 검사)
     Int16, // int16(short), wire I64(범위 검사)

@@ -1,4 +1,4 @@
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Platform/Memory.h>
 #include <SparksVm/Vm.h>
 

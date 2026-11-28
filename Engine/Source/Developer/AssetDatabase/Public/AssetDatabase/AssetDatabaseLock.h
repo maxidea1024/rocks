@@ -1,7 +1,7 @@
 #pragma once
 
 #include <AssetDatabase/ProjectLayout.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Platform/File.h>
 
 // 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem 8절, 7.1절 4 — A2a). 이 잠금을 쥔 프로세스만

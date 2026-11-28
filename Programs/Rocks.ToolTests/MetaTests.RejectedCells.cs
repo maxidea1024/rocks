@@ -84,7 +84,7 @@ internal static partial class MetaTests
     // 같은 RMC3000으로 거부된다.
     private const string CellPreamble =
         "#include <Meta/Annotations.h>\n#include <Core/Containers/Array.h>\n#include <Core/Containers/OrderedMap.h>\n" +
-        "#include <Core/Containers/OrderedSet.h>\n#include <Core/Encoding/Sha256.h>\n#include <Core/Optional.h>\n#include <Core/Text/Name.h>\n" +
+        "#include <Core/Containers/OrderedSet.h>\n#include <Core/Hash/Sha256.h>\n#include <Core/Optional.h>\n#include <Core/Text/Name.h>\n" +
         "#include <Core/Text/String.h>\n#include <Localization/Text.h>\n#include <Object/AssetId.h>\n#include <Object/ClassRef.h>\n" +
         "#include <Object/InstancedStruct.h>\n#include <Object/Object.h>\n#include <Object/ObjectRefArray.h>\n#include <Object/ObjectRefMap.h>\n" +
         "#include <Object/ObjectRefs.h>\n#include <Object/SoftObjectRef.h>\n" +

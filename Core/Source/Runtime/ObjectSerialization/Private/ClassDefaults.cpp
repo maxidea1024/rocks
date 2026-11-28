@@ -1,6 +1,6 @@
 #include "GraphSaveInternal.h"
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Object/ClassRef.h>
 #include <Object/TypeRegistry.h>
 #include <ObjectSerialization/ClassDefaults.h>

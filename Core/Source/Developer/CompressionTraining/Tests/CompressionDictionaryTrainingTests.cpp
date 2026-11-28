@@ -3,7 +3,7 @@
 #include <Compression/Compression.h>
 #include <Compression/CompressionDictionary.h>
 #include <CompressionTraining/CompressionDictionaryTraining.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Function.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>

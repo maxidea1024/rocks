@@ -152,7 +152,8 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         void SetBodyCollision(PhysicsBodyHandle, const ResolvedCollision&) noexcept override {
         }
 
-        Result<void> SetBodyGeometry(PhysicsBodyHandle, const BodyGeometry&) noexcept override {
+        Result<void> SetBodyGeometry(PhysicsBodyHandle,
+                                     Span<const BodyShapeElement>) noexcept override {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 

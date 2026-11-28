@@ -9,7 +9,7 @@
 #include <Base/Endian.h>
 #include <Base/InitializerList.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Math/RandomStream.h>
 #include <Core/Memory/SystemAllocator.h>

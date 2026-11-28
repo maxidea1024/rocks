@@ -2,6 +2,8 @@
 
 기준일: 2026-11-13, 개정 2(1차 교차검증 — 독립 설계 1·반례 검토 3·사실 확인 3 — 과 2차 최종 검증 2를 반영, 19절). UE 대조 기준: UE 5.8(5.8.4, commit `f45729c0b6f0`) 대조(2026-11-15에 5.6에서 옮겨 3절·19.3절을 다시 확인했다). UE Zen Storage Server에 대응하는 Rocks의 에셋 너겟 서버를 정한다. 에디터·쿠커·명령행이 함께 쓰는 사용자별 로컬 캐시 프로세스이고, 같은 프로그램을 팀 공유 서버로도 띄운다. 구현은 .NET 10·C#이다(사용자 결정 — 13절). 너겟 키·값의 의미는 [에셋 시스템](AssetSystem/09-AssetNuggets.ko.md) 9절, 계층 구조는 [구현 계획](EngineImplementationPlan.ko.md) 9.1·27.2절을 따른다. 이 문서가 바꾸는 다른 문서의 내용은 17절에 모은다(아직 반영하지 않았다).
 
+> **콘텐츠 해시 전환(예정, [ContentHash](ContentHash.ko.md), 2026-11-28).** 이 문서가 콘텐츠 주소·동일성 판정으로 정한 SHA-256 값(저장 byte·원본·조각 해시, 조각 해시 표, Record 본문 해시(3절 51행 결정, 5.1·5.2, 6.7 비용 근거, 891행의 "공유 프레임워크만으로 SHA-256" 결정은 CH8대로 BLAKE3 NuGet으로 바뀐다. 토큰·설치 경로 SHA-256은 남는다))은 `ContentHash`(BLAKE3-256, 32 byte)로 바뀐다. 하위 호환 없이 일괄 B(CH-B3b)에서 한 번에 바뀌고, 그때 본문과 형식 버전을 고친다. 외부 무결성·프로토콜 SHA-256(CH5)은 남는다.
+
 원칙: 기반이 부족하면 우회하지 않고 보강한다. 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기는 AssetSystem과 같다 — **구현**(동작·시험), **계약**(API·형식이 있고 호출하면 `Unsupported`·`UnsupportedCapability`), **후속**(API도 없음). 지금은 설계 단계이며 구현은 없다.
 
 ## 1. 이름·역할·불변식
@@ -634,7 +636,7 @@ Build 의존 순환의 SCC 구성원은 함께 만들어지므로 **SCC 하나�
 |---|---|---|
 | `Process`: 분리 실행(10.4절 규칙)·(pid, 시작 시각) 정체·생존 확인·권한 상승 여부 | PlatformBase | PlatformLayer P1 "프로세스와 pipe", UE `FPlatformProcess`. 임포트 worker process(AssetSystem 17절)도 쓴다. Android는 `Unsupported` |
 | `LocalChannel`: Windows named pipe·POSIX UDS 클라이언트, 완료 기반 API(`WorkerTaskEvent`로 이음), 서버 정체 조회(pipe 소유자 SID·서버 프로세스 SID / peer uid) | PlatformBase | UE `FPlatformNamedPipe`가 Core HAL에 있다. 구현은 Windows overlapped IO(AsyncFile과 같은 IOCP), POSIX는 v1에서 전용 IO 스레드(후속 kqueue). TCP·UDP 소켓은 넣지 않는다(NetCore 계획 — 계획 §3.1) |
-| SHA-256 하드웨어 경로(SHA-NI·ARMv8 SHA2) + 스칼라 차등 시험 | Core Encoding | 클라이언트는 Put마다 저장 byte·원본·조각을 해시한다. 지금 Core 구현은 스칼라뿐이다 |
+| SHA-256 하드웨어 경로(SHA-NI·ARMv8 SHA2) + 스칼라 차등 시험 | Core Encoding | 클라이언트는 Put마다 저장 byte·원본·조각을 해시한다. 셰이더 워커 시작 비용 때문에 앞당겨 구현한다(2026-11-28, [CoreDataFoundations](CoreDataFoundations.ko.md) 6절 C7) |
 | TLS·HTTP | 넣지 않는다 | 원격은 로컬 Rockpile이 대신한다 |
 
 ## 13. .NET 구현

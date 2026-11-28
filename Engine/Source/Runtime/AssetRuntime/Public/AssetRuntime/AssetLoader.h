@@ -58,8 +58,9 @@ public:
     using Job = void (*)(void* context) noexcept;
 
     // job(context)를 어느 스레드에서 정확히 한 번 실행한다. 실패(자원·종료)면 실행하지 않고 그
-    // 오류를 돌려준다. Game 스레드에서 불리며 그동안 로더 상태를 바꾸는 호출은
-    // WrongContext다(11.6절 18).
+    // 오류를 돌려준다. 아무 스레드에서 동시에 불릴 수 있다(로더는 Game 스레드에서, 스트리밍
+    // bulk는 worker·IO 완료 스레드에서도 부른다 — AS 20.6 8). 로더가 부르는 동안 로더 상태를
+    // 바꾸는 호출은 WrongContext다(11.6절 18).
     virtual Result<void> Run(Job job, void* context) noexcept = 0;
 
 protected:

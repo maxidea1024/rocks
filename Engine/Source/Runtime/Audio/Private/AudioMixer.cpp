@@ -1,5 +1,7 @@
 #include <Audio/AudioMixer.h>
 
+#include "AudioMixerInternal.h"
+
 #include <Audio/AudioStreamRing.h>
 #include <Audio/Panner.h>
 #include <Core/Assert.h>
@@ -12,6 +14,18 @@
 
 namespace rocks::audio {
 
+using mixer_internal::BitsFloat;
+using mixer_internal::ClampCounted;
+using mixer_internal::CopyView;
+using mixer_internal::FloatBits;
+using mixer_internal::GenerationDelta;
+using mixer_internal::HighWordShift;
+using mixer_internal::LowWordMask;
+using mixer_internal::NextGeneration;
+using mixer_internal::PlanBufferCount;
+using mixer_internal::PlanWordBufferBits;
+using mixer_internal::SeqlockWritingBit;
+using mixer_internal::WithChannels;
 using platform::AtomicLoad;
 using platform::AtomicStore;
 using platform::AtomicThreadFence;
@@ -31,9 +45,7 @@ constexpr float StereoToMonoGain = 0.707f;
 // 스트림 refill 수위 = 링 용량 / 이 값이다(3.40.1절 — 절반).
 constexpr uint32 StreamRefillDivisor = 2;
 
-// 64비트 원자 word의 상위 32비트 자리와 하위 mask다(mailbox·stop-all·terminal 묶음).
-constexpr uint32 HighWordShift = 32;
-constexpr uint64 LowWordMask = NumericLimits<uint32>::Max();
+// terminal word의 사유 mask다.
 constexpr uint64 ReasonMask = NumericLimits<uint8>::Max();
 
 // seqlock 내용 word 색인이다.
@@ -49,6 +61,7 @@ enum SeqlockWord : uint32 {
     SeqlockNonSpatialized,
     SeqlockLowPass,
     SeqlockHighPass,
+    SeqlockAttenuation,
     SeqlockWordCount
 };
 
@@ -69,9 +82,6 @@ uint32 PauseRampFrames(float current, float target) noexcept {
     return static_cast<uint32>(math::Ceil(distance * static_cast<float>(PauseFadeFrames)));
 }
 
-// seqlock version의 홀수 bit(쓰는 중)다.
-constexpr uint32 SeqlockWritingBit = 1;
-
 bool IsValidBlockFrames(uint32 frames) noexcept {
     return frames >= MinMixBlockFrames && frames <= MaxMixBlockFrames &&
            (frames & (frames - 1)) == 0;
@@ -86,33 +96,8 @@ bool IsValidParams(const AudioVoiceParams& params) noexcept {
            math::IsFinite(params.nonSpatializedAmount) && params.nonSpatializedAmount >= 0.0f &&
            params.nonSpatializedAmount <= 1.0f && math::IsFinite(params.lowPassCutoffHz) &&
            params.lowPassCutoffHz >= 0.0f && math::IsFinite(params.highPassCutoffHz) &&
-           params.highPassCutoffHz >= 0.0f;
-}
-
-// 범위 밖 값을 자르거나 기본값으로 바꾸고 바꾼 수를 센다(실시간 경로는 실패를 돌려줄 곳이 없다).
-float ClampCounted(float value, float minimum, float maximum, float fallback,
-                   uint64& counter) noexcept {
-    if (!math::IsFinite(value)) {
-        ++counter;
-        return fallback;
-    }
-
-    if (value < minimum || value > maximum) {
-        ++counter;
-        return math::Clamp(value, minimum, maximum);
-    }
-
-    return value;
-}
-
-uint32 NextGeneration(uint32 generation) noexcept {
-    // 0은 무효 handle이라 건너뛴다.
-    return generation + 1 == 0 ? 1 : generation + 1;
-}
-
-// generation 차이(부호 있음)다. 양수면 a가 b보다 새롭다(3.23.1절 — 2^31 한계).
-int32 GenerationDelta(uint32 a, uint32 b) noexcept {
-    return static_cast<int32>(a - b);
+           params.highPassCutoffHz >= 0.0f && math::IsFinite(params.attenuationGain) &&
+           params.attenuationGain >= 0.0f && params.attenuationGain <= MaxAttenuationGain;
 }
 
 // loop 구간의 [시작, 끝)이다. 0/0이면 clip 전체다.
@@ -127,18 +112,8 @@ void LoopRange(const AudioClipDesc& desc, uint32& begin, uint32& end) noexcept {
     end = desc.loopEnd;
 }
 
-PlanarView WithChannels(PlanarView view, uint32 channels) noexcept {
-    view.channelCount = channels;
-    return view;
-}
-
-uint32 FloatBits(float value) noexcept {
-    return platform::BitCast<uint32>(value);
-}
-
-float BitsFloat(uint32 bits) noexcept {
-    return platform::BitCast<float>(bits);
-}
+// 처음 plan(Master 하나)의 일련번호다. 빈 plan 버퍼는 0이라 처음부터 "채택보다 오래됨"이다.
+constexpr uint64 InitialPlanSerial = 1;
 
 } // namespace
 
@@ -147,8 +122,10 @@ static_assert(sizeof(AudioMixerCounters) % sizeof(uint64) == 0,
               "AudioMixerCounters must hold only uint64 fields");
 
 AudioMixer::AudioMixer(const AudioMixerConfig& config, Allocator& allocator) noexcept
-    : config_(config), controlVoices_(allocator), clips_(allocator), sharedVoices_(allocator),
-      voices_(allocator) {
+    : config_(config), controlVoices_(allocator), clips_(allocator), controlBuses_(allocator),
+      planLinkOf_(allocator), planDepth_(allocator), sharedVoices_(allocator),
+      sharedBuses_(allocator), plans_(allocator), voices_(allocator), busInputs_(allocator),
+      rtBuses_(allocator) {
 }
 
 Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
@@ -157,7 +134,8 @@ Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
         (config.layout != ChannelLayout::Mono && config.layout != ChannelLayout::Stereo) ||
         !IsValidBlockFrames(config.blockFrames) || config.maxVoices == 0 ||
         config.maxVoices > MaxMixerVoices || config.maxClips == 0 ||
-        config.maxClips > MaxMixerClips) {
+        config.maxClips > MaxMixerClips || config.maxBuses == 0 ||
+        config.maxBuses > MaxMixerBuses) {
         return Result<AudioMixer>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -204,7 +182,111 @@ Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
     mixer.inputScratch_ = Move(input.Value());
     mixer.voiceScratch_ = Move(voice.Value());
     mixer.master_ = Move(master.Value());
+    if (auto buses = mixer.CreateBuses(allocator); !buses) {
+        return Result<AudioMixer>::Failure(buses.Error());
+    }
+
     return Result<AudioMixer>::Success(Move(mixer));
+}
+
+Result<void> AudioMixer::CreateBuses(Allocator& allocator) noexcept {
+    // 버스 표·plan 버퍼·scratch를 미리 잡는다(3.45.3절 — 블록 처리와 제어 쪽은 할당하지 않는다).
+    const uint32 buses = config_.maxBuses;
+    const uint32 outputs = OutputChannelCount();
+    const uint32 frames = config_.blockFrames;
+    if (auto resized = controlBuses_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    if (auto resized = planLinkOf_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    if (auto resized = planDepth_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    if (auto resized = sharedBuses_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    if (auto resized = rtBuses_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    if (auto resized = busInputs_.TryResize(buses); !resized) {
+        return resized;
+    }
+
+    for (uint32 buffer = 0; buffer < PlanBufferCount; ++buffer) {
+        if (auto pushed = plans_.TryPushBack(BusPlan(allocator)); !pushed) {
+            return pushed;
+        }
+
+        BusPlan& plan = plans_[buffer];
+        if (auto resized = plan.order.TryResize(buses); !resized) {
+            return resized;
+        }
+
+        if (auto resized = plan.parent.TryResize(buses); !resized) {
+            return resized;
+        }
+
+        if (auto resized = plan.generation.TryResize(buses); !resized) {
+            return resized;
+        }
+
+        if (auto resized = plan.initial.TryResize(buses); !resized) {
+            return resized;
+        }
+    }
+
+    for (uint32 bus = MasterBusIndex + 1; bus < buses; ++bus) {
+        auto created = PlanarBuffer::TryCreate(outputs, frames, allocator);
+        if (!created) {
+            return Result<void>::Failure(created.Error());
+        }
+
+        busInputs_[bus] = Move(created.Value());
+    }
+
+    PlanarBuffer* const scratches[] = {&prePan_, &postPan_, &sendScratch_, &dryScratch_};
+    for (PlanarBuffer* scratch : scratches) {
+        auto created = PlanarBuffer::TryCreate(outputs, frames, allocator);
+        if (!created) {
+            return Result<void>::Failure(created.Error());
+        }
+
+        *scratch = Move(created.Value());
+    }
+
+    auto pre = PlanarBuffer::TryCreate(MaxClipChannels, frames, allocator);
+    if (!pre) {
+        return Result<void>::Failure(pre.Error());
+    }
+
+    auto curve = PlanarBuffer::TryCreate(1, frames, allocator);
+    if (!curve) {
+        return Result<void>::Failure(curve.Error());
+    }
+
+    preScratch_ = Move(pre.Value());
+    masterGainCurve_ = Move(curve.Value());
+    // Master 칸과 처음 plan(Master 하나)이다. RT는 처음부터 이 plan을 채택한 상태다.
+    controlBuses_[MasterBusIndex].generation = MasterBusGeneration;
+    controlBuses_[MasterBusIndex].acquired = true;
+    controlBuses_[MasterBusIndex].inLatestPlan = true;
+    BusPlan& initial = plans_[0];
+    initial.serial = InitialPlanSerial;
+    initial.generation[MasterBusIndex] = MasterBusGeneration;
+    initial.order[0] = MasterBusIndex;
+    initial.orderCount = 1;
+    rtBuses_[MasterBusIndex].generation = MasterBusGeneration;
+    planWord_ = InitialPlanSerial << PlanWordBufferBits;
+    adoptedPlanSerial_ = InitialPlanSerial;
+    publishedPlanSerial_ = InitialPlanSerial;
+    counters_.activeBuses = 1;
+    return Result<void>::Success();
 }
 
 // --- 제어 쪽: clip 표 ---
@@ -364,6 +446,13 @@ Result<AudioVoiceHandle> AudioMixer::AcquireVoice() noexcept {
 Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClipId clip,
                                                uint32 startFrame, bool loop,
                                                const AudioVoiceParams& params) noexcept {
+    return PreparePlay(voice, clip, startFrame, loop, params, MasterRoute());
+}
+
+Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClipId clip,
+                                               uint32 startFrame, bool loop,
+                                               const AudioVoiceParams& params,
+                                               const AudioVoiceRoute& route) noexcept {
     ControlVoice* slot = FindControl(voice);
     if (slot == nullptr || clip.index >= clips_.Size() || !clips_[clip.index].registered ||
         clips_[clip.index].generation != clip.generation) {
@@ -378,7 +467,8 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     const bool azimuthOnWide =
         params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels;
     if (slot->state != ControlState::Reserved || startFrame >= desc.frameCount ||
-        (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnWide) {
+        (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnWide ||
+        !ValidateRoute(route)) {
         return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -393,6 +483,8 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     ++clips_[clip.index].users;
     slot->clipIndex = clip.index;
     slot->state = ControlState::Submitted;
+    // 시작 라우팅은 Play 명령을 내기 전에 쓴다(명령 링 게시가 RT에 보이게 한다 — 3.45.5절).
+    sharedVoices_[voice.index].startRoute = route;
 
     AudioRtCommand command;
     command.type = AudioRtCommandType::Play;
@@ -507,7 +599,8 @@ Result<void> AudioMixer::PublishParams(AudioVoiceHandle voice,
         FloatBits(params.rightAzimuthDegrees),
         FloatBits(params.nonSpatializedAmount),
         FloatBits(params.lowPassCutoffHz),
-        FloatBits(params.highPassCutoffHz)};
+        FloatBits(params.highPassCutoffHz),
+        FloatBits(params.attenuationGain)};
     for (uint32 word = 0; word < SeqlockWords; ++word) {
         AtomicStore<MemoryOrder::Relaxed>(&shared.contents[word], words[word]);
     }
@@ -644,6 +737,8 @@ void AudioMixer::ReadUnread(uint32 index, uint32 generation,
 
         return;
     }
+
+    status.unreadReadFailed = true;
 }
 
 uint32 AudioMixer::CollectFinished(Span<AudioVoiceTerminal> out) noexcept {
@@ -692,6 +787,9 @@ AudioMixerCounters AudioMixer::CountersSnapshot() const noexcept {
     counters.streamStarvedFrames = words[next++];
     counters.streamStartDelayFrames = words[next++];
     counters.pausedVoices = words[next++];
+    counters.staleBusSends = words[next++];
+    counters.cutBusSends = words[next++];
+    counters.activeBuses = words[next++];
     return counters;
 }
 
@@ -862,6 +960,7 @@ bool AudioMixer::ReadSeqlock(uint32 index, uint32& generation, uint64& sequence,
     params.nonSpatializedAmount = BitsFloat(words[SeqlockNonSpatialized]);
     params.lowPassCutoffHz = BitsFloat(words[SeqlockLowPass]);
     params.highPassCutoffHz = BitsFloat(words[SeqlockHighPass]);
+    params.attenuationGain = BitsFloat(words[SeqlockAttenuation]);
     params.paused = ((words[SeqlockPanMode] >> PausedShift) & 1u) != 0;
     return true;
 }
@@ -896,6 +995,11 @@ void AudioMixer::ProcessSeqlocks() noexcept {
             slot.state == AudioVoiceState::Stopping) {
             ApplySeqlock(index, slot, false);
         }
+
+        // 시작 전 라우팅은 StartVoice가 순번으로 고른다(3.45.5절).
+        if (slot.state == AudioVoiceState::Playing || slot.state == AudioVoiceState::Stopping) {
+            ApplyRouteSeqlock(index, slot);
+        }
     }
 }
 
@@ -926,6 +1030,8 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
     params.highPassCutoffHz =
         ClampCounted(params.highPassCutoffHz, 0.0f, NumericLimits<float>::Max(),
                      defaults.highPassCutoffHz, clamped);
+    params.attenuationGain = ClampCounted(params.attenuationGain, 0.0f, MaxAttenuationGain,
+                                          defaults.attenuationGain, clamped);
     if (static_cast<uint32>(params.panMode) > static_cast<uint32>(AudioPanMode::Azimuth) ||
         (params.panMode == AudioPanMode::Azimuth && desc.channelCount > MaxAzimuthSourceChannels)) {
         // 방위각 패닝은 mono·stereo clip만이다(3.42.6절).
@@ -937,8 +1043,10 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
         immediate ? 0u : (rampFrames < MaxRatioInterpFrames ? rampFrames : MaxRatioInterpFrames);
     if (immediate) {
         slot.gain.Reset(params.gain);
+        slot.attenuation.Reset(params.attenuationGain);
     } else {
         slot.gain.SetTarget(params.gain, ramp);
+        slot.attenuation.SetTarget(params.attenuationGain, ramp);
     }
 
     double ratio = static_cast<double>(params.pitch) * static_cast<double>(desc.sampleRate) /
@@ -1029,6 +1137,7 @@ void AudioMixer::StartVoice(uint32 index, VoiceSlot& slot, const AudioRtCommand&
     slot.state = AudioVoiceState::Playing;
     // PreparePlay 뒤 Play 적용 전에 낸 출판도 바로 반영한다(3.23.2절).
     ApplySeqlock(index, slot, true);
+    StartRoute(index, slot, command.sequence);
     // 일시정지된 Play는 시작을 미룬다(3.44.5절). 풀린 구간에서 RenderVoice가 시작한다.
     slot.startDeferred = slot.params.paused;
     if (!slot.startDeferred) {
@@ -1247,14 +1356,16 @@ RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
     ROCKS_ASSERT(platform::IsRealtimeAudioFloatingPointEnvironment());
     const uint32 blockFrames = config_.blockFrames;
     ROCKS_ASSERT(interleavedOut.Size() == static_cast<usize>(blockFrames) * OutputChannelCount());
-    master_.Clear();
 
     const uint64 blockStart = mixFrame_;
     const uint64 blockEnd = blockStart + blockFrames;
-    // 블록 시작 순서: stop-all → stop mailbox → seqlock → 명령(3.23.7절).
+    // 블록 시작 순서: stop-all → stop mailbox → voice seqlock(파라미터·라우팅) → plan 채택 → 버스
+    // seqlock → 명령(3.23.7절·3.45.6절). 라우팅·Play가 새 버스를 가리키면 그 plan도 보인다.
     ProcessStopAll(blockStart);
     ProcessMailboxes(blockStart);
     ProcessSeqlocks();
+    AdoptPlan();
+    ProcessBusSeqlocks();
 
     uint32 segmentStart = 0;
     uint32 segmentCount = 1;
@@ -1297,6 +1408,17 @@ RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
     }
 
     RenderSegment(segmentStart, blockFrames - segmentStart);
+    ProcessBuses();
+    // 구간마다 모아 둔 마스터 gain 곡선을 Master 버스 출력에 곱한다(3.45.6절).
+    const float* curve = masterGainCurve_.Channel(0);
+    const PlanarView master = master_.View();
+    for (uint32 channel = 0; channel < master.channelCount; ++channel) {
+        float* samples = master.channels[channel];
+        for (uint32 frame = 0; frame < master.frameCount; ++frame) {
+            samples[frame] *= curve[frame];
+        }
+    }
+
     FinishMaster(interleavedOut);
     SignalStreamRefill();
     mixFrame_ = blockEnd;
@@ -1318,8 +1440,14 @@ void AudioMixer::RenderSegment(uint32 offset, uint32 frames) noexcept {
         }
     }
 
-    // 마스터 gain은 구간마다 건다. 블록 중간의 SetMasterGain이 앞 구간을 바꾸지 않게 한다.
-    masterGain_.Apply(master_.View().Slice(offset, frames));
+    // 마스터 gain은 구간마다 곡선에 모아 둔다. 블록 중간의 SetMasterGain이 앞 구간을 바꾸지 않게
+    // 한다. 곱은 버스 처리 뒤 Master 출력에 건다(3.45.6절).
+    const PlanarView curve = masterGainCurve_.View().Slice(offset, frames);
+    for (uint32 frame = 0; frame < frames; ++frame) {
+        curve.channels[0][frame] = 1.0f;
+    }
+
+    masterGain_.Apply(curve);
 }
 
 uint32 AudioMixer::FillInput(VoiceSlot& slot, uint32 frames) noexcept {
@@ -1452,6 +1580,8 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                 slot.fade.Advance(rest);
             }
 
+            // 소리를 내지 않으니 빠지는 send는 바로 비운다(3.45.5절).
+            FreeFinishedSends(slot, true);
             slot.unreadFrames += rest;
             produced = frames;
             break;
@@ -1512,20 +1642,53 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                 const PlanarView voice = WithChannels(voiceScratch_.View(rendered), sourceChannels);
                 const uint32 consumed = slot.resampler.Process(input, voice).Value();
                 AdvanceCursor(slot, consumed);
-                slot.lowPass.Process(voice);
-                slot.highPass.Process(voice);
+                // UE 순서(3.45.5절): gain·fade·pause gain까지가 pre, 필터와 감쇠 뒤가 post다.
                 slot.gain.Apply(voice);
                 slot.fade.Apply(voice);
                 if (pauseRamping) {
                     slot.pauseGain.Apply(voice);
                 }
+
+                const bool hasPre = HasPreSend(slot);
+                const PlanarView pre = WithChannels(preScratch_.View(rendered), sourceChannels);
+                if (hasPre) {
+                    CopyView(pre, voice);
+                }
+
+                slot.lowPass.Process(voice);
+                slot.highPass.Process(voice);
+                slot.attenuation.Apply(voice);
+                // pre는 같은 시작 ramp 상태의 사본으로 pan한다(두 단계가 같은 채널 맵 구간).
+                GainRamp preGains[MaxClipChannels][MaxClipChannels];
+                if (hasPre) {
+                    for (uint32 source = 0; source < MaxClipChannels; ++source) {
+                        for (uint32 output = 0; output < MaxClipChannels; ++output) {
+                            preGains[source][output] = slot.channelGains[source][output];
+                        }
+                    }
+                }
+
+                const PlanarView postPan = postPan_.View(rendered);
+                Clear(postPan);
                 for (uint32 source = 0; source < sourceChannels; ++source) {
                     for (uint32 output = 0; output < outputs; ++output) {
                         slot.channelGains[source][output].MixAdd(
-                            voice.channels[source], master_.Channel(output) + offset + produced,
-                            rendered);
+                            voice.channels[source], postPan.channels[output], rendered);
                     }
                 }
+
+                const PlanarView prePan = prePan_.View(rendered);
+                if (hasPre) {
+                    Clear(prePan);
+                    for (uint32 source = 0; source < sourceChannels; ++source) {
+                        for (uint32 output = 0; output < outputs; ++output) {
+                            preGains[source][output].MixAdd(pre.channels[source],
+                                                            prePan.channels[output], rendered);
+                        }
+                    }
+                }
+
+                MixSends(slot, postPan, hasPre ? &prePan : nullptr, offset + produced, rendered);
             }
 
             if (rendered < chunk) {
@@ -1542,6 +1705,8 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
                     slot.pauseGain.Advance(silent);
                 }
 
+                // 빠지는 send만 진행한다(무음이라 끝나면 비운다 — 3.45.5절).
+                AdvanceRemovingSends(slot, silent);
                 if (ending == AudioVoiceEndReason::NaturalEnd) {
                     ending = AudioVoiceEndReason::None;
                 }
@@ -1567,6 +1732,7 @@ void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint3
         }
     }
 
+    FreeFinishedSends(slot, false);
     // 읽지 않은 누적은 바뀌었거나 일시정지 중일 때만 게시한다(Running이면 값이 그대로다).
     if (slot.pauseState != PauseState::Running || slot.unreadDirty) {
         PublishUnread(index, slot, segmentStartFrame + frames);
@@ -1636,6 +1802,9 @@ void AudioMixer::PublishBlockEnd() noexcept {
 
     counters_.pausedVoices = paused;
     words[next++] = counters_.pausedVoices;
+    words[next++] = counters_.staleBusSends;
+    words[next++] = counters_.cutBusSends;
+    words[next++] = counters_.activeBuses;
     for (uint32 word = 0; word < CounterSnapshotWords; ++word) {
         AtomicStore<MemoryOrder::Relaxed>(&counterSnapshot_[word], words[word]);
     }

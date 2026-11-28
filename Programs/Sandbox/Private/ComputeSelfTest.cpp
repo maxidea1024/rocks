@@ -2,7 +2,7 @@
 #include "SandboxShaders.h"
 
 #include <Core/Containers/Array.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/FrameArena.h>
 #include <Platform/Memory.h>
 #include <RenderBase/ComputeDispatch.h>

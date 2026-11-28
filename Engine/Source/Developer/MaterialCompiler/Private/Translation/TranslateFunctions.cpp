@@ -5,7 +5,7 @@
 #include "FunctionNodeNames.h"
 
 #include <Base/NumericLimits.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <MaterialSchema/MaterialAssetReference.generated.h>

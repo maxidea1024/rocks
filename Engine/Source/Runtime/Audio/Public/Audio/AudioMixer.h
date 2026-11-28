@@ -12,8 +12,9 @@
 // 믹서 코어다(Docs/Design/AudioSystem 3.22–3.23절, UE FMixerDevice·FMixerSourceManager 대응).
 //
 // 두 면이 있고 서로 다른 스레드에서 불러도 된다(3.23절 스레드 경계).
-// - 제어 쪽(제어 스레드 하나): AcquireVoice·PreparePlay·Make*·PublishParams·RequestStop·StopAll·
-//   ReleaseVoice·RegisterClip·UnregisterClip·QueryVoice·CollectFinished·CountersSnapshot·
+// - 제어 쪽(제어 스레드 하나): AcquireVoice·PreparePlay·Make*·PublishParams·PublishRoute·
+//   RequestStop·StopAll·ReleaseVoice·RegisterClip·UnregisterClip·QueryVoice·CollectFinished·
+//   AcquireBus·ReleaseBus·PublishBusParams·PublishBusPlan·AdoptedPlanSerial·CountersSnapshot·
 //   CompletedMixFrame. 제어 슬롯만 쓰고, RT와는 원자값(seqlock·mailbox·epoch·시작/terminal·ACK)과
 //   명령으로만 주고받는다. 할당하지 않는다(표는 생성 때 고정).
 // - 렌더 쪽(RT 스레드 하나): RenderBlock. 블록 하나(Q frame)를 만든다. 할당·대기·로그가 없다.
@@ -80,8 +81,16 @@ public:
     //   시작하지 않는다(시작 시각은 실제 시작 블록 frame이다).
     // - Reserved가 아닌 voice, startFrame ≥ frameCount, loop인데 startFrame ≥ loop 끝, 범위 밖
     //   파라미터, stereo clip의 Azimuth는 InvalidArgument.
+    // - route(3.45.5절): 시작 라우팅이다. 가장 최근에 게시한 plan에 없는 버스, 같은 버스 중복,
+    //   범위 밖 값은 InvalidArgument다. route가 없는 형태는 {Master, level 1, post}다.
+    Result<AudioRtCommand> PreparePlay(AudioVoiceHandle voice, AudioClipId clip, uint32 startFrame,
+                                       bool loop, const AudioVoiceParams& params,
+                                       const AudioVoiceRoute& route) noexcept;
     Result<AudioRtCommand> PreparePlay(AudioVoiceHandle voice, AudioClipId clip, uint32 startFrame,
                                        bool loop, const AudioVoiceParams& params) noexcept;
+
+    // Master 하나로 가는 기본 라우팅이다(level 1, post, 필터 없음).
+    static AudioVoiceRoute MasterRoute() noexcept;
 
     // PreparePlay로 만든 Play 명령을 장치에 보내지 않고 버린다(명령 링이 차서 미뤘던 Play를 제어
     // 쪽이 거둘 때 — Docs/Design/AudioSystem 3.41.1절). voice는 Reserved로 돌아가고(ReleaseVoice로
@@ -104,6 +113,43 @@ public:
     // 최신 파라미터를 seqlock 슬롯에 출판한다(3.23.2절). 다음 블록 시작에 DefaultParamRampFrames로
     // 적용된다. 거부 규칙은 MakeSetParams와 같다.
     Result<void> PublishParams(AudioVoiceHandle voice, const AudioVoiceParams& params) noexcept;
+
+    // 바뀐 라우팅을 라우팅 seqlock에 순번과 함께 출판한다(3.45.5절). 다음 블록 시작에 적용된다.
+    // 같은 버스의 level·필터 변화와 새 send는 DefaultParamRampFrames로 ramp하고, 빠진 send는 0으로
+    // ramp한 뒤 칸을 비운다. 거부 규칙은 MakeStop과 route 규칙(PreparePlay)을 합친 것이다.
+    Result<void> PublishRoute(AudioVoiceHandle voice, const AudioVoiceRoute& route) noexcept;
+
+    // --- 제어 쪽: 버스(3.45.3–3.45.4절) ---
+
+    // Master 칸 handle이다. 늘 plan에 있고 놓을 수 없다.
+    static AudioBusHandle MasterBus() noexcept {
+        return AudioBusHandle{MasterBusIndex, MasterBusGeneration};
+    }
+
+    // 빈 버스 칸을 잡는다. plan에 넣기 전까지 RT가 보지 않는다. 칸이 없으면 CapacityExceeded.
+    Result<AudioBusHandle> AcquireBus() noexcept;
+
+    // 버스 칸을 놓고 generation을 올린다. Master는 InvalidArgument, 이전 generation은 StaleHandle,
+    // 가장 최근 plan에 있거나 RT가 그 칸이 빠진 plan을 아직 채택하지 않았으면 Busy.
+    Result<void> ReleaseBus(AudioBusHandle bus) noexcept;
+
+    // 버스 파라미터를 버스 seqlock에 출판한다. 다음 블록 plan 채택 뒤 읽고 한 블록(Q frame)에 걸쳐
+    // ramp한다(그 generation이 같은 블록에 처음 들어오면 바로). 값이 [0, MaxBusGain] 밖이거나
+    // 비유한이면 InvalidArgument, 잡지 않은 칸·이전 generation은 StaleHandle.
+    Result<void> PublishBusParams(AudioBusHandle bus, const AudioBusParams& params) noexcept;
+
+    // 버스 graph plan을 게시한다(3.45.4절). links는 Master를 뺀 모든 버스다. 버스 중복·없는 부모·
+    // 순환·Master·범위 밖 첫 값은 InvalidArgument, 잡지 않은 칸·이전 generation은 StaleHandle,
+    // 채택되지 않은 plan이 MaxPendingPlans개면 Busy(다음에 다시 낸다).
+    Result<void> PublishBusPlan(Span<const AudioBusLink> links) noexcept;
+
+    // RT가 마지막으로 채택한 plan 일련번호다(ACK). 처음 plan(Master 하나)은 1이다.
+    uint64 AdoptedPlanSerial() const noexcept;
+
+    // 가장 최근에 게시한 plan 일련번호다.
+    uint64 PublishedPlanSerial() const noexcept {
+        return publishedPlanSerial_;
+    }
 
     // stop mailbox에 쓴다(3.23.3절). 다음 블록 시작에 적용된다. 거부 규칙은 MakeStop과 같다.
     Result<void> RequestStop(AudioVoiceHandle voice, uint32 fadeFrames) noexcept;
@@ -131,7 +177,8 @@ public:
 
     // --- 렌더 쪽 ---
 
-    // 블록 하나를 렌더한다(3.22.6절, 3.23.7절 순서: stop-all → mailbox → seqlock → 명령).
+    // 블록 하나를 렌더한다(3.22.6절, 3.45.6절 순서: stop-all → mailbox → voice seqlock(파라미터·
+    // 라우팅) → plan 채택 → 버스 seqlock → 명령, 블록 끝에 버스 처리 → 마스터).
     // - commands: (mixFrame, sequence) 오름차순, ImmediateMixFrame 없음(어기면 assert).
     // - interleavedOut: Q × OutputChannelCount() float(다르면 assert).
     // 반환: 앞에서부터 소비한 명령 수. 블록 끝 이후 명령과 구간 상한을 넘는 명령은 남긴다.
@@ -190,6 +237,21 @@ private:
         ResumingIn
     };
 
+    // voice의 send 칸이다(RT 스레드만 쓴다 — 3.45.5절). used이고 active가 아니면 빠지는 중이다.
+    struct SendSlot {
+        AudioBusHandle bus;
+        GainRamp level{0.0f};
+        AudioSendStage stage = AudioSendStage::PostAttenuation;
+        bool used = false;
+        bool active = false;
+        bool lowPassEnabled = false;
+        bool highPassEnabled = false;
+        // 빠지기 시작한 순서다(넘칠 때 가장 오래된 칸을 끊는다).
+        uint64 removalSerial = 0;
+        OnePoleLowPass lowPass;
+        OnePoleHighPass highPass;
+    };
+
     // RT 스레드만 쓴다.
     struct VoiceSlot {
         uint32 generation = 0;
@@ -219,14 +281,24 @@ private:
         OnePoleLowPass lowPass;
         OnePoleHighPass highPass;
         GainRamp gain;
+        GainRamp attenuation;
         GainRamp fade;
         // [원본 채널][출력 채널] 이득 ramp다.
         GainRamp channelGains[MaxClipChannels][MaxClipChannels];
+        // 라우팅(3.45.5절): send 칸, 마지막으로 본 라우팅 seqlock version과 적용한 순번.
+        SendSlot sends[MaxVoiceSendSlots];
+        uint32 lastRouteVersion = 0;
+        uint64 lastRouteSequence = 0;
     };
 
-    // seqlock 내용 word 수다: generation, 순번 하위·상위, 파라미터 7개(비트 패턴). AudioMixer.cpp의
+    // seqlock 내용 word 수다: generation, 순번 하위·상위, 파라미터 9개(비트 패턴). AudioMixer.cpp의
     // SeqlockWord 열거와 static_assert로 묶는다.
-    static constexpr uint32 SeqlockWords = 11;
+    static constexpr uint32 SeqlockWords = 12;
+
+    // 라우팅 seqlock 내용 word 수다: generation, 순번 하위·상위, send 수, send마다 RouteSendWords.
+    static constexpr uint32 RouteSendWords = 6;
+    static constexpr uint32 RouteHeaderWords = 4;
+    static constexpr uint32 RouteWords = RouteHeaderWords + RouteSendWords * MaxVoiceSends;
 
     // 계수 스냅샷 word 수다. AudioMixerCounters의 uint64 필드 수와 static_assert로 묶는다.
     static constexpr uint32 CounterSnapshotWords = sizeof(AudioMixerCounters) / sizeof(uint64);
@@ -253,6 +325,58 @@ private:
         uint32 unreadPaused = 0;
         uint64 unreadFrames = 0;
         uint64 unreadAsOfFrame = 0;
+        // 라우팅 seqlock(3.45.5절 — 제어가 쓰고 RT가 읽는다).
+        uint32 routeVersion = 0;
+        uint32 routeContents[RouteWords] = {};
+        // 시작 라우팅이다. PreparePlay가 Play 명령을 내기 전에 쓰고 그 수명 동안 다시 쓰지 않는다
+        // (명령 링 게시가 RT에 보이게 한다 — 원자값이 아니다).
+        AudioVoiceRoute startRoute;
+    };
+
+    // 제어 쪽 버스 칸이다.
+    struct ControlBus {
+        uint32 generation = 1;
+        bool acquired = false;
+        // 가장 최근에 게시한 plan에 있다.
+        bool inLatestPlan = false;
+        // 이 칸이 빠진 첫 plan 일련번호다(0 = 빠진 적 없음).
+        uint64 removedAtSerial = 0;
+    };
+
+    // 버스 seqlock 내용 word 수다: generation, output, wet, dry.
+    static constexpr uint32 BusSeqlockWords = 4;
+
+    // 제어와 RT가 원자값으로만 주고받는 버스 칸이다.
+    struct SharedBus {
+        uint32 version = 0;
+        uint32 contents[BusSeqlockWords] = {};
+    };
+
+    // 미리 잡은 plan 버퍼다(3.45.4절). 게시 뒤에는 다시 쓸 때까지 바꾸지 않는다. 칸 색인 배열은
+    // maxBuses 크기이고 generation 0은 plan에 없다는 뜻이다.
+    struct BusPlan {
+        explicit BusPlan(Allocator& allocator) noexcept
+            : order(allocator), parent(allocator), generation(allocator), initial(allocator) {
+        }
+
+        uint64 serial = 0;
+        uint32 orderCount = 0;
+        Array<uint32> order;
+        Array<uint32> parent;
+        Array<uint32> generation;
+        Array<AudioBusParams> initial;
+    };
+
+    // RT 쪽 버스 칸이다.
+    struct RtBus {
+        uint32 generation = 0;
+        GainRamp output;
+        GainRamp wet;
+        GainRamp dry{0.0f};
+        bool touched = false;
+        // 이 generation이 이번 블록에 처음 들어왔다(버스 seqlock 값을 ramp 없이 쓴다).
+        bool fresh = false;
+        uint32 lastVersion = 0;
     };
 
     AudioMixer(const AudioMixerConfig& config, Allocator& allocator) noexcept;
@@ -294,16 +418,48 @@ private:
     void SignalStreamRefill() noexcept;
     void FinishMaster(Span<float> interleavedOut) noexcept;
     void PublishBlockEnd() noexcept;
+    // 버스 표·plan 버퍼·scratch를 만든다(TryCreate에서만).
+    Result<void> CreateBuses(Allocator& allocator) noexcept;
+
+    // 라우팅·버스(AudioMixerBuses.cpp).
+    Result<void> ValidateRoute(const AudioVoiceRoute& route) const noexcept;
+    void WriteRouteSeqlock(AudioVoiceHandle voice, const AudioVoiceRoute& route) noexcept;
+    bool ReadRouteSeqlock(uint32 index, uint32& version, uint32& generation, uint64& sequence,
+                          AudioVoiceRoute& route) noexcept;
+    void ApplyRouteSeqlock(uint32 index, VoiceSlot& slot) noexcept;
+    void StartRoute(uint32 index, VoiceSlot& slot, uint64 playSequence) noexcept;
+    void ApplyRoute(VoiceSlot& slot, const AudioVoiceRoute& route, bool immediate) noexcept;
+    void MixSends(VoiceSlot& slot, const PlanarView& post, const PlanarView* pre, uint32 offset,
+                  uint32 frames) noexcept;
+    void AdvanceRemovingSends(VoiceSlot& slot, uint32 frames) noexcept;
+    void FreeFinishedSends(VoiceSlot& slot, bool all) noexcept;
+    bool HasPreSend(const VoiceSlot& slot) const noexcept;
+    bool IsSilentState(const VoiceSlot& slot) const noexcept;
+    void AdoptPlan() noexcept;
+    void ProcessBusSeqlocks() noexcept;
+    void ProcessBuses() noexcept;
+    PlanarView BusInput(uint32 index) noexcept;
 
     AudioMixerConfig config_;
     // 제어 스레드 상태.
     Array<ControlVoice> controlVoices_;
     Array<ClipSlot> clips_;
+    Array<ControlBus> controlBuses_;
+    // plan 게시용 scratch(칸 → links 색인, 깊이)다.
+    Array<uint32> planLinkOf_;
+    Array<uint32> planDepth_;
+    uint64 publishedPlanSerial_ = 0;
     uint64 nextSequence_ = 0;
     uint32 nextVoiceSearch_ = 0;
     uint32 controlStopAllEpoch_ = 0;
     // 공유 원자값.
     Array<SharedVoice> sharedVoices_;
+    Array<SharedBus> sharedBuses_;
+    Array<BusPlan> plans_;
+    // 게시한 plan {일련번호:56, 버퍼 색인:8}이다(제어 → RT).
+    uint64 planWord_ = 0;
+    // RT가 채택한 plan 일련번호다(RT → 제어).
+    uint64 adoptedPlanSerial_ = 0;
     uint64 stopAllWord_ = 0;
     // RT가 마지막으로 처리한 stop-all epoch다(RT → 제어). 제어는 아직 처리되지 않은 epoch의 fade와
     // 새 fade 중 짧은 쪽을 낸다.
@@ -317,6 +473,18 @@ private:
     PlanarBuffer inputScratch_;
     PlanarBuffer voiceScratch_;
     PlanarBuffer master_;
+    // 버스 입력 버퍼(칸 0은 master_)와 RT 버스 칸, 채택한 plan 버퍼 색인이다.
+    Array<PlanarBuffer> busInputs_;
+    Array<RtBus> rtBuses_;
+    uint32 rtPlan_ = 0;
+    // voice send scratch(pre 사본, pre·post pan 출력, send 필터 사본)와 dry 사본, 마스터 gain 곡선.
+    PlanarBuffer preScratch_;
+    PlanarBuffer prePan_;
+    PlanarBuffer postPan_;
+    PlanarBuffer sendScratch_;
+    PlanarBuffer dryScratch_;
+    PlanarBuffer masterGainCurve_;
+    uint64 nextRemovalSerial_ = 0;
     DynamicsProcessor limiter_;
     GainRamp masterGain_;
     uint64 mixFrame_ = 0;

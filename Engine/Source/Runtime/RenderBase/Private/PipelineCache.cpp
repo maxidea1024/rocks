@@ -1,6 +1,6 @@
 #include <RenderBase/PipelineCache.h>
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <ShaderCore/ShaderBindingLayout.h>
 #include <string.h>
 

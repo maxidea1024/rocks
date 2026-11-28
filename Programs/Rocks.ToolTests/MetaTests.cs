@@ -112,6 +112,7 @@ internal static partial class MetaTests
         RegisterSparksFunctions(context);
         RegisterSparksEvents(context);
         RegisterNotify(context);
+        RegisterSetters(context);
         RegisterSubobjects(context);
         RegisterDependencyRecords(context);
     }

@@ -8,7 +8,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <GraphicsTypes/GraphicsBackend.h>
 #include <GraphicsTypes/GraphicsPlatform.h>
 #include <Meta/GeneratedType.h>

@@ -1,6 +1,6 @@
 #include <TestSupport/Test.h>
 #include <Core/Encoding/Base64.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 
 namespace rocks::test {
 namespace encoding_tests_file {

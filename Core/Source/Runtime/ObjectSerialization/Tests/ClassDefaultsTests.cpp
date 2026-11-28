@@ -1,7 +1,7 @@
 #include <ReflectionTestFixtures/ClassDefaultsFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Base/Compiler.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/GeneratedFieldCodec.h>

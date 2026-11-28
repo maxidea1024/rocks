@@ -72,8 +72,8 @@ struct ValueScene {
         BodyCreateDesc desc;
         desc.component = ObjectHandle{FakeRegistry, ++tags, FakeGeneration};
         desc.actor = desc.component;
-        desc.geometry.kind = BodyGeometryKind::Sphere;
-        desc.geometry.radius = SphereRadius;
+        const BodyShapeElement sphere = BodyShapeElement::Sphere(SphereRadius);
+        desc.geometry = Span<const BodyShapeElement>(&sphere, 1);
         desc.worldTransform.translation = Vec3d(static_cast<double>(tags) * BodySpacing, 0.0, 0.0);
         desc.motion = motion;
         desc.collision.collisionEnabled = CollisionEnabled::QueryAndPhysics;

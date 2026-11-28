@@ -74,7 +74,7 @@
 | PR12b | 쿠킹: `Placement`·쿠킹 bulk 원본 배치, `CookContext` sidecar sink, staging·게시 순서, 매니페스트 sidecar 칸 쓰기·병합, 부분 쿠킹 재사용, 정리·패키징 `.rbsc`, `asset-load-cooked --verify-sidecars`, 시험 | AssetCooker·AssetCommandlets |
 | PR12c | 런타임 손잡이: 범위 IO 인터페이스·기본 구현, `OpenStreamedBulk`·`StreamedBulk`·`BulkReadHandle`(제출 큐·우선순위·취소·블록 해시·worker callback·파일 계수), 종료 계약, 시험 | AssetRuntime·EngineAssets |
 
-**진행**: PR12a 구현 완료(2026-11-28 — 대조표 14.1.121). 구현 리뷰에서 블록 수 올림 넘침, 섹션 존재 규칙(BulkIndex ⇔ Bulk 또는 Sidecar), 0 byte Sidecar 배치(패키지 안), 쿠커 bulkRawBytes 합의 Sidecar 제외, `ExpectedSidecarHeader` 입력 계약, Sandbox TestContent 에디터 패키지 20개의 판 올림을 반영했다. PR12b 구현 완료(2026-11-28 — 20.5, 대조표 14.1.123, 구현 리뷰 반영: 20.2 2·20.1 6 표기 정정, sidecar 경로의 할당 실패·쓰기 실패 시험, 검증만이면 타입 모듈 생략). 지금 엔진 처리기 가운데 Sidecar를 고르는 것은 없다(오디오 AU6b가 처음 쓴다). 다음은 PR12c다.
+**진행**: PR12a 구현 완료(2026-11-28 — 대조표 14.1.121). 구현 리뷰에서 블록 수 올림 넘침, 섹션 존재 규칙(BulkIndex ⇔ Bulk 또는 Sidecar), 0 byte Sidecar 배치(패키지 안), 쿠커 bulkRawBytes 합의 Sidecar 제외, `ExpectedSidecarHeader` 입력 계약, Sandbox TestContent 에디터 패키지 20개의 판 올림을 반영했다. PR12b 구현 완료(2026-11-28 — 20.5, 대조표 14.1.123, 구현 리뷰 반영: 20.2 2·20.1 6 표기 정정, sidecar 경로의 할당 실패·쓰기 실패 시험, 검증만이면 타입 모듈 생략). PR12c 구현 완료(2026-11-28 — 20.6, 대조표 14.1.125, 구현 리뷰 반영: IO 취소를 뮤텍스 밖 핀으로, 제출 중 취소, 넓힌 범위 4 GiB 검사, worker 제출 실패 경로, 종료 순서). 지금 엔진 처리기 가운데 Sidecar를 고르는 것은 없다(오디오 AU6b가 처음 쓴다).
 
 단계마다 리뷰어 하나다. PR12a 판 올림 뒤 Sandbox TestContent 재쿠킹·14.1 golden 재생성을 같이 한다. PR12c가 끝나면 오디오 세션에 알린다(AU6b 착수 가능 — 배치·두 번째 bulk ref·Subsystem 순서·3.11.5·3.12.4·06-Phases 수정). 렌더 세션에는 텍스처 스트리밍이 같은 API를 쓸 수 있음을 알린다.
 
@@ -97,3 +97,32 @@
 7. **`asset-load-cooked --verify-sidecars`**(13.1절 문법에 더함): `asset-load-cooked --profile=<id> [<AssetId|경로 힌트>] [--project=<dir>] [--verify-sidecars]` — `--verify-sidecars`가 있으면 대상은 선택이다. 대상이 있으면 지금처럼 로드한 뒤, 매니페스트의 sidecarBytes가 있는 모든 항목을 AssetId 순으로 본다: 패키지 파일 크기·SHA-256(`CheckCookedPackageFile`) → `ReadPackage`(타입 축 없음) → `Sidecar` 섹션이 매니페스트와 같은지(`CheckCookedPackageContents`) → `VerifySidecarFile`(아래). 성공 줄 `asset-load-cooked: <profile> sidecars verified <수>`(대상이 있으면 로드 줄 뒤), 첫 실패는 `<진단 코드>: <AssetId>: error <오류> (sidecar)`·종료 코드 1이다.
 8. **`VerifySidecarFile(reader, contents, scratch, failure)`**(AssetRuntime `PackageReader.h`): sidecar 파일 전체를 scratch 크기 조각으로 흘려 읽어 파일 크기 = fileBytes, 머리(`ReadSidecarHeader`), 블록 SHA-256 전부, 전체 SHA-256 = 섹션 sha256을 본다. 다르면 `CorruptPackage` / `CorruptData`(section = `Sidecar`, detail = 첫 다른 블록 번호 또는 0), 읽기 오류는 그 오류(진단 None), 빈 scratch InvalidArgument. 범위 읽기 손잡이(PR12c)와 검증 명령이 같은 규칙을 쓴다.
 9. **시험**: 쿠킹 bulk 원본 배치(새 bulk·next), sidecar 출력 null이면 패키지 안, 실행기의 sidecar 칸(로더 대조 통과), 게시 순서(sidecar 게시 뒤 패키지 단계 실패 → 매니페스트가 새 sidecar를 가리키지 않음 — sink 결과 주입), 같은 이름 sidecar 대조·손상 교체, 재사용(sidecar만 지워짐·바뀜 → 다시 쿠킹, 같으면 재사용), 전체 쿠킹이 낡은 `.rbsc`만 지움·부분 쿠킹은 보존, `VerifySidecarFile`의 각 실패(크기·머리·블록·전체·IO·조각 크기 모두), 명령(성공 줄·대상과 함께·손상 sidecar·없는 sidecar·사용법), 같은 처리기를 두 번 쿠킹하면 패키지·sidecar byte가 같다. 배치는 너겟 키에 들어가지 않는다(키는 처리기 정체·설정·콘텐츠 해시뿐이다 — 20.1 6, 따로 시험하지 않는다).
+
+### 20.6 PR12c 구현 세부(2026-11-28 — 착수 때 정함)
+
+1. **범위 IO 경계** `StreamedBulkIo`(`AssetRuntime/StreamedBulk.h` — 로더의 `CookedPackageIo`와 같은 모양):
+   - `Open(path, pathBytes, header, fileBytes)`: 파일을 열고 크기와 머리 64 byte를 읽는다(막을 수 있다 — AssetManager는 worker 작업에서만 부른다, Game 스레드 동기 IO 없음). 결과는 구현의 파일 객체(`StreamedBulkFile*`).
+   - `Read(file, read)`: `[offset, offset + bytes)`를 read.destination에 읽기 시작한다. 완료는 아무 스레드에서 `read.complete(read, result)` 정확히 한 번(`Read`가 돌아오기 전이어도 된다), 즉시 실패는 반환값이다.
+   - `Cancel(read)`: 최선 노력(경합하면 원래 결과). 이 호출 안에서 complete를 부르지 않고, complete 뒤·Release 전 호출은 무동작이다(AssetManager는 자기 뮤텍스 밖에서 부르고 그동안 Release를 미룬다 — 11). `Close(file)`: 진행 중 읽기가 없을 때만.
+   - complete는 구현이 자기 lock을 쥔 채 부르지 않는다. AssetManager 쪽 complete는 검증 작업을 worker에 넣기만 한다(그 제출은 할당할 수 있다).
+   - 기본 구현 `AsyncStreamedBulkIo(allocator, AsyncIoContext&)` — `AsyncReadFile`(머리는 제출 뒤 `Wait`로 읽는다 — worker라 막아도 된다). EngineAssets가 자기 `io_`로 만들어 넘긴다.
+   - `AssetManagerConfig::streamedIo`(null이면 `OpenStreamedBulk`는 Unsupported)·`streamedMaxInFlight`(기본 `StreamedBulkMaxInFlight` = 8, 0은 InvalidArgument). worker는 로더 worker(`config.loader.worker`)를 같이 쓴다.
+2. **Package가 sidecar 정보를 쥔다**: 로드가 `PackageContents`의 Sidecar 섹션 값(fileBytes·sha256·hashBlockBytes·블록 해시 표)과 머리 기대값(bulkAlignment·Sidecar 항목 수·assetId)을 Package로 옮긴다. `Package::Sidecar()`가 `const PackageSidecarState*`(없으면 null)를 준다.
+3. **`AssetManager::OpenStreamedBulk(lease, ref)`**(Game 스레드): 검사 순서 — WrongThread, Shutdown 뒤 ShuttingDown, IO 없음 Unsupported, 회수·무효 lease StaleHandle, 빈 ref InvalidArgument, Package의 bulk 조회(없는 bulkId NotFound·다른 값 TypeMismatch), 패키지 안 bulk Unsupported, 할당 실패. sidecar 경로는 쿠킹 루트 + `AppendCookedSidecarPath`(매니페스트 항목)다. 같은 경로의 `SidecarFile`이 있으면 계수만 올리고, 없으면 만든다(경로·기대 크기·머리 기대값·블록 해시 사본 — IO 없음).
+4. **`StreamedBulk`**(move-only): `Bytes()`(rawBytes), `Read(offset, destination, priority, callback, context)` — 아무 스레드(AudioRT 제외 — 할당한다). 즉시 실패(callback 없음): 빈 StreamedBulk·null callback·`offset + destination.Size()`가 rawBytes를 넘음·블록 경계로 넓힌 읽기 범위(6 — 파일 끝에서 자름)가 4 GiB − 1 초과 InvalidArgument, Shutdown 뒤 ShuttingDown, 할당 실패 OutOfMemory. 0 byte 읽기는 IO 없이 Done(callback은 worker)이다.
+5. **제출 큐**: 우선순위(`BulkReadPriority` Low·Normal·High·Critical — UE `EAsyncIOPriorityAndFlags` 축약) 높은 것 먼저, 같으면 제출 순서. 진행 IO 수가 `streamedMaxInFlight` 미만일 때만 꺼낸다. 파일이 아직 열리지 않았으면 첫 요청이 worker 열기 작업을 걸고, 요청들은 그 파일을 기다린다(진행 수에 들지 않는다). 열기 결과: 크기 ≠ fileBytes·머리(`ReadSidecarHeader`) 다름 → CorruptData, IO 오류 → 그 오류다. 실패는 그 `SidecarFile`에 남아(마지막 계수가 놓일 때까지) 기다리던 요청과 뒤 요청 모두 그 오류다.
+6. **읽기**: 요청 범위를 덮는 블록 경계 범위(파일 끝에서 자름)를 scratch에 읽는다(제출 때 할당 — 실패는 OutOfMemory 결과). IO 완료는 worker 검증 작업을 건다: 읽은 byte < 요청 → CorruptData(짧은 읽기), 덮은 블록 SHA-256이 표와 다름 → CorruptData, 맞으면 요청 범위를 destination에 복사한다. 그다음 상태를 정하고 callback, scratch 해제, 진행 수를 내리고 큐를 다시 돈다.
+7. **`BulkReadHandle`**(move-only): `State()`(Pending·Done·Failed·Cancelled), `Cancel()`(아직 제출 전이면 큐에서 빼고 Cancelled — callback은 worker, 제출 뒤면 IO 취소 요청 — 결과는 Cancelled 또는 원래 결과, 검증 중·끝남은 무동작), `SetPriority(p)`(제출 전이면 큐 순서를 바꾼다). Pending인 손잡이의 소멸은 `platform::Fatal`. 상태는 callback 직전에 정해지므로 callback 안에서 자기 손잡이를 파괴할 수 있다 — 대신 Pending이 아님을 본 것이 callback이 돌아왔다는 뜻은 아니다(callback 끝은 callback 안에서 알린다). 손잡이는 StreamedBulk보다 오래 살 수 있다(요청이 SidecarFile을 계수한다).
+8. **callback 스레드**: 늘 worker다. worker 제출이 실패하면(종료·할당 실패) 원인을 로그에 남기고(조용한 대체 금지 — 이것이 유일한 예외 경로) 작업마다 다음과 같이 끝낸다.
+   - 열기 작업: 지금 스레드에서 열지 않는다(Game 스레드 동기 IO 금지). 파일이 그 제출 오류로 실패하고(5), 기다리던 요청은 그 오류다.
+   - 검증 작업(IO 완료 스레드): 해시를 그 스레드에서 하지 않는다. IO 결과가 성공이면 제출 오류로 바꾸고(이미 실패 — Cancelled·IO 오류 — 면 그 오류를 둔다) 지금 스레드에서 IO 자원을 돌려준 뒤 callback을 부른다.
+   - 끝내기 작업(0 byte·제출 전 취소·파일 실패·종료 취소 — 무거운 일 없음): 정한 결과 그대로 지금 스레드에서 callback을 부른다.
+   - `AssetLoaderWorker::Run`은 아무 스레드에서 동시에 불릴 수 있다(로더는 Game 스레드, 스트리밍 bulk는 worker·IO 완료 스레드).
+9. **파일 수명**: `SidecarFile`은 계수(StreamedBulk 수 + 살아 있는 요청 수)가 0이 되는 스레드에서 `Close`하고 지운다(진행 IO가 없음이 계수로 보장된다).
+10. **종료**: `AssetManager::Shutdown`이 새 Open·Read를 ShuttingDown으로 막고, 큐의 요청을 Cancelled로 먼저 끝내고(worker callback), 그다음 진행 IO에 하나씩 취소를 요청한 뒤(11 — 뮤텍스 밖, 할당 없음) 모든 요청의 callback이 돌아올 때까지 기다린다(명시 조건 변수 — 시간 대기 없음). 파괴 때 `SidecarFile`·요청이 남아 있으면(손잡이·StreamedBulk를 놓지 않음) `platform::Fatal`이다.
+11. **동시성**: 상태는 AssetManager 안 `StreamedBulkSystem` 하나가 뮤텍스로 지키고 callback·IO 호출은 모두 뮤텍스 밖에서 한다.
+   - 제출: `io.Read`가 성공해 돌아온 뒤에만 "IO 진행"으로 표시한다(완료·검증이 Read 반환보다 먼저 끝났으면 표시하지 않는다). 제출 동안 요청 계수를 하나 더 쥔다. 제출 중에 들어온 취소는 Read가 돌아온 뒤 보낸다.
+   - IO 취소: 뮤텍스 안에서 요청의 IO 핀(`ioPins`)을 올리고 뮤텍스 밖에서 `io.Cancel`을 부른 뒤 핀을 내린다. 검증 작업은 핀이 0이 될 때까지(조건 변수) `io.Release`를 미룬다.
+   - 시스템 수명: 끝나지 않은 요청·열기 작업 수(`outstanding`)를 Shutdown이 기다린다. IO 완료 스레드는 worker 제출 동안 이 수를 하나 더 쥔다(worker가 먼저 전달을 마쳐도 시스템이 산다). 이 수를 0으로 만드는 모든 경로(열기 예약 실패 포함 — 파일을 놓은 뒤 내린다)가 깨운다. `Read`·`Cancel`을 부른 사용자 스레드는 이 수를 쥐지 않는다. 대신 그 스레드는 StreamedBulk나 손잡이를 쥐고 있고, 그것이 남은 채 AssetManager를 파괴하면 Fatal(10)이다. 그래서 그 호출이 돌아오기 전에는 시스템이 파괴되지 않는다.
+   - 할당은 `config.loader.allocator`(다른 스레드 해제가 되는 allocator — 로더와 같은 요구)다.
+12. **시험**: 20.4 런타임 줄 전부. gate IO(완료를 쌓아 두고 시험이 내보냄)와 손으로 돌리는 worker로 순서를 정하고, 기본 구현은 디스크 sidecar로 범위·전체 읽기, 4 스레드 동시 읽기(시작 gate), IO 완료 실패(`AsyncIoFaultPoint::Completion`), 블록 해시 검출을 본다(실제 `WorkerSchedulerLoaderWorker`). worker 제출 실패(열기·검증·끝내기), scope Revoke 뒤 읽기·회수 lease StaleHandle, WrongThread, 진행 상한 0도 본다. 4 GiB 상한은 그만한 sidecar가 필요해 시험하지 않는다(검사는 6의 넓힌 범위 계산을 같이 쓴다).

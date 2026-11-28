@@ -18,6 +18,10 @@ struct PackageAccess {
         package.bulkStore_ = Move(store);
     }
 
+    static void SetSidecar(Package& package, UniquePtr<PackageSidecarState>&& sidecar) noexcept {
+        package.sidecar_ = Move(sidecar);
+    }
+
     static void SetAssetId(Asset& asset, AssetId id) noexcept {
         asset.assetId_ = id;
     }

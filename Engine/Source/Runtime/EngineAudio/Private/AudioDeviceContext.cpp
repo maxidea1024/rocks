@@ -576,6 +576,12 @@ void AudioDeviceContext::ApplyRemoveScene(const ControlCommand& command,
             continue;
         }
 
+        // 정지 꼬리 동안 다시 게시할 값은 fader를 곱한 마지막 값이다(일시정지 전환이 감쇠 전
+        // gain을 내지 않게).
+        if (detached.fading) {
+            detached.params.gain *= detached.fader.At(mixer_.CompletedMixFrame());
+        }
+
         detached.fading = false;
         if (detached.stopFade > SceneRemoveFadeFrames) {
             detached.stopFade = SceneRemoveFadeFrames;
@@ -740,13 +746,15 @@ void AudioDeviceContext::CollectStarted(ControlBatch& batch) noexcept {
             record.cursorMixFrame = startMixFrame;
             record.cursorUnread = 0;
             record.cursorRunning = true;
-            // 복귀 fade-in은 실제 시작에서 시작한다(3.41.1절). 일시정지 중이면 멈춘 시각에서 걸어
-            // 풀린 뒤 진행한다(3.44.3절).
+            // 복귀 fade-in은 실제 시작에서 시작한다(3.41.1절). 일시정지 중에 들어온 시작 frame만
+            // 멈춘 시각으로 자른다(풀린 뒤 진행 — 3.44.3절). Thread 렌더는 블록 도중에 시작을
+            // 게시하므로 완료 frame으로 자르면 fade-in이 앞당겨진다.
             if (record.resumePending) {
                 record.resumePending = false;
-                const uint64 at = RecordNow(record, mixer_.CompletedMixFrame());
-                record.resume.StartFrom(0.0f, 1.0f, startMixFrame < at ? startMixFrame : at,
-                                        ResumeFadeFrames);
+                const uint64 begin = record.paused && startMixFrame > record.pauseStartMixFrame
+                                         ? record.pauseStartMixFrame
+                                         : startMixFrame;
+                record.resume.StartFrom(0.0f, 1.0f, begin, ResumeFadeFrames);
                 record.paramsDirty = true;
             }
 
@@ -907,10 +915,14 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
     const float stereo =
         playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
-    params.gain = ClampGain(
-        record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
-        record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(at) *
-        record.resume.At(at) * record.concurrencyScale * record.stealFader.At(frame));
+    params.gain =
+        ClampGain(record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
+                  record.focus.volume * record.resume.At(at) * record.concurrencyScale *
+                  record.stealFader.At(frame));
+    // 거리 감쇠 × 차폐 볼륨은 필터 뒤에 건다(UE GetDistanceAndOcclusionAttenuation — 3.45.5절).
+    params.attenuationGain =
+        math::Clamp(record.spatial.attenuationGain * record.occlusionVolume.At(at), 0.0f,
+                    audio::MaxAttenuationGain);
     // LPF는 공기 흡수·차폐·분류·재생 값의 최솟값, HPF는 최댓값이다(UE
     // FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
     params.lowPassCutoffHz =

@@ -1,6 +1,6 @@
 # Core 데이터 기반 보강(A0-C) 설계
 
-기준일: 2026-11-27, 초안 4(2.2절 `Cos`·`Atan` 추가 — 커브 쿠킹 평가 CurveData D22). 초안 3(2026-11-12, 교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Encoding/Sha256.h`).
+기준일: 2026-11-28, 초안 5(6절 SHA-256 하드웨어 경로 C7 — 셰이더 워커 시작 비용 측정 근거, Rockpile R0 항목을 앞당김). 초안 4(2026-11-27, 2.2절 `Cos`·`Atan` 추가 — 커브 쿠킹 평가 CurveData D22). 초안 3(2026-11-12, 교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Hash/Sha256.h`).
 
 원칙: 표준 라이브러리 없이 Core에 구현한다. 외부 데이터(UCD·시험 데이터)는 고정 버전 원본을 저장소에 두고 생성기로 표를 만든다(라이선스 고지 포함). 결과가 호스트·CRT·locale에 따라 달라질 수 있는 연산은 쓰지 않는다.
 
@@ -205,3 +205,38 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 | C4(구현됨) | CRT 없는 숫자 변환(파서·최단 표기·정밀도 서식)과 NumberText·StringBuilder 교체, `number-tables` 생성기, 정책 `crt-number-conversion` | .NET 대조·어려운 사례 표·독립 기준값(이분 탐색·최단성) |
 | C5(구현됨) | JSON 읽기·쓰기, JSONTestSuite 데이터 라이브러리 | JSONTestSuite·왕복·고정점·한도·위치 시험 |
 | C6(구현됨) | RecordList(`WireType::RecordList`), Record 트리 공유 예산(`ArchiveBudget`, `OpenValue`·`OpenField`) | 형식·예산·실패 원자성 시험 |
+| C7 | SHA-256 하드웨어 경로(6절, Rockpile 12.6절 R0 항목을 앞당김) | 커널마다 NIST 벡터·스칼라 차등·선택 표·자가 시험 거부 시험, 정책 `target-intrinsics` 통과 |
+
+## 6. SHA-256 하드웨어 경로(C7, 2026-11-28)
+
+**근거(측정).** Development 셰이더 공급자의 워커는 시작할 때마다 저장소 도구 파일(dxcompiler 21.9 MB, d3dcompiler_47 4.9 MB, SPIRV-Tools 3.6 MB, spirv-cross 2.3 MB, 합계 약 33 MB)의 SHA-256을 확인한 뒤 적재한다(ShaderSystem 16.4절 끝). 같은 22 MB 파일을 이 기기(SHA-NI 있음)에서 해시한 시간은 다음과 같다.
+
+| 구현 | /Od(Debug) | /O2 |
+|---|---|---|
+| 지금의 스칼라 | 770 ms(28 MB/s) | 55 ms |
+| SHA-NI | 40 ms | 9 ms |
+
+Debug 워커 하나가 시작에 쓰는 약 1.5 s 가운데 약 1.2 s가 이 해시다. 너겟 키·에셋 원본 해시·쿠킹 결과 대조도 같은 `Sha256`을 쓰므로, 워커 쪽만 우회하지 않고 Core 구현에 하드웨어 경로를 넣는다. Rockpile R0(12.6절)가 계획한 항목과 같은 것이다.
+
+**구조.**
+- 내부 헤더 `Core/Private/Hash/Sha256Kernels.h`(namespace `rocks::detail`)는 블록 함수 `Sha256BlocksFunction = void(*)(uint32* state, const uint8* blocks, usize count) noexcept`를 정의한다. 64 byte 블록 `count`개를 차례로 압축하며, 경계는 블록 하나가 아니라 버퍼 단위다(Compiler.h target 속성 규칙).
+- 커널은 셋이다.
+  - `Scalar`: 지금 구현이다.
+  - `X64Sha`: SHA-NI(`SHA256RNDS2`·`SHA256MSG1`·`SHA256MSG2`)와 SSSE3 `PSHUFB`, SSE4.1 `PBLENDW`를 쓴다. 조건은 `cpu.sha && cpu.ssse3 && cpu.sse41`이다. 셋은 CPUID에서 서로 독립 bit라 PlatformBase `CpuFeatures`에 `ssse3`·`sse41` 칸을 더했다.
+  - `Arm64Sha2`: ARMv8 `SHA256H`·`SHA256H2`·`SHA256SU0`·`SHA256SU1`을 쓴다. 조건은 `cpu.armSha2`이다.
+- `SelectSha256Kernel(cpu)`는 조건을 만족하는 이 아키텍처의 커널을, 아니면 `Scalar`를 돌려준다. `Sha256KernelBlocks(kernel)`는 블록 함수를 돌려준다.
+- `CheckSha256Kernel(blocks)`는 알려진 답으로 자가 시험한다: 한 블록(`"abc"`), 두 블록(448 bit NIST 메시지), 여러 블록을 한 번에 넘긴 결과와 블록마다 넘긴 결과의 동치.
+- target 매크로는 `Base/Compiler.h`에 둔다: `ROCKS_TARGET_X64_SHA`(`"sha,sse4.1"`), `ROCKS_TARGET_ARM64_SHA2`(`"neon,sha2"`). 정책 `target-intrinsics`의 SHA 계열에 넣고, 쓰는 곳은 `Core/Private/Hash/`뿐이다(Crypto 5.3절).
+
+**선택.**
+- 첫 `Compress` 때 함수 안 static으로 한 번 고른다. 순서는 `QueryCpuFeatures()` → `SelectSha256Kernel` → `Scalar`가 아니면 `CheckSha256Kernel`이다. 결과는 프로세스 끝까지 같다.
+- 자가 시험은 결과가 틀린 커널을 거른다. CPU가 기능 bit를 보고했는데 명령이 실제로 없으면(일부 가상 머신의 마스킹) 시험 중 잘못된 명령 예외로 끝난다. 자가 시험이 실패하면 `Scalar`를 쓰고, `platform::WriteDiagnostic`으로 stderr에 영어 한 줄을 남긴다. Core는 Log에 의존하지 않으므로 이렇게 한다. 조용한 대체는 하지 않는다.
+- 하드웨어가 없는 CPU에서 `Scalar`를 쓰는 것은 기능 판별 결과이므로 진단을 남기지 않는다.
+- 공개 API(`Sha256`·`Sha256Digest`)와 출력 byte는 바뀌지 않는다.
+- 내부 콘텐츠 해시는 뒤이어 BLAKE3로 바뀐다([ContentHash](ContentHash.ko.md)). SHA-256은 외부 무결성(제3자 manifest의 upstream 대조)·Crypto·빌드 지문에 남으므로 이 하드웨어 경로도 남는다. 셰이더 도구 적재 검사는 manifest `blake3` 칸으로 옮긴다(ContentHash CH11).
+
+**시험(`Core/Tests/Sha256Tests.cpp`).**
+- 이 CPU가 실행할 수 있는 커널마다 NIST 벡터를 확인하고, 스칼라와 차등 비교한다(길이 0–4,160 byte, 블록 수 1–65를 한 번에 넘기는 경우 포함).
+- 선택 표: 기능이 없으면 `Scalar`, x64에서 `sha`에 `ssse3`·`sse41` 가운데 하나라도 없으면 `Scalar`, 셋 다 있으면 `X64Sha`, ARM64에서 `armSha2`가 있으면 `Arm64Sha2`.
+- 자가 시험은 결과를 한 bit 바꾸는 커널을 거부한다.
+- ARM64 커널은 이 기기에서 실행할 수 없으므로 macOS·Android에서 같은 시험으로 확인한다.

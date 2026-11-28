@@ -1,7 +1,7 @@
 #include "ImageFuzz.h"
 
 #include <Compression/Compression.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ImageCodec/ImageDecode.h>
 #include <Platform/Memory.h>

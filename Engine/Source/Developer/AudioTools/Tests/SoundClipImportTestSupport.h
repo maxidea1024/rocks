@@ -4,7 +4,7 @@
 #include <AudioAssets/AudioAssetsTypes.h>
 #include <AudioAssets/SoundClip.generated.h>
 #include <AudioAssets/SoundClipImportOptions.generated.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>

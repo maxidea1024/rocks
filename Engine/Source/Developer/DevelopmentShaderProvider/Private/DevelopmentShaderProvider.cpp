@@ -64,6 +64,16 @@ constexpr uint32 WatchIdleMilliseconds = 100;
 
 // 한 번의 재컴파일에 모으는 바뀐 원문 수의 상한이다(넘으면 모두 바뀐 것으로 본다).
 constexpr usize MaxPendingSources = 256;
+// 공급자 스케줄러 스레드 수의 상한이다(ShaderSystem 16.6절 SSD95 — 너겟 조회·쓰기와 job 준비 병렬).
+constexpr uint32 MaxProviderSchedulerWorkers = 16;
+
+// 공급자 스케줄러 스레드 수다: LogicalProcessorCount() - 1(호출 스레드 몫을 뺀다), 최소 1, 상한
+// MaxProviderSchedulerWorkers(엔진 GC 스케줄러의 자동 크기와 같은 모양).
+uint32 ProviderSchedulerWorkers() noexcept {
+    const uint32 processors = platform::LogicalProcessorCount();
+    const uint32 workers = processors > 1 ? processors - 1 : 1;
+    return workers < MaxProviderSchedulerWorkers ? workers : MaxProviderSchedulerWorkers;
+}
 
 // 실패 로그에 남기는 진단 수의 상한이다(나머지는 수만 센다).
 constexpr usize MaxLoggedDiagnostics = 32;
@@ -309,7 +319,9 @@ struct DevelopmentShaderProvider::State {
         // 여기서 시작한다. 첫 셰이더 요청은 렌더 lane에서 오므로 Prepare에서 시작하면 WrongThread다
         // (Docs/Design/ShaderSystem 12.3.1절 SSD16 "너겟 캐시를 쓰지 못하던 결함"). 실패해도
         // 공급자는 캐시 없이 동작한다.
-        if (auto started = scheduler.Start(); !started) {
+        WorkerSchedulerConfig schedulerConfig;
+        schedulerConfig.workerCount = ProviderSchedulerWorkers();
+        if (auto started = scheduler.Start(schedulerConfig); !started) {
             Log::Warning(LogDevelopmentShaderProvider,
                          "The shader nugget scheduler could not start ({Error}); shaders compile "
                          "without the cache",
@@ -910,14 +922,20 @@ DevelopmentShaderProvider::RequestLibrary(const render::ShaderProvisionRequest& 
         if (built && state.manager != nullptr) {
             const ShaderCompileProgress after = state.manager->Progress();
             const uint64 end = platform::MonotonicNanoseconds();
-            Log::Info(LogDevelopmentShaderProvider,
-                      "The {Format} shader library was built in {BuildMs} ms after {PrepareMs} ms "
-                      "of preparation: {Jobs} jobs, {Hits} nugget hits, {Workers} workers started, "
-                      "{Batches} batches",
-                      request.formatId, (end - buildStart) / NanosecondsPerMillisecond,
-                      (buildStart - prepareStart) / NanosecondsPerMillisecond,
-                      after.total - before.total, after.cacheHits - before.cacheHits,
-                      after.workersStarted - before.workersStarted, after.batches - before.batches);
+            Log::Info(
+                LogDevelopmentShaderProvider,
+                "The {Format} shader library was built in {BuildMs} ms after {PrepareMs} ms "
+                "of preparation: {Jobs} jobs, {Hits} nugget hits, {Workers} workers started, "
+                "{Batches} batches (started at monotonic {StartMs} ms; prepare {PrepMs} ms, "
+                "lookup {LookupMs} ms, compile {CompileMs} ms, publish {PublishMs} ms)",
+                request.formatId, (end - buildStart) / NanosecondsPerMillisecond,
+                (buildStart - prepareStart) / NanosecondsPerMillisecond, after.total - before.total,
+                after.cacheHits - before.cacheHits, after.workersStarted - before.workersStarted,
+                after.batches - before.batches, buildStart / NanosecondsPerMillisecond,
+                (after.prepareNanoseconds - before.prepareNanoseconds) / NanosecondsPerMillisecond,
+                (after.lookupNanoseconds - before.lookupNanoseconds) / NanosecondsPerMillisecond,
+                (after.compileNanoseconds - before.compileNanoseconds) / NanosecondsPerMillisecond,
+                (after.publishNanoseconds - before.publishNanoseconds) / NanosecondsPerMillisecond);
         }
 
         if (!built) {

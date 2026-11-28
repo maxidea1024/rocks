@@ -640,6 +640,60 @@ TEST(ShaderCompileManager_IsolatesFailingBatch) {
     CHECK(refused.status == ShaderCompileStatus::InvalidJob);
 }
 
+// 병렬 준비(ShaderSystem 16.6절 SSD94): scheduler가 있으면 job 준비를 ParallelFor로 나눈다. 실패가
+// 섞여도 결과·진단·키·계수가 호출 스레드 혼자 준비한 것과 같다.
+TEST(ShaderCompileManager_PreparesInParallelLikeSerial) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("managerparallel", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderCompileManager_PreparesInParallelLikeSerial: %s\n", skip);
+        }
+
+        return;
+    }
+
+    Array<ShaderCompileJob> jobs(TestAllocator());
+    test.Jobs(jobs);
+    REQUIRE(jobs.Size() >= 5);
+    jobs[1].entryPath = "/Project/Missing.rsf";
+    jobs[4].entryPoint = StringView();
+    WorkerScheduler scheduler(TestAllocator());
+    REQUIRE(scheduler.Start(WorkerSchedulerConfig{4}));
+
+    Array<ShaderCompileJobResult> serial(TestAllocator());
+    Array<ShaderCompileJobResult> parallel(TestAllocator());
+    for (const bool useScheduler : {false, true}) {
+        ShaderCompileManagerConfig config =
+            test.Config(useScheduler ? "WorkParallel" : "WorkSerial");
+        config.scheduler = useScheduler ? &scheduler : nullptr;
+        config.workerCount = 2;
+        ShaderCompileManager manager(config);
+        REQUIRE(manager.Start());
+        Array<ShaderCompileJobResult>& results = useScheduler ? parallel : serial;
+        REQUIRE(manager.Compile(jobs.View(), results));
+        const ShaderCompileProgress progress = manager.Progress();
+        CHECK(progress.total == jobs.Size() && progress.failed == 2 &&
+              progress.completed == jobs.Size() - 2 && progress.provisional == 0);
+    }
+
+    for (usize index = 0; index < jobs.Size(); ++index) {
+        const ShaderCompileJobResult& left = serial[index];
+        const ShaderCompileJobResult& right = parallel[index];
+        CHECK(left.status == right.status && left.hasKey == right.hasKey &&
+              left.diagnostics.View() == right.diagnostics.View());
+        if (left.hasKey && right.hasKey) {
+            CHECK(left.key == right.key);
+        }
+    }
+
+    CHECK(parallel[1].status == ShaderCompileStatus::PreprocessError);
+    CHECK(parallel[4].status == ShaderCompileStatus::InvalidJob);
+    CHECK(parallel[0].status == ShaderCompileStatus::Success &&
+          parallel[5].status == ShaderCompileStatus::Success);
+    (void)scheduler.Shutdown();
+}
+
 TEST(ShaderCompileCommand_ReportsJobsAndWritesOutputs) {
     ManagerCase test;
     const char* skip = nullptr;

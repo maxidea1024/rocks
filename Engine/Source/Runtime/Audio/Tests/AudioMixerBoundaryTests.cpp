@@ -30,6 +30,20 @@ public:
         mixer.seqlockReadHook_ = hook;
     }
 
+    // 라우팅 seqlock version이다(3.45.5절).
+    static uint32 RouteVersion(AudioMixer& mixer, uint32 voice) noexcept {
+        return platform::AtomicLoad(&mixer.sharedVoices_[voice].routeVersion);
+    }
+
+    static void SetRouteVersion(AudioMixer& mixer, uint32 voice, uint32 version) noexcept {
+        platform::AtomicStore(&mixer.sharedVoices_[voice].routeVersion, version);
+    }
+
+    // 읽지 않은 누적 seqlock version이다(홀수 = 쓰는 중으로 보인다).
+    static void SetUnreadVersion(AudioMixer& mixer, uint32 voice, uint32 version) noexcept {
+        platform::AtomicStore(&mixer.sharedVoices_[voice].unreadVersion, version);
+    }
+
     static void SetMailbox(AudioMixer& mixer, uint32 voice, uint64 value) noexcept {
         platform::AtomicStore(&mixer.sharedVoices_[voice].mailbox, value);
     }
@@ -629,6 +643,82 @@ TEST(Audio_Mixer2_ControlRejectsAndClipRelease) {
 // 보내지 않은 Play 버리기(3.41.1절 — 명령 링이 차서 미뤘던 Play를 제어 쪽이 거둘 때): voice는
 // Reserved로 돌아가 바로 놓이고 clip 사용 수가 내려가 해제된다. Reserved·정지 요청 뒤·낡은 handle은
 // 거부한다. 버린 Play의 순번 틈은 다른 voice 재생에 영향이 없다.
+// 읽지 않은 누적 seqlock이 계속 쓰는 중으로 보이면 조회는 읽기 실패를 알리고 값을 0으로 두지
+// 않는다(제어 쪽이 커서를 진행하지 않게 — 3.44.6절). 다시 짝수면 정상으로 읽는다.
+TEST(Audio_Mixer2_UnreadTornReadReported) {
+    constexpr uint32 OddVersion = 1;
+    constexpr uint32 EvenVersion = 2;
+    SystemAllocator allocator;
+    OfflineAudioRender rig = MakeRig(ConfigOf(), allocator);
+    const float ones[1024] = {1.0f};
+    const AudioClipId clip = RegisterOnes(rig.Mixer(), ones, 1024);
+    AudioVoiceParams paused;
+    paused.paused = true;
+    const AudioVoiceHandle voice = PlayAt(rig, clip, 0);
+    (void)RenderBlocks(rig, 1, allocator);
+    REQUIRE(rig.Mixer().PublishParams(voice, paused));
+    (void)RenderBlocks(rig, 1, allocator);
+    const AudioVoiceStatus published = StatusOf(rig.Mixer(), voice);
+    CHECK(!published.unreadReadFailed);
+    REQUIRE(published.unreadAsOfFrame != UnsetMixFrame);
+
+    AudioMixerTestAccess::SetUnreadVersion(rig.Mixer(), voice.index, OddVersion);
+    const AudioVoiceStatus torn = StatusOf(rig.Mixer(), voice);
+    CHECK(torn.unreadReadFailed);
+    CHECK(torn.unreadAsOfFrame == UnsetMixFrame);
+
+    AudioMixerTestAccess::SetUnreadVersion(rig.Mixer(), voice.index, EvenVersion);
+    CHECK(!StatusOf(rig.Mixer(), voice).unreadReadFailed);
+}
+
+// Play 시작 때 라우팅 seqlock이 찢어지면 시작 라우팅을 ramp 없이 쓰고, 다음 블록에 더 뒤 순번의
+// 라우팅을 읽어 ramp로 옮긴다(3.45.5절).
+TEST(Audio_Mixer2_StartRouteSurvivesTornRouteRead) {
+    SystemAllocator allocator;
+    float ones[8192];
+    for (float& value : ones) {
+        value = 1.0f;
+    }
+
+    OfflineAudioRender rig = MakeRig(ConfigOf(), allocator);
+    AudioMixer& mixer = rig.Mixer();
+    auto loud = mixer.AcquireBus();
+    auto quiet = mixer.AcquireBus();
+    REQUIRE(loud && quiet);
+    AudioBusLink links[2];
+    links[0].bus = loud.Value();
+    links[0].parent = AudioMixer::MasterBus();
+    links[1].bus = quiet.Value();
+    links[1].parent = AudioMixer::MasterBus();
+    links[1].initialParams.outputGain = 0.5f;
+    REQUIRE(mixer.PublishBusPlan(Span<const AudioBusLink>(links, 2)));
+    AudioVoiceRoute toLoud;
+    toLoud.sendCount = 1;
+    toLoud.sends[0].bus = loud.Value();
+    AudioVoiceRoute toQuiet = toLoud;
+    toQuiet.sends[0].bus = quiet.Value();
+    auto voice = mixer.AcquireVoice();
+    REQUIRE(voice);
+    auto play = mixer.PreparePlay(voice.Value(), RegisterOnes(mixer, ones, 8192), 0, false,
+                                  AudioVoiceParams{}, toLoud);
+    REQUIRE(play);
+    REQUIRE(mixer.PublishRoute(voice.Value(), toQuiet));
+    play.Value().mixFrame = 0;
+    SubmitOrDie(rig, play.Value());
+    AudioMixerTestAccess::SetSeqlockReadHook(mixer, [](AudioMixer& target, uint32 index) noexcept {
+        AudioMixerTestAccess::SetRouteVersion(
+            target, index, AudioMixerTestAccess::RouteVersion(target, index) + 2);
+    });
+    Array<float> output = RenderBlocks(rig, 1, allocator);
+    AudioMixerTestAccess::SetSeqlockReadHook(mixer, nullptr);
+    CHECK(Left(output, 0) == 0.5f && Left(output, 255) == 0.5f);
+    CHECK(mixer.Counters().skippedSeqlockReads == 1);
+
+    output = RenderBlocks(rig, 2, allocator);
+    CHECK(Left(output, 0) == 0.5f);
+    CHECK(Left(output, 300) == 0.25f);
+}
+
 TEST(Audio_Mixer2_AbandonPreparedPlay) {
     SystemAllocator allocator;
     float ones[2048];

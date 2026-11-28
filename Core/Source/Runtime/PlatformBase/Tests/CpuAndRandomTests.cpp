@@ -15,7 +15,8 @@ TEST(Platform_CpuFeaturesAreConsistent) {
     // 두 번째 호출은 같은 객체를 돌려준다.
     CHECK(&features == &platform::QueryCpuFeatures());
     if constexpr (IsArm64) {
-        CHECK(features.neon && !features.avx && !features.sse42);
+        CHECK(features.neon && !features.avx && !features.sse42 && !features.ssse3 &&
+              !features.sse41);
         CHECK(!features.aes && !features.pclmulqdq && !features.sha);
         // FEAT_PMULL은 FEAT_AES가 있어야 정의된다(Arm ARM). 반대 방향은 보장하지 않는다.
         CHECK(!features.armPmull || features.armAes);
@@ -33,12 +34,14 @@ TEST(Platform_CpuFeaturesAreConsistent) {
         CHECK(!features.fma || features.avx);
     }
 
-    printf("  cpu: sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d aes=%d pclmulqdq=%d sha=%d "
+    printf("  cpu: ssse3=%d sse4.1=%d sse4.2=%d popcnt=%d avx=%d avx2=%d fma=%d bmi2=%d aes=%d "
+           "pclmulqdq=%d sha=%d "
            "neon=%d "
            "armAes=%d armPmull=%d armSha2=%d armDit=%d armSb=%d\n",
-           features.sse42, features.popcnt, features.avx, features.avx2, features.fma,
-           features.bmi2, features.aes, features.pclmulqdq, features.sha, features.neon,
-           features.armAes, features.armPmull, features.armSha2, features.armDit, features.armSb);
+           features.ssse3, features.sse41, features.sse42, features.popcnt, features.avx,
+           features.avx2, features.fma, features.bmi2, features.aes, features.pclmulqdq,
+           features.sha, features.neon, features.armAes, features.armPmull, features.armSha2,
+           features.armDit, features.armSb);
 }
 
 TEST(Platform_DataIndependentTimingScope) {

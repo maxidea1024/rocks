@@ -4,7 +4,7 @@
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
 #include <TestSupport/NFailAllocator.h>

@@ -21,6 +21,8 @@ CpuFeatures Detect() noexcept {
         return features;
     }
 
+    features.ssse3 = (ecx & (1u << 9)) != 0;
+    features.sse41 = (ecx & (1u << 19)) != 0;
     features.sse42 = (ecx & (1u << 20)) != 0;
     features.popcnt = (ecx & (1u << 23)) != 0;
     features.aes = (ecx & (1u << 25)) != 0;

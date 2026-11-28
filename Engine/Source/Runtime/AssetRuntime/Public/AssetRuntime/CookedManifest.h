@@ -6,7 +6,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Build/EngineVersion.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>

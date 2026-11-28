@@ -1,7 +1,7 @@
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <Core/Assert.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/FileError.h>
 
 // 패키지 bulk 저장소 구현이다(Docs/Design/AssetSystem 6.1절, 7.1절 15 — A2c1).

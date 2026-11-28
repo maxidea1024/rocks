@@ -2,7 +2,7 @@
 
 #include <Base/Guid.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <Meta/PropertyPathSchema.h>

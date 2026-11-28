@@ -2,6 +2,8 @@
 
 기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다. UE 대조 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`)이다 — 본문의 UE 사실 서술은 2026-11-15에 5.8 원본으로 다시 확인했고, 날짜를 적은 설계 교차검증 기록(4.6·5.6·7.1·9.1절 확정안 머리)의 UE 대조는 당시 기준 UE 5.6이다. A0-O 다음 단계인 리플렉션 B9가 이 문서의 값 종류·지정자·경로·텍스트 표기를 넓힌다 — [리플렉션 보강(리플렉션 B9) 설계](ReflectionExtensions.ko.md)(이하 RX).
 
+> **콘텐츠 해시 전환(예정, [ContentHash](ContentHash.ko.md), 2026-11-28).** 이 문서가 콘텐츠 주소·동일성 판정으로 정한 SHA-256 값(반사 필드 타입 `Sha256Digest`(wire `Digest256`은 그대로, C++ 타입은 `ContentHash` — CH13. 전환 뒤 `Sha256Digest`는 반사할 수 없다))은 `ContentHash`(BLAKE3-256, 32 byte)로 바뀐다. 하위 호환 없이 일괄 B(CH-B3b)에서 한 번에 바뀌고, 그때 본문과 형식 버전을 고친다. 외부 무결성·프로토콜 SHA-256(CH5)은 남는다.
+
 원칙:
 
 - UE 5.8 대응: UHT → MetaCompiler, `FProperty` → `FieldSchema` + 생성 typed thunk, `UENUM`(`UMETA(DisplayName)` 포함)·`USTRUCT`·`TArray`·`TSoftObjectPtr`·상속되는 클래스 플래그. UE의 클래스명과 메모리 offset 기반 property 접근은 복제하지 않는다 — 필드 접근은 생성 코드의 멤버 포인터 thunk만 쓴다(raw offset·주소 공개 없음).
@@ -187,7 +189,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 
 ### 3.2 `Sha256Digest`
 
-- Core의 `Sha256Digest`(`Core/Encoding/Sha256.h`, 32 byte)를 쓴다. `ValueKind::Digest256`, wire `Bytes`(9), 길이 정확히 32(아니면 InvalidArgument). `FieldValue`에 `digest` 칸을 더한다.
+- Core의 `Sha256Digest`(`Core/Hash/Sha256.h`, 32 byte)를 쓴다. `ValueKind::Digest256`, wire `Bytes`(9), 길이 정확히 32(아니면 InvalidArgument). `FieldValue`에 `digest` 칸을 더한다.
 
 ### 3.3 `SoftObjectRef<T>`
 
@@ -862,10 +864,10 @@ Transaction·Undo 기록·병합(CU4 — B6은 옛 값 출력까지), 변경 통
   toolchain-target: x86_64-pc-windows-msvc19.29.30159
   toolchain-abi: <AbiFields — 정렬된 key=value 목록을 ;로 이음>
   host-dependent: no
-  action: Compile src:Core/Source/Runtime/Core/Private/Encoding/Sha256.cpp
+  action: Compile src:Core/Source/Runtime/Core/Private/Hash/Sha256.cpp
   arg: /nologo
   …
-  input: src:Core/Source/Runtime/Core/Public/Core/Encoding/Sha256.h <64 hex>
+  input: src:Core/Source/Runtime/Core/Public/Core/Hash/Sha256.h <64 hex>
   ```
   액션은 (종류, Compile이면 소스 키·나머지는 모듈 이름)의 ordinal 순, 인자는 원래 순서, 입력은 키 ordinal 순·중복 제거. ID는 진단·캐시 무효화용이며 호스트에 따라 달라질 수 있는 `toolchain-target`·`toolchain-abi`를 일부러 담는다(호환·병합 판정에 쓰지 않는다). 형식 2는 `executable:` 다음 줄에 `engine-version:`(요청의 엔진 버전, 정규 10진 "주.부.패치" — 8.2절)을 더했다.
 - 입력: 1단계 액션의 `Inputs`, `DeclaredInputs`(액션 key와 같이 `headersOnly:false`·제외 없음으로 열되 `<out>/BuildInfo`는 명시적으로 뺀다), `HeaderDirectories`를 `Fingerprints.TreeFiles(dir, headersOnly:true, …)`로 연 파일(액션 key·InputSnapshot과 같은 열거). 액션 출력·`<out>/BuildInfo`·`OwnedRoots` 아래 파일은 뺀다. MetaCompiler 생성 헤더(`out:Generated/…`)는 넣는다(액션 그래프보다 앞 단계의 출력이므로 입력이다 — identity 명세 ID 재배정과 MetaCompiler 변경이 ID에 보인다). 규칙 원본(`*.Build.cs`)은 해시하지 않는다(규칙의 영향은 모두 액션의 소스 목록·인자·include 순서·라이브러리로 나타나고, Program.cs는 컴파일된 규칙 어셈블리만 갖는다). depfile은 쓰지 않는다.

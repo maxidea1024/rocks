@@ -245,7 +245,7 @@
       "상태": "계획",
       "역할": "Foundation",
       "외부조건": "",
-      "파일목록": "Engine/Core/Public/Core/Text/String.h;Engine/Core/Public/Core/Text/StringView.h;Engine/Core/Public/Core/Text/Name.h;Engine/Core/Public/Core/Guid.h;Engine/Core/Public/Core/Hash.h;Engine/Core/Private/Text/NameTable.cpp;Tests/Core/TextIdTests.cpp",
+      "파일목록": "Engine/Core/Public/Core/Text/String.h;Engine/Core/Public/Core/Text/StringView.h;Engine/Core/Public/Core/Text/Name.h;Engine/Core/Public/Core/Guid.h;Engine/Core/Public/Core/Hash/TypeHash.h;Engine/Core/Private/Text/NameTable.cpp;Tests/Core/TextIdTests.cpp",
       "하네스": "unit·contract·fault·concurrency; 해당 불변식에 대한 독립 oracle·negative control",
       "장애주입": "UTF 오류·intern 실패·hash 충돌",
       "동시성검증": "Name shard·shutdown·OS path 차이",
@@ -1839,7 +1839,7 @@
       "상태": "계획"
     },
     {
-      "경로": "Engine/Core/Public/Core/Hash.h",
+      "경로": "Engine/Core/Public/Core/Hash/TypeHash.h",
       "모듈": "Core",
       "공개범위": "Public",
       "작업ID": "C13",

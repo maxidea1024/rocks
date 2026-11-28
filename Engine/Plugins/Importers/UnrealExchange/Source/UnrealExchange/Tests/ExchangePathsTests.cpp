@@ -1,4 +1,4 @@
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Math/RandomStream.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NameComponent.h>

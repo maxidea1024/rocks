@@ -1,7 +1,7 @@
 #pragma once
 
 #include <AudioTools/SourceAudio.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Math/MathUtility.h>
 
 // 원본 디코더 시험이 함께 쓰는 도구다(Docs/Design/AudioSystem 3.26–3.29절): 채널별 주파수

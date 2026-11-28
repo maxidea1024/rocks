@@ -16,3 +16,4 @@
 - [12.15 A5k 텍스처 시나리오·PostLoad 판정·렌더 세션 알림](12.15-A5kScenario.ko.md)
 - [12.16 블록 압축 형식 표(개정 3 — UE 정정)](12.16-CompressionFormats.ko.md)
 - [12.17 텍스처 압축 단계 구현 세부(TC1–TC5)](12.17-CompressionStage.ko.md)
+- [12.18 텍스처 보정 단계(TP1–TP7)](12.18-ProcessingStage.ko.md)

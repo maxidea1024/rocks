@@ -5,7 +5,7 @@
 #include <AssetDatabase/ProjectLayout.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Core/Build/EngineVersion.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Platform/File.h>
 
 // 색인 캐시다(Docs/Design/AssetSystem 7절 캐시, 7.1절 16 A2d1).

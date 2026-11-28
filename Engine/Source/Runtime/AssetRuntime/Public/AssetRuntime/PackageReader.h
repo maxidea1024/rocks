@@ -253,16 +253,6 @@ ROCKS_ASSETRUNTIME_API Result<PackageFingerprint>
 ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
                        AssetDiagnostic* failure = nullptr) noexcept;
 
-// sidecar 파일 머리(AS 20.1 3)에 있어야 할 값이다(ExpectedSidecarHeader가 패키지에서 만든다 — 범위
-// 읽기 손잡이는 이 값을 복사해 쥔다).
-struct SidecarHeaderExpectation {
-    uint32 bulkAlignment = 0;
-    // Sidecar 항목 수다.
-    uint32 entryCount = 0;
-    uint64 fileBytes = 0;
-    AssetId asset{};
-};
-
 // 읽은 패키지(ReadPackage·ReadPackageForEdit 결과 — BulkIndex를 읽은 것, ReadPackageIndex 결과는
 // bulkEntries가 비어 entryCount가 0이 되므로 쓰지 않는다)에서 sidecar 머리 기대값을 만든다:
 // 헤더 bulkAlignment·assetId, Sidecar 항목 수, Sidecar 섹션 fileBytes. sidecar가 없는 패키지는
