@@ -4,6 +4,8 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 41(초안) | 2026-11-28 | MS3d 설계 교차 리뷰 반영: artifact는 순수 값(텍스처·컬렉션은 Material Hard 필드 번호, 머티리얼 파라미터 표), artifact 합치기는 정규 byte로, 파라미터 충돌 오류(UE TryAddParameter)·출처 규칙(인스턴스 소유·레이어 우선·callPath 전체)·기본값 해석 하나, 번역 키 텍스처 위치에 AssetId(MS3c 결함), cookKey 설정 키, 쿠킹 Tags 대신 `CookContext::cookKey`로 찾는 셰이더 묶음 Record(MAS9 개정)·진단 setting(MAS11), 실행 범위 연결·다시 만들기 hook, 값 v2 컬렉션 part, static 변형 경고, 9.2·9.4·12.2·12.4절 정정 |
+| 40(초안) | 2026-11-28 | 12.8절 MS3d 설계: 다섯 묶음(파라미터 값 hook·번역 파라미터 정체, 값 v2·런타임 artifact 형, 처리기, 묶음 원천, 쿠킹 로드 시험), 16절 MAS9(쿠킹 Tags)·MAS10(진단 코드) |
 | 39(초안) | 2026-11-28 | 12.8절 MS3c 리뷰 반영(traits 품질 정규화·UE 그림자·velocity 규칙 8.3절, layout 서명·길이 앞붙임 8.6절, 키 세부·해석 의미 검사·MS3d로 넘기는 것)과 셰이더 시스템 MSR17·MSR18·MSR19·MRD18 반영(16절): platformClass는 집합, 묶음 id는 ShaderCore, 묶음 원천 등록, 조합 열거 |
 | 38(초안) | 2026-11-27 | 6.13절 MS2f4 ColorRamp: 원본 공급 `FindColorCurve`·`MaterialColorCurveSnapshot`(19.4.2절 이름 정정), 번역 의존 ColorCurve·Build 의존 hook, 상수 입력은 CurveAssets `EvaluateAdjustedColorCurve`(비트 동일), 연결 입력은 UE 키 구간 합(조정·보간 무시, 키 0개 알파 0). MS2f 교차 리뷰 반영(V13 우회 차단 목록, Noise CameraRelative 3성분·quality 클램프, RotateAboutAxis 스칼라 축 UE 오류, return 대소문자 무시, SceneTexture 입력 문법 후속). engine-runtime 병합: RenderBase 개정 48 문구(2절 `TextureSampleKind`)·UnrealExchange 장 파일 링크 |
 | 37(초안) | 2026-11-27 | 6.13절 MS2f5 CustomHlsl: 모듈 Custom 함수 표와 IR 연산 CustomArguments·CustomCall·CustomOutput(94–96), 함수 모양(문맥 c 첫 인자·텍스처 두 인자·Double 한 인자·inout 추가 출력·return 감싸기·정의·include), V13 토큰·include·clip 검사, MaterialAttributes 출력 거부(편차) |
