@@ -67,14 +67,16 @@
 
 ### 24.6 숫자 입력 칸(`NumericEntryBox` — UE `SNumericEntryBox`)
 
-- 값은 Optional이다. 없으면 미정 문자열(기본 "---", UE `DefaultUndeterminedString`)을 보이고, 글자를 넣으면 `OnUndeterminedValueCommitted`.
-- `AllowSpin`(기본 끔): 켜면 안에 `SpinBox`(스타일 "NumericEntrySpinBox"), 끄면 편집 텍스트 상자(스타일 "NormalEditableTextBox").
-- 레이블: 바깥(기본 — 칸 왼쪽 별도 칸, 여백 (3, 0)) / 안쪽(칸 위에 겹침 — 스핀이면 스핀 위). 레이블 만들기:
-  - `BuildLabel(글자, 전경, 바탕)`: 꾸밈 brush 위 글자(여백 (1, 0, 6, 0), hit 투명). UE 꾸밈은 `Common/TextBoxLabelBorder` png — Rocks는 RB(바탕색, 4, 왼쪽 모서리만)로 그린다.
-  - `BuildNarrowColorLabel(색)`: 2×16 막대(UE `NarrowDecorator` SVG — Rocks가 그린 SVG `CoreWidgets/NumericEntryBox/NarrowDecorator`), 여백 (2, 0, 0, 0).
-- 토글(`DisplayToggle` — 체크 상자, 여백 (1, 0, 1, 0)): 끄면 칸을 비활성으로 보인다.
-- 툴팁 형식(`ToolTipTextFormat` — "X: {0}")과 0에 아주 가까운 값 경고 툴팁(UE `NearZeroWarning`)을 따른다. 범위가 있으면 툴팁에 범위를 붙인다(Rocks 보강 — "0 – 100").
-- 나머지 인자(배수·감도·Delta·자릿수·범위·슬라이더 범위·지수·휠·키마다 알림·최소 폭)는 스핀 상자로 넘긴다. 기본은 UE `SNumericEntryBox` 값이다(값 범위 형식 최소·최대, 슬라이더 범위 0–100, 휠 켬, 최소 폭 0).
+- **구조**(UE `Construct` 255–440행): Element 파생, 자식은 [토글 체크 상자] [바깥 레이블] [칸]이고 칸은 스핀 상자(`AllowSpin`)와 편집 텍스트 상자(늘 만든다)가 겹치며, 안쪽 레이블이 그 위에 놓인다. `Initialize(글자 크기, allowSpin)`로 만든다(`AllowSpin` 기본 끔 — UE).
+- **값**은 Optional이다. 있고 스핀이면 스핀이 보이고 상자는 접힌다. 없거나 스핀이 아니면 상자가 보인다. 미정이면 상자 글자는 미정 문자열(기본 "---", UE `DefaultUndeterminedString`)이다(UE `Tick`·`OnGetValueForTextBox`). 상자가 초점을 가진 동안에는 글자를 바꾸지 않는다(치는 중).
+- **상자 경로**(UE `OnTextChanged`·`OnTextCommitted`·`SendChangesFromText`): 글자가 바뀌면 읽히는 값으로 `OnValueChanged`, 확정이면 `OnValueCommitted`(Enter·FocusLost). 미정이고 `OnUndeterminedValueCommitted`가 있으면 그것을 부른다(글자 그대로). 읽기는 24.4절 `ParseNumberWithUnit`이고 값 범위로 자른다. 상자는 "NormalEditableTextBox" 스타일 편집 텍스트 상자다(UE는 `SEditableText` + 상자 스타일 `SBorder` — Rocks `EditableTextBox`가 같다).
+- **스핀 경로**: 범위·슬라이더 범위·Delta·자릿수·형식·단위·배수·감도·지수·휠·키마다 알림·최소 폭은 스핀으로 넘기고, 스핀 사건(`OnValueChanged`·`OnValueCommitted`·끌기 시작·끝)을 그대로 내보낸다. 스타일은 "NumericEntrySpinBox"다.
+- **레이블**: 호출자가 만든 요소를 바깥(기본 — 칸 왼쪽 별도 칸) 또는 안쪽(칸 위 왼쪽에 겹침, 세로 채움 — UE `LabelVAlign` 기본 Fill)에 둔다. 여백 기본 (3, 0)(UE `LabelPadding`). 만들기 도우미:
+  - `MakeLabel(글자, 전경, 바탕)`: 둥근 바탕(RB(바탕, 3) — UE 꾸밈 `Common/TextBoxLabelBorder` png 대신 Rocks가 그린다) 위 글자, 여백 (1, 0, 6, 0), hit 투명(UE `BuildLabel`).
+  - `MakeNarrowColorLabel(색)`: 폭 2 세로 막대(RB(색, 1), 칸 높이 — UE `NarrowDecorator` 2×16 SVG를 칸 높이로 늘린 것과 같다), hit 투명(UE `BuildNarrowColorLabel`).
+- **토글**(`DisplayToggle` — 체크 상자, 여백 (1, 0, 1, 0)): 끄면 스핀·상자를 비활성으로 만들고 `OnToggleChanged`를 부른다(UE `HandleToggleCheckBoxChanged`).
+- **툴팁**: 앞말(`SetToolTipPrefix` — UE `ToolTipTextFormat` "X: {0}")과 값 글자, 범위가 둘 다 있으면 " (최소 – 최대)"를 붙인다(Rocks 보강). 거의 정수 표시("...")면 "Exact value: " + 지수 표기를 보인다(UE `NearZeroWarning_ToolTip`).
+- 기본은 UE `SNumericEntryBox` 값이다: 값 범위 형식 최소·최대, 슬라이더 범위 0–100(스핀일 때), 휠 켬, 최소 폭 0, 배수 Shift ×10·Ctrl ×0.1.
 
 ### 24.7 벡터 입력(`VectorInputBox` — UE `SNumericVectorInputBox`)
 
