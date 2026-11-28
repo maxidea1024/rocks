@@ -28,7 +28,7 @@ constexpr usize SectionCountOffset = 44;
 
 // 고정 장면(섞임 — 쿠킹 Zstd) 출력의 SHA-256이다(AssetSidecar_GoldenBytes).
 constexpr StringView GoldenPackageDigest =
-    "d394b0531f57549dd4331eea8943e3b8576e4e16a06ee012b4fd7d472b404cb3";
+    "2816a807ddf1593a6f25fc0e904e7a76a24d2e4c6b33345c4a572f5037ee93d7";
 constexpr StringView GoldenSidecarDigest =
     "d7a79cdf683f7177c6b075f1ffc9c1e51f09d9f1604c309b63aaa598f2bbd2b1";
 

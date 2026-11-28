@@ -10,6 +10,7 @@
 #include <World/Physics/BodyForce.h>
 #include <World/Physics/BodyKinematics.h>
 #include <World/Physics/BodySettingsChange.h>
+#include <World/Physics/BodyWeldDesc.h>
 #include <World/Physics/HitResult.h>
 #include <World/Physics/MtdResult.h>
 #include <World/Physics/OverlapMode.h>
@@ -186,12 +187,26 @@ public:
                                    const QueryParams& params,
                                    Array<HitResult>& all) const noexcept = 0;
 
-    // body의 형상으로 하는 overlap All이다(UE ComponentOverlapMulti). 그 body의 컴포넌트만 뺀다.
-    // 반환 값은 막는 겹침이 있는지다. 오류: 없는 handle·옛 세대(StaleHandle), OverlapShape의 오류.
-    virtual Result<bool> OverlapBody(PhysicsBodyHandle body, const Vec3d& position,
-                                     const Quatd& rotation, const QueryFilter& filter,
-                                     const QueryParams& params,
+    // body의 한 부분(part — null이면 루트 자신, 아니면 weld한 자식 컴포넌트) 원소로 하는 overlap
+    // All이다(UE ComponentOverlapMulti·IsShapeBoundToBody — 7.1.22절). position·rotation은 그 부분
+    // 컴포넌트의 자세다. 그 부분 컴포넌트만 뺀다. 반환 값은 막는 겹침이 있는지다. 오류: 없는
+    // handle·옛 세대·없는 부분(StaleHandle), OverlapShape의 오류.
+    virtual Result<bool> OverlapBody(PhysicsBodyHandle body, ObjectHandle part,
+                                     const Vec3d& position, const Quatd& rotation,
+                                     const QueryFilter& filter, const QueryParams& params,
                                      Array<OverlapResult>& all) const noexcept = 0;
+
+    // 자식 원소를 루트 body에 합친다(UE FBodyInstance::Weld — 7.1.22절). 형상을 다시 만들고 루트
+    // 질량 값으로 질량을 다시 계산한다(깨우지 않는다). 같은 컴포넌트가 이미 부분이면
+    // relative·형상을 바꾼다(UE SetWeldedBodyTransform). 질의·접촉 hit는 그 원소에서
+    // child.component를 낸다. 오류: 없는 handle·옛 세대(StaleHandle), 원소 없음·비유한 값·원소 수
+    // 합 > BodyGeometryMaxElements·부분 수 > BodyWeldMaxParts·null 컴포넌트·루트
+    // 자신(InvalidArgument), 할당 실패. 실패하면 이전 형상·부분을 둔다.
+    virtual Result<void> WeldBody(PhysicsBodyHandle root, const BodyWeldDesc& child) noexcept = 0;
+
+    // weld한 자식 부분을 빼고 형상을 다시 만든다(UE FBodyInstance::UnWeld). 없는 부분·handle은
+    // 무시한다. 형상을 다시 만들지 못하면(할당 실패) 부분을 두고 Warning이다.
+    virtual void UnweldBody(PhysicsBodyHandle root, ObjectHandle child) noexcept = 0;
 
 protected:
     PhysicsScene() noexcept = default;

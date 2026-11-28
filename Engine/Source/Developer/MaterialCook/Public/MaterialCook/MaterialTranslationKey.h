@@ -13,8 +13,8 @@
 // schemaVersion, loweringVersion) 이름 순 목록(루트와 모은 그래프 전부), 계약
 // 버전(MaterialCommon·상수 프로그램·특성 정규 바이트), 의존 (역할 문자열, AssetId, 내용 키)
 // 목록((역할, AssetId) 순 — 열지 못한 대상은 None, 텍스처 역할은 아래 위치 목록이 대신한다), 텍스처
-// 참조 위치 (그래프 asset(루트는 null), 노드 id, 필드, 사실 바이트 또는 None) 목록(AssetId 없이 —
-// 기본 텍스처를 사실이 같은 텍스처로 바꾸면 적중).
+// 참조 위치 (그래프 asset(루트는 null), 노드 id, 필드, AssetId(파라미터 기본값 필드면 None), 사실
+// 바이트 또는 None) 목록(파라미터 기본 텍스처를 사실이 같은 텍스처로 바꾸면 적중).
 //
 // 사용 예:
 //   auto key = ComputeMaterialTranslationKey(desc);
@@ -24,13 +24,13 @@ namespace rocks {
 // 번역 너겟 정체성이다(IR·생성 규칙·값 배치가 바뀌면 버전 Guid를 바꾼다 — 모든 키가 바뀐다).
 inline constexpr NuggetProcessorId MaterialTranslationNuggetId{
     Guid{0x524f434b4d415452ull, 0x0000000000000001ull},
-    Guid{0x524f434b4d41544eull, 0x0000000000000001ull}};
+    Guid{0x524f434b4d41544eull, 0x0000000000000002ull}};
 
 // 번역 너겟 bucket이다(소문자 규칙 — UE "MaterialTranslation" 버킷 대응, 12.1절).
 inline constexpr char MaterialTranslationBucket[] = "material_translation";
 
 // 키 본문 배치 버전이다(배치가 바뀌면 올린다).
-inline constexpr uint32 MaterialTranslationKeyLayoutVersion = 1;
+inline constexpr uint32 MaterialTranslationKeyLayoutVersion = 2;
 
 // 생성 원문이 기대는 MaterialCommon.rsh 계약 버전이다(그 계약이 바뀌면 올린다 — 7.2절).
 inline constexpr uint32 MaterialCommonContractVersion = 1;

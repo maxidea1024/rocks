@@ -61,7 +61,9 @@ AudioDeviceContext::AudioDeviceContext(Allocator& allocator, audio::AudioOutputD
       deferred_(allocator), awaitingStart_(allocator), terminalScratch_(allocator),
       candidates_(allocator), groups_(allocator), groupScratch_(allocator), mixes_(allocator),
       overrides_(allocator), adjustments_(allocator), categoryScales_(allocator),
-      categoryCache_(allocator), passive_(allocator) {
+      categoryCache_(allocator), passive_(allocator), busEntries_(allocator),
+      voiceBusRefs_(allocator), busModifiers_(allocator), loggedBusFallbacks_(allocator),
+      busLinks_(allocator) {
 }
 
 AudioDeviceContext::~AudioDeviceContext() noexcept = default;
@@ -79,7 +81,11 @@ Result<void> AudioDeviceContext::Initialize(uint32 maxActiveVoices) noexcept {
         !overrides_.TryReserve(MaxMixOverrides) ||
         !adjustments_.TryReserve(MaxActiveMixes * MaxMixAdjusters + MaxMixOverrides) ||
         !categoryScales_.TryReserve(MaxCategoryDistanceScales) ||
-        !categoryCache_.TryReserve(MaxPlaybacks) || !passive_.TryReserve(MaxActiveMixes)) {
+        !categoryCache_.TryReserve(MaxPlaybacks) || !passive_.TryReserve(MaxActiveMixes) ||
+        !busEntries_.TryResize(mixer_.Config().maxBuses - 1) ||
+        !voiceBusRefs_.TryResize(mixerVoices) || !busModifiers_.TryReserve(MaxBusModifiers) ||
+        !loggedBusFallbacks_.TryReserve(MaxLoggedBusFallbacks) ||
+        !busLinks_.TryReserve(mixer_.Config().maxBuses)) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -103,6 +109,7 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     occlusion_ = batch.occlusion;
     userVolume_ = batch.userVolume;
     ApplySnapshots(batch);
+    ApplyBusSettings(batch);
     // 일시정지 전환을 미룬 Play 재시도 앞에 반영한다(일시정지되는 Deferred는 보내지 않고 놓는다
     // — 3.44.4절).
     UpdatePause(batch, now);
@@ -151,6 +158,9 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
         case ControlCommandType::SetCategoryDistanceScale:
             // 위에서 이미 적용했다.
             break;
+        case ControlCommandType::SetBusSend:
+            ApplySetBusSend(command);
+            break;
         }
     }
 
@@ -176,6 +186,9 @@ void AudioDeviceContext::Process(ControlBatch& batch) noexcept {
     }
 
     ApplyMasterGain(batch.masterGain);
+    // 버스 표(참조 없는 버스 빼기·plan·칸 놓기·값)와 바뀐 라우팅을 낸다(3.45.8절).
+    UpdateBuses();
+    PublishRoutes();
     PublishParams(now);
     // Inline 서비스는 묶음마다 이 자리에서 링을 채운다(엔진 Inline 시험이 훅 없이 결정적
     // — 3.40.2절).
@@ -243,6 +256,15 @@ void AudioDeviceContext::Abandon() noexcept {
 
     for (uint32& owner : voiceOwners_) {
         owner = 0;
+    }
+
+    // 버스 칸은 믹서와 함께 사라진다(3.45.8절).
+    for (BusEntry& entry : busEntries_) {
+        entry = BusEntry{};
+    }
+
+    for (VoiceBusRefs& refs : voiceBusRefs_) {
+        refs = VoiceBusRefs{};
     }
 
     releasing_.Clear();
@@ -384,6 +406,16 @@ void AudioDeviceContext::ApplyPlay(ControlCommand& command, ControlBatch& batch)
     record.playbackHighPass = command.highPassFrequency;
     record.hasOcclusionInterval = command.hasOcclusionInterval;
     record.occlusionInterval = command.occlusionInterval;
+    // 재생 단위 버스 send(UE PendingSubmixSends — 3.45.7절)다.
+    record.busOverrideCount = command.busSendCount;
+    for (uint32 index = 0; index < command.busSendCount; ++index) {
+        record.busOverrides[index] = command.busSends[index];
+    }
+
+    record.route = audio::AudioVoiceRoute{};
+    record.routeDirty = false;
+    record.distanceSends = false;
+    record.routeWarned = false;
     record.everAssigned = false;
     record.occlusionPending = false;
     record.occlusionChecked = false;
@@ -632,6 +664,7 @@ void AudioDeviceContext::UpdateSpatial(Record& record, uint64 now, bool acceptin
     // 1) 우선순위 거리 감쇠(UE AS 2080–2103 — 모양 반경을 빼지 않은 거리).
     const float listenerDistance =
         static_cast<float>((record.position - scene.listenerPosition).Length());
+    record.listenerDistance = listenerDistance;
     const float attenuated =
         record.priority * PriorityAttenuationScale(attenuation, listenerDistance);
     const auto factorNow = [&]() noexcept {
@@ -853,6 +886,7 @@ void AudioDeviceContext::ReclaimVoices() noexcept {
     while (index < releasing_.Size()) {
         // Busy는 AudioRT ACK가 아직 마지막 사용 블록에 닿지 않았다는 뜻이다(다음 묶음에서 다시).
         if (mixer_.ReleaseVoice(releasing_[index].voice)) {
+            ReleaseVoiceBusRefs(releasing_[index].voice.index);
             ReleaseClipUser(releasing_[index].clip);
             (void)releasing_.TryRemoveAt(index);
             continue;

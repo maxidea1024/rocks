@@ -40,6 +40,9 @@ struct SaveNode {
     usize nameBytes = 0;
     usize firstPosition = 0;
     Array<uint8> record;
+    // 선언 subobject 노드면 그 SubobjectGuid다(NodeTable 종류 1 — ClassifyDeclaredSubobjects가
+    // 정한다, Docs/Design/Prefab 10.4절). 0이면 객체 노드다.
+    Guid subobjectId{};
 };
 
 // graph v2 저장 문맥이다: 강한 참조는 대상 타입을 검사한 뒤 U32로 쓴다(집합 안이면 local ID). 집합
@@ -87,6 +90,14 @@ public:
     void EndStructBaseline() noexcept override;
     Result<bool> OmitCurrent(uint32 wire, Span<const uint8> payload,
                              usize referenceMark) noexcept override;
+
+    // 기준과 같아도 생략하지 않을 최상위 필드 두 개다(선언 subobject의 소유 구조 — Root 필드와 부착
+    // 부모: 레코드 값은 null이라 사용자가 지운 null이 기준과 같아 사라지면 복원이 표 대상을 다시
+    // 써 넣는다, Docs/Design/Prefab 10.4절). EndBaseline이 지운다.
+    void SetForcedFields(Guid first, Guid second) noexcept {
+        forcedFirst_ = first;
+        forcedSecond_ = second;
+    }
 
     usize ReferenceMark() const noexcept override {
         return positions_.Size() + weakDeferrals_.Size();
@@ -291,6 +302,8 @@ private:
     };
     Array<BaselineLevel> baselines_;
     const OverrideSet* overrides_ = nullptr;
+    Guid forcedFirst_{};
+    Guid forcedSecond_{};
 };
 
 // 객체 하나의 필드 루프가 저장 쪽에 묻고 알리는 곳이다(EncodeObjectFields — 그래프 저장 노드와
@@ -331,6 +344,11 @@ Result<void> EncodeObjectFields(Allocator& allocator, ObjectRegistry* registry,
                                 Budget& budget, usize maxFieldBytes, FieldEncodeContext& context,
                                 RecordBuilder& record, ObjectFieldSink& sink,
                                 usize& payloadBytes) noexcept;
+
+// 선언 subobject 노드를 가린다(GraphSaveSet.cpp — Docs/Design/Prefab 10.4절).
+Result<void> ClassifyDeclaredSubobjects(Array<SaveNode>& nodes, const GraphEncodeContext& context,
+                                        ObjectRegistry& registry, const ObjectAccessContext& access,
+                                        bool nodeTable, Budget& budget) noexcept;
 
 // NodeTable의 outer 값과 BaseOuter 비트를 정한다(GraphSaveSet.cpp).
 Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeContext& context,

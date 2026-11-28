@@ -132,20 +132,20 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 - `writeNodeTable = false`인데 집합에 선언 subobject를 가진 객체가 있으면 `InvalidArgument`다(종류 1을 표현할 수 없다).
 - `ObjectGraphFormatVersion` = 3. 클래스 기본값 지문과 그래프 byte가 모두 바뀐다 — 모든 에셋 패키지(TestContent 포함)를 다시 쿠킹하고 golden(`PackageGoldenTests`·`ClassDefaultsTests`·너겟 시험)을 다시 고정한다.
 
-**저장**:
+**저장**(PF1c1 구현 결정 — 2026-11-28, 처음 안의 Include·목록 걸러내기·root/attach 사전 비교를 단순화):
 
-- **Include**: `AddNode(owner)` 직후 그 선언 subobject를 표 순서로 넣는다. 호출자가 준 집합의 owner에 딸린 subobject는 집합 끝에 덧붙인다. `IncludeNode`가 subobject를 대상으로 받으면 조상 사슬(owner)을 더한 뒤 `locals_`를 다시 확인해 중복을 막는다(`GraphSaveSet.cpp:9-34·117-201`). subobject의 SubobjectGuid는 owner의 `subobjects[k].field(owner)`가 그 handle을 담은 항목에서 얻는다.
-- 소유 필드(`Subobject`)는 값으로 쓰지 않는다.
-- `SubobjectList` 목록은 선언 subobject를 뺀 나머지만 쓴다. `FieldEncodeContext`에 원소 생략 질의를 두고 배열 codec이 개수를 먼저 센 뒤 쓴다(원소 수가 앞에 오므로 — `ArrayFieldCodec.h:127`).
-- `SubobjectRoot` 필드(종류 0 owner)와 `SubobjectAttach` 필드(종류 1 노드)는 **encode 전에 표 대상과 비교**한다. 같으면 쓰지 않고, 다르면 null이어도 기준 비교(`OmitCurrent` — `GraphSave.cpp:478-485`)를 거치지 않고 **강제로 쓴다**(레코드의 이 필드는 null이라, 그대로 두면 사용자가 지운 null이 기준과 같아 사라지고 복원이 표 대상을 다시 써 넣는다).
-- 종류 1 노드의 Record 기준은 subobject 기본값 레코드다(10.6절).
+- 소유 필드(`Subobject`)·소유 목록·Root 필드·부착 부모는 **지금처럼 노드 참조로 쓴다.** 그래서 편의 저장의 Include가 소유 필드·목록 참조로 subobject를 저절로 노드에 넣는다(Outer가 소유 노드라 NodeTable 순서 규칙 "Outer가 앞"을 그대로 지킨다). 쓴 값은 복원에서 instancing이 만든 것과 같은 handle을 다시 쓰므로 해가 없다.
+- **선언 subobject 가리기**(`ClassifyDeclaredSubobjects` — GraphSaveSet.cpp): 생성 출처가 `ClassSubobject`이고 Outer가 집합 안 노드인 노드는, 소유 노드 타입 표에서 이름(= 소유 필드 도구 이름)이 같은 항목의 SubobjectGuid로 종류 1 항목을 쓴다(객체를 읽지 않는다). 표에 없는 이름이면 `InvalidArgument`다. 소유 객체 없이 저장한 선언 subobject는 객체 노드로 쓴다. NodeTable을 쓰지 않는 저장(`writeNodeTable` 거짓 — A1 Exports)에 소유 객체와 함께 든 선언 subobject가 있으면 `InvalidArgument`다(에셋 클래스는 subobject가 없어 지금은 생기지 않는다).
+- **강제 쓰기**: 차이 쓰기(기준 Editor·Cooked)에서도 소유 객체의 `SubobjectRoot` 필드와 선언 subobject의 `SubobjectAttach` 필드는 기준과 같아도 쓴다(`GraphEncodeContext::SetForcedFields` — 레코드 값이 null이라 사용자가 지운 null이 사라지면 복원이 표 대상을 다시 써 넣는다). 대가: 클래스가 `Root`·`AttachParent`를 바꿔도 저장된 데이터에는 전파되지 않는다(값 기본값 전파는 PF1c2의 노드별 기준이 맡는다).
+- 종류 1 노드의 Record 기준(subobject 기본값 레코드)은 PF1c2다 — PF1c1은 subobject 타입의 클래스 레코드를 기준으로 쓴다(덮은 기본값은 차이로 남는다 — 값은 맞고 전파만 약하다).
 
 **복원**:
 
-- **도달 검사**(`CheckReachable` — `GraphStage.cpp:273-279`, `GraphReachability.cpp:7-11`)에 "종류 0 owner → 그 종류 1 노드" 암묵 강한 간선을 더한다(소유 필드·목록·root가 저장되지 않아 그 노드로 들어오는 참조가 없다).
-- **1단계 검증**에서 거부한다: Record에 `Subobject` 필드 값이 있음, `SubobjectList` 원소가 종류 1 노드이거나 중복, 종류 1 노드 Record의 타입이 표 항목 타입과 다름, owner 아래 표 이름과 같은 이름의 종류 0 노드(`CheckCreatePreconditions` — `GraphIdentity.cpp:148`, 진단 `DeclaredSubobjectNameConflict`). 생성 예산에는 표에 있으나 그래프에 없는 subobject 수도 넣는다.
-- **2a**: 종류 0 노드를 만든 직후 `CreateDeclaredSubobjects`(10.3절)를 부르고 종류 1 항목을 (owner, id) 키로 그 subobject에 묶는다. 표에 있는데 그래프에 없는 subobject(클래스에 새로 생김)도 만들어지고 기본값 그대로다. 2a는 이제 할당·상한 밖에도 `InitSubobjectDefaults` 실패로 실패할 수 있다(`GraphApply.cpp:303-305` 주석과 OF 5.4절 실패 목록을 고친다).
-- **2b**: Record를 적용한다(누락 = 기준). `ApplyFields` 끝, `CheckRequired` 앞(`GraphStage.cpp:156·186`)에서 `SubobjectList` 목록을 "선언 subobject(표 순서) + Record의 원소"로 다시 짠다(Record decode가 목록을 통째로 바꾸므로 — `ArrayFieldCodec.h:652`). `Required`는 원소 non-null 규칙이라 빈 목록은 문제없다.
+- 1단계(`ResolveDeclaredSubobjectNode` — GraphLoad.cpp, `DecodeNode` 앞): 종류 1 노드의 소유 노드는 앞의 객체 노드여야 하고(아니면 `CorruptData`), 표에 없는 SubobjectGuid는 `InvalidArgument`(클래스에서 사라짐 — 하위호환 없음, 다시 저장한다)다. 타입은 표 항목 타입, 이름은 소유 필드 도구 이름이고 이후 검사(정체성·형제 유일성 — 같은 (소유 노드, SubobjectGuid) 두 번도 이것이 `CorruptData`로 잡는다)는 객체 노드와 같다. 편의 복원의 도달 검사는 소유 노드에서 그 종류 1 노드로 닿는다고 본다(Record가 참조를 담지 않아도).
+- 2a(`CreateNodes` — GraphApply.cpp): 객체 노드는 만든 직후 `CreateDeclaredSubobjects`를 부른다(그래프에 항목이 없는 새 subobject도 생긴다). 종류 1 노드는 `ConstructionContext::DeclaredSubobject(owner, index)`(소유 필드 값)에 묶는다. 2a는 이제 기본값 덮기 hook 실패·표 이름과 같은 이름의 객체 노드(`AlreadyExists`)로도 실패한다.
+- 2b 뒤(`ObjectGraphStage::ApplyFields`): 선언 subobject를 가진 객체 노드마다 `ConstructionContext::RestoreDeclaredSubobjectList`가 소유 필드를 대조한다 — 2a가 만든 subobject(Outer = 소유 객체, 이름 = 필드 도구 이름)를 찾아, 필드가 null이면 그것으로 되돌리고(**선언 subobject의 파괴는 저장하지 않는다** — UE default subobject를 편집기에서 지울 수 없는 것과 같다, PF1c1 리뷰 결정 2026-11-28) 다른 객체면 `CorruptData`다. 그 뒤 소유 목록을 "선언 subobject(표 순서) + 저장된 나머지(한 번씩)"로 다시 짠다.
+- 2단계 예산은 객체 노드마다 만드는 선언 subobject 수(표 크기)도 미리 청구한다. 2a의 종류 1 묶기 실패도 트랜잭션을 고정한다.
+- `ObjectGraphFormatVersion` = 3(NodeTable 항목 앞 종류 byte — 항목 29 byte). 클래스 기본값 지문과 그래프·패키지 byte가 모두 바뀐다: 지문 golden(`ClassDefaultsGoldenTests`), 패키지 golden(`PackageGoldenTests`·`PackageSidecarTests`·`AssetIndexCommandletFixtures.h`)을 다시 고정하고 Sandbox TestContent 패키지를 다시 만든다.
 
 ### 10.5 생성 출처
 
@@ -179,7 +179,8 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 |---|---|---|
 | PF1a(끝 — 2026-11-28) | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경), 등록 검사(`SubobjectSchemaTests`), `DefaultSubobject_TableGeneratedWithStableGuid`. 모듈 경계 상속은 PF1e의 StaticMeshActor(WorldIntegration)가 실제 빌드로 덮는다 |
 | PF1b(끝 — 2026-11-28) | ObjectRuntime `ObjectOrigin` 슬롯 표지, 타입을 지운 목록 staged 대입, `CreateDeclaredSubobjects`, `SubobjectDefaultsContext` 두 모드 | `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_TableReferencesResolve`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_NoSharedMutableComponent`, 실패 rollback |
-| PF1c | ObjectSerialization graph 형식 3(종류 1 노드·Include·도달 간선·목록 걸러내기·root/attach 비교·1단계 거부·2b 재짜기), subobject 기본값 레코드·노드별 기준 | `GraphV3_DeclaredSubobjectNodeRoundTrip`, `DefaultSubobject_RecordIsDeterministic`, `DefaultSubobject_TableReferencesEqualBaseline`, `DefaultSubobject_ClearedRootIsSaved`(null 강제 쓰기), `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `DefaultSubobject_NewClassSubobjectAppearsOnLoad`, `DefaultSubobject_MissingSubobjectRejected`, `DefaultSubobject_NameConflictRejected`, `DefaultSubobject_RenameKeepsGuidAndOverride`, golden 재고정 |
+| PF1c1(끝 — 2026-11-28) | ObjectSerialization graph 형식 3(종류 1 노드·선언 subobject 가리기·1단계 해석·2a 묶기·2b 목록 다시 짜기·Root/attach 강제 쓰기), golden 재고정, TestContent 다시 만들기 | `GraphV3_DeclaredSubobjectNodeRoundTrip`, `DefaultSubobject_ClearedRootIsSaved`, `DefaultSubobject_MissingSubobjectRejected`, `DefaultSubobject_EditorBaselineRoundTrip`, `DefaultSubobject_DestroyedSubobjectIsNotSaved`, `DefaultSubobject_MalformedNodesRejected`(종류 byte·종류 1 형식·소유 노드·중복·표 이름 충돌·NodeTable 없는 저장), 형식 시험 갱신 |
+| PF1c2 | subobject 기본값 레코드(타입 레코드에 캐시)·노드별 기준(종류 1 노드 = subobject 기본값 레코드)·`PlanRevert`·기본값 조회 | `DefaultSubobject_RecordIsDeterministic`, `DefaultSubobject_TableReferencesEqualBaseline`, `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `DefaultSubobject_NewClassSubobjectAppearsOnLoad`, `DefaultSubobject_RenameKeepsGuidAndOverride` |
 | PF1d | World SpawnActor 한 트랜잭션·Component Outer·이름 규칙·subobject 장부·부착 함수 추출·Subobject 필드 비우기·편입 Outer 검사 | `DefaultSubobject_SpawnActorSingleTransaction`, `DefaultSubobject_ComponentOuterIsActor`, `AddComponent_NamesAreSmallestFreeNumber`, 기존 World 시험 |
 | PF1e | ERD37 이전(15종), `PrepareRoot` 삭제, Actor 예시, 기존 시험 갱신(`WorldLightComponentTests.cpp:840-865` root 재사용·거부, `StaticMeshComponentTests.cpp:559-608`, `WorldEnvironmentComponentTests.cpp:1068` 부근, `WorldPrimitiveComponentTests.cpp:478-500`, 리플렉션 필드 수), 에셋 재쿠킹 | `DefaultSubobject_EngineActorRootSavedAsSubobject`, 광원·Trigger·환경 기존 시험 |
 

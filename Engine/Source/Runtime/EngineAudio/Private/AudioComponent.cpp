@@ -38,6 +38,15 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
 
     options.remainActiveIfDropped = remainActiveIfDropped;
     options.category = category_;
+    // 재생 전에 건 send는 이번 Play에 쓰고 비운다(UE PendingSubmixSends).
+    options.busSendCount = busSendCount_;
+    for (uint32 index = 0; index < busSendCount_; ++index) {
+        options.busSends[index] = Move(busSends_[index]);
+        busSends_[index] = PlayBusSend{};
+    }
+
+    busSendCount_ = 0;
+
     options.alwaysPlay = alwaysPlay;
     options.isUiSound = isUiSound;
     if (enableLowPassFilter) {
@@ -71,6 +80,33 @@ Result<void> AudioComponent::Play(uint32 startFrame) noexcept {
     }
 
     playback_ = played.Value();
+    return Result<void>::Success();
+}
+
+Result<void> AudioComponent::SetBusSend(const MixBusRef& bus, float level) noexcept {
+    if (!bus || !math::IsFinite(level) || level < 0.0f) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 재생 중이면 그 재생에만 낸다(UE SetSubmixSend). 아니면 다음 Play에 쓸 send로 둔다.
+    if (AudioWorldSubsystem* audio = Subsystem(); audio != nullptr && IsPlaying()) {
+        return audio->SetBusSend(playback_, bus, level);
+    }
+
+    uint32 index = 0;
+    while (index < busSendCount_ && busSends_[index].bus.Get()->Key() != bus.Get()->Key()) {
+        ++index;
+    }
+
+    if (index == busSendCount_) {
+        if (busSendCount_ >= audio::MaxVoiceSends) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        busSends_[busSendCount_++].bus = bus;
+    }
+
+    busSends_[index].level = level;
     return Result<void>::Success();
 }
 

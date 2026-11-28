@@ -133,6 +133,74 @@ Guid Translator::ParameterIdentity(Guid node, Guid parameterId, bool shared) con
     return DeriveExpandedGuid(parts);
 }
 
+Result<void> Translator::RecordParameterOrigin(Guid node, Guid identity, Guid parameterId,
+                                               StringView name, bool shared) noexcept {
+    IrParameterOrigin origin(allocator_);
+    origin.identity = identity;
+    origin.parameterId = parameterId;
+    if (auto assigned = origin.name.TryAssign(name); !assigned) {
+        return assigned;
+    }
+
+    const ExpandedOrigin* own = origins_.Find(node);
+    origin.owner = own != nullptr ? snapshots_[own->snapshot]->asset : Guid{};
+    if (!shared) {
+        // 원본 id다(사본이면 그 원본, 주 그래프 노드면 그대로).
+        const auto original = [&](Guid at) noexcept {
+            const ExpandedOrigin* found = origins_.Find(at);
+            return found != nullptr ? found->original : at;
+        };
+
+        bool layered = false;
+        Guid at = node;
+        for (usize step = 0; step <= origins_.Count() + syntheticOwners_.Count(); ++step) {
+            if (const ExpandedOrigin* copy = origins_.Find(at)) {
+                const Guid call = copy->call;
+                if (const SyntheticLayer* layer = syntheticLayers_.Find(call)) {
+                    // 가장 안쪽 레이어 합성 호출이 scope다(합성 id는 경로에 넣지 않는다).
+                    if (!layered) {
+                        layered = true;
+                        origin.layer = layer->layer;
+                        origin.scope = layer->blend ? ParameterScopeKind::LayerBlend
+                                                    : ParameterScopeKind::Layer;
+                    }
+                } else if (auto pushed = origin.callPath.TryPushBack(original(call)); !pushed) {
+                    return pushed;
+                }
+
+                at = call;
+                continue;
+            }
+
+            if (const Guid* owner = syntheticOwners_.Find(at)) {
+                if (auto pushed = origin.callPath.TryPushBack(original(*owner)); !pushed) {
+                    return pushed;
+                }
+
+                at = *owner;
+                continue;
+            }
+
+            break;
+        }
+
+        // 안 → 바깥으로 모았으니 뒤집는다.
+        const usize count = origin.callPath.Size();
+        for (usize index = 0; index < count / 2; ++index) {
+            const Guid swap = origin.callPath[index];
+            origin.callPath[index] = origin.callPath[count - 1 - index];
+            origin.callPath[count - 1 - index] = swap;
+        }
+
+        if (!layered) {
+            origin.scope = origin.callPath.IsEmpty() ? ParameterScopeKind::Global
+                                                     : ParameterScopeKind::FunctionCall;
+        }
+    }
+
+    return builder_.AddParameterOrigin(Move(origin));
+}
+
 Guid Translator::CopiedNodeId(Guid consumer, Guid original) const noexcept {
     const ExpandedOrigin* origin = origins_.Find(consumer);
     if (origin == nullptr) {

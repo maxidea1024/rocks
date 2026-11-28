@@ -446,20 +446,23 @@ protected:
 
 ### 5.1 형식
 
-예정 개정(2026-11-28, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절 — PF1): NodeTable 항목에 노드 종류 칸을 더한다. 종류 "선언 subobject"는 새 객체를 만들지 않고 "노드 k(소유 객체)의 SubobjectGuid g"를 가리키며, 복원 2a가 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶는다. A1 Exports도 같은 칸을 쓴다. 형식 버전은 3이 되고(하위호환 없음) 클래스 기본값 지문이 함께 바뀐다. 차이 기준 `GraphBaseline`에는 노드별 기준 제공자(subobject 노드 = subobject 기본값 레코드)를 더한다. 도달 검사의 암묵 간선(owner → 선언 subobject), 소유 목록 걸러내기·복원 재짜기, 2a의 새 실패(`InitSubobjectDefaults`)와 5.4절 실패 목록 개정은 [Prefab](Prefab/07-Pf1ClassSubobjects.ko.md) 10.4절이 정본이다. 아래는 지금(형식 2) 형식이다.
+개정(2026-11-28, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절 — PF1c1에서 구현, 형식 3): NodeTable 항목에 노드 종류 칸을 더한다. 종류 "선언 subobject"는 새 객체를 만들지 않고 "노드 k(소유 객체)의 SubobjectGuid g"를 가리키며, 복원 2a가 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶는다. A1 Exports는 아직 바꾸지 않는다(에셋 클래스에 subobject가 없다). 형식 버전은 3이 되고(하위호환 없음) 클래스 기본값 지문이 함께 바뀐다. 노드별 차이 기준(subobject 노드 = subobject 기본값 레코드)은 PF1c2다. 도달 검사는 소유 노드에서 그 선언 subobject 노드로 닿는다고 본다. 선언 subobject 가리기(종류 1)·Root/부착 부모 강제 쓰기, 1단계 해석, 2a 묶기와 새 실패(`InitSubobjectDefaults`·표 이름 충돌), 2b 뒤 소유 목록 다시 짜기는 [Prefab](Prefab/07-Pf1ClassSubobjects.ko.md) 10.4절이 정본이다.
 
 모든 정수 little-endian, Guid·문자열·Bytes는 Archive 규칙이다(정수는 고정 폭 — `Archive.h`).
 
 ```
 offset size 필드
 0      8    magic "ROCKSGRF"
-8      4    formatVersion = 2           (그 밖은 Unsupported — v1은 읽지 않는다)
+8      4    formatVersion = 3           (그 밖은 Unsupported — 이전 형식은 읽지 않는다, 하위호환 없음)
 12     4    flags: NodeTable(1) | BaseOuter(2)   (BaseOuter는 NodeTable과만, 정의되지 않은 비트는 InvalidArgument)
 16     4    nodeCount (1..maxObjects)
 20     4    externalCount (0..maxExternalReferences)
-24     —    [NodeTable] nodeCount × { Guid type, u32 outer, String name }
-              outer: 0 = 그래프 밖(BaseOuter 비트가 있으면 기준 Outer, 없으면 Outer 없음),
+24     —    [NodeTable] nodeCount × { u8 kind, Guid type, u32 outer, String name }
+              kind 0 객체: outer 0 = 그래프 밖(BaseOuter 비트가 있으면 기준 Outer, 없으면 Outer 없음),
                      1..자기 번호−1 = 노드 k
+              kind 1 선언 subobject(Prefab 10.4절): type 칸 = SubobjectGuid, outer = 소유 객체 노드
+                     (앞의 kind 0), name은 비어 있다 — 새로 만들지 않고 소유 노드가 만든 subobject에 묶는다
+              그 밖의 kind는 CorruptData
        —    nodeCount × Bytes(Record)   Record = ROCKSREC(schema = 노드 타입, version = 저장 당시 스키마 버전)
 끝     —    남는 byte 없음
 ```
@@ -654,7 +657,7 @@ public:
 
 - 상태 기계: 생성 → Validate → CreateObjects → ApplyFields → CheckRequired. 순서를 어기거나 앞 단계가 실패한 뒤 부르면 InvalidArgument. 호출 검사(순서·스레드·문맥·트랜잭션) 실패는 상태를 바꾸지 않고, 진행 중인 같은 Stage에 다시 들어오면 Busy다(Od2 구현 — 아래 구현에서 정한 점). 트랜잭션에 객체를 넣은 뒤의 실패(2a의 Create 실패·2b(imports 확인 포함 — 개수 불일치도)·2c)는 그 트랜잭션을 그 오류로 고정한다(`ConstructionContext::Fail` — Commit이 실패하고 Rollback·소멸자가 되돌린다, 부분 공개 없음). 그래서 한 트랜잭션에 올린 Stage 하나의 실패가 트랜잭션 전체(SCC의 다른 그래프 포함)를 실패시킨다. 2a 사전 확인 실패는 객체가 없으므로 고정하지 않는다.
 - **1단계 노드 검사**(노드 k마다): 타입 Acquire(NotFound) → Abstract·생성 함수 없음(Unsupported) → `ValidateLayout` → outer 값(0·1..k−1) → `CheckNewObjectIdentity`(정책 사본, 앞 노드들로 계산한 Outer 요약 또는 outer 0이면 `hasBase ? input.base : Outer 없음`) → 그래프 안 형제 유일성((outer, 비교 키) 해시 — 중복은 InvalidArgument, 파일 손상이므로). 이어서 지금 `DecodeNode`의 Record 검증(버전·마이그레이션·필드·`excludedFlags` 존재 거부), 참조 검사(노드 참조의 범위·기대 형식, 외부 참조의 범위와 `importTypes`로 기대 형식의 양립 — 고아 검사는 없다, 양립 규칙은 아래 "구현에서 정한 점(A0-Oe)"). 외부 참조 token은 지금처럼 (대상 번호, 기대 형식 위치)로 남긴다.
-- **2a 사전 확인**(만들기 전): 정책 사본 일치(WrongContext) → `hasBase`면 `baseOuter`가 생존 객체 또는 이 트랜잭션 객체이고 `DescribeOuter` 결과의 `isOutermost`·`outermostIsPackage`·`pathBytes`가 `input.base`와 같음(InvalidArgument — handle·Inner 유무는 비교하지 않는다) → 기준 Outer 노드마다 실제 요약으로 `CheckNewObjectIdentity`를 다시 실행(대표 자식 규칙이 실제 Inner 상태로 판정된다) → 기준 Outer 노드 이름의 Registry 점유(AlreadyExists — 대표 노드는 빈 비교 키로 점유를 확인하므로 기준 Outer에 이미 대표 자식이 있으면 AlreadyExists), `hasBase`가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유(AlreadyExists). 이후 실제 Create가 실패할 수 있는 이유는 할당·슬롯 상한·종료·재진입뿐이다.
+- **2a 사전 확인**(만들기 전): 정책 사본 일치(WrongContext) → `hasBase`면 `baseOuter`가 생존 객체 또는 이 트랜잭션 객체이고 `DescribeOuter` 결과의 `isOutermost`·`outermostIsPackage`·`pathBytes`가 `input.base`와 같음(InvalidArgument — handle·Inner 유무는 비교하지 않는다) → 기준 Outer 노드마다 실제 요약으로 `CheckNewObjectIdentity`를 다시 실행(대표 자식 규칙이 실제 Inner 상태로 판정된다) → 기준 Outer 노드 이름의 Registry 점유(AlreadyExists — 대표 노드는 빈 비교 키로 점유를 확인하므로 기준 Outer에 이미 대표 자식이 있으면 AlreadyExists), `hasBase`가 아니면 outer 0 이름 있는 노드의 최상위 이름 공간 점유(AlreadyExists). 이후 실제 Create가 실패할 수 있는 이유는 할당·슬롯 상한·종료·재진입뿐이다. 선언 subobject 생성(형식 3 — [Prefab](Prefab/07-Pf1ClassSubobjects.ko.md) 10.4절)은 그 밖에도 기본값 덮기 hook 실패와 표 이름과 같은 이름의 객체 노드(AlreadyExists)로 실패하며, 2b 뒤 소유 필드가 그 subobject가 아닌 다른 객체를 가리키면 CorruptData다.
 - **2b 확인**(쓰기 전): `imports.Size() == importTypes.Size()`(InvalidArgument), import마다 생존 객체 또는 이 트랜잭션 객체(StaleHandle), 실제 타입이 선언 타입의 native 파생(InvalidArgument — 호출자 계약), 그리고 1단계가 기록한 (import i, 기대 형식) 쌍마다 실제 대상이 그 기대를 만족(TypeMismatch). `importTypes`는 1단계 형식 검사와 A1의 `expectedTypeId` 대조에만 쓰이고, 실제 연결의 판정은 기록한 쌍이다. 이어서 지금 `ConstructGraph`의 적용 루프다(외부 참조 token을 `imports`의 handle로 바꾼다). 이 확인은 쓰기 전이지만 객체를 만든 뒤라 실패하면 트랜잭션을 고정한다(상태 기계 규칙).
 - 1단계가 청구하는 2단계 몫: 노드 생성(노드 수 + 이름 byte) + Commit 몫 1 + staged 간선 수 + 2b imports 확인(import 수 + 기록한 쌍 수) + 적용 몫(지금과 같다). 2c(Required)는 작업량 무제한이다(4절).
 

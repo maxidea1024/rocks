@@ -6,6 +6,7 @@
 #include <AudioAssets/SoundClip.h>
 #include <EngineAudio/AudioAttenuation.h>
 #include <EngineAudio/AudioOcclusionQuery.h>
+#include <AudioAssets/MixBusData.h>
 #include <AudioAssets/MixSnapshotData.h>
 #include <AudioAssets/SoundCategory.h>
 #include <Core/Containers/Array.h>
@@ -137,6 +138,25 @@ public:
     // 장치 전체 focus 배수다(UE FAudioDevice::SetGlobalFocusSettings — AudioDevice.cpp:7578–7589,
     // 3.42.5절). 다음 프레임 끝 묶음부터 쓰인다. 칸이 음수·비유한이면 InvalidArgument다.
     Result<void> SetGlobalFocusSettings(const GlobalFocusSettings& settings) noexcept;
+
+    // 버스(Docs/Design/AudioSystem 3.45.9절)다. 다음 프레임 끝 묶음에 실린다.
+    // - SetMasterBus: Master의 값(볼륨·wet·dry)을 정한다(UE UAudioSettings::MasterSubmix). 빈 ref면
+    //   엔진 내장 Master다. 부모가 있는 버스는 InvalidArgument다. 이 키를 가리키는 버스·send는
+    //   Master로 간다.
+    // - SetBaseDefaultBus: 버스를 정하지 않은 재생의 기본 버스다(UE BaseDefaultSubmix). 그 뒤에
+    //   voice를 받는 재생부터 쓴다. 빈 ref면 Master다.
+    // - SetBusOutputVolume·SetBusWetLevel·SetBusDryLevel: 선형 실행 배수(≥ 0, UE
+    //   SetSubmixOutputVolume 등)다. 버스가 아직 없어도 키로 남는다. 빈 ref·음수·비유한은
+    //   InvalidArgument, 배수 표(MaxBusModifiers)가 차면 CapacityExceeded다.
+    // - SetBusSend: 재생 단위 send(UE UAudioComponent::SetSubmixSend)다. 같은 버스가 사운드 send에
+    //   있으면 level만 바꾸고, 없으면 덧붙인다. 끝난 재생은 아무 일도 하지 않는다(Stop과 같다).
+    // 오류: 사슬 검사 실패(ValidateMixBusChain).
+    Result<void> SetMasterBus(MixBusRef bus) noexcept;
+    Result<void> SetBaseDefaultBus(MixBusRef bus) noexcept;
+    Result<void> SetBusOutputVolume(const MixBusRef& bus, float volume) noexcept;
+    Result<void> SetBusWetLevel(const MixBusRef& bus, float level) noexcept;
+    Result<void> SetBusDryLevel(const MixBusRef& bus, float level) noexcept;
+    Result<void> SetBusSend(PlaybackHandle handle, const MixBusRef& bus, float level) noexcept;
 
     // 엔진 기본 분류다(UE UAudioSettings::DefaultSoundClass — 3.43.1절). 분류가 없는 사운드의 다음
     // Play부터 쓴다. 빈 ref면 분류 없음이다. 오류: 사슬 검사 실패(ValidateSoundCategoryChain).
@@ -336,6 +356,25 @@ private:
     GlobalFocusSettings focusSettings_;
     SoundCategoryChainRef defaultCategory_;
     MixSnapshotRef defaultBaseMix_;
+    // 버스 설정과 실행 배수 표다(3.45.8절 — 묶음에는 바뀐 것만 싣는다).
+    struct GameBusModifier {
+        uint64 key = 0;
+        float volume = 1.0f;
+        float wet = 1.0f;
+        float dry = 1.0f;
+    };
+
+    enum class BusModifierKind : uint8 {
+        Volume,
+        Wet,
+        Dry
+    };
+
+    Result<void> SetBusModifier(const MixBusRef& bus, BusModifierKind kind, float value) noexcept;
+    MixBusRef masterBus_;
+    MixBusRef baseDefaultBus_;
+    bool busSettingsDirty_ = false;
+    Array<GameBusModifier> busModifiers_;
     // 이번 프레임 끝에 정한 차폐 허용(mute·audio.occlusion.disable이 아님)이다. 다음 프레임의 Play
     // 첫 검사와 요청 응답이 쓴다.
     bool occlusionEnabled_ = true;

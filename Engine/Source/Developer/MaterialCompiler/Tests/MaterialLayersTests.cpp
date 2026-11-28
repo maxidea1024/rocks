@@ -337,6 +337,15 @@ TEST(MaterialLayers_ParameterPerLayer) {
     REQUIRE(out.succeeded);
     REQUIRE(out.module.Parameters().Size() == 1);
     CHECK(!(out.module.Parameters()[0].id == LayerParameterId));
+    // 출처(12.8절 MS3d1): 레이어 scope(그 레이어 Guid), 경로는 레이어 노드 하나, 소유는 레이어
+    // 함수.
+    const IrParameterOrigin* origin = out.module.FindParameterOrigin(out.module.Parameters()[0].id);
+    REQUIRE(origin != nullptr);
+    CHECK(origin->scope == ParameterScopeKind::Layer);
+    CHECK(!(origin->layer == Guid{}));
+    CHECK(origin->owner == LayerParameter);
+    REQUIRE(origin->callPath.Size() == 1);
+    CHECK(origin->callPath[0] == layers);
 
     // 위 레이어를 Bottom 혼합으로 바꾸면 아래 레이어의 파라미터가 남고 정체가 다르다.
     FunctionFixture keepBottom(env, BlendBottom, "KeepBottom");
@@ -350,6 +359,11 @@ TEST(MaterialLayers_ParameterPerLayer) {
     REQUIRE(otherOut.succeeded);
     REQUIRE(otherOut.module.Parameters().Size() == 1);
     CHECK(!(otherOut.module.Parameters()[0].id == out.module.Parameters()[0].id));
+    const IrParameterOrigin* otherOrigin =
+        otherOut.module.FindParameterOrigin(otherOut.module.Parameters()[0].id);
+    REQUIRE(otherOrigin != nullptr);
+    CHECK(otherOrigin->scope == ParameterScopeKind::Layer);
+    CHECK(!(otherOrigin->layer == origin->layer));
 }
 
 // 보통 호출로 써도 용도 Layer 함수의 입출력 규칙을 본다(UE ValidateFunctionUsage).

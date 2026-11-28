@@ -67,6 +67,8 @@ bool IsTraceableShape(const Vec3d& start, const Vec3d& end, const Quatd& rotatio
 // 컴포넌트 질의에 쓰는 body 값이다.
 struct ComponentQuery {
     PhysicsBodyHandle body;
+    // weld된 컴포넌트면 그 컴포넌트(루트 body의 부분 — 7.1.23절)다.
+    ObjectHandle part;
     QueryFilter filter;
     // 형상 값이 0이다(UE IsZeroExtent — PrimitiveComponent::IsZeroExtent).
     bool zeroExtent = false;
@@ -76,7 +78,9 @@ struct ComponentQuery {
 bool ReadComponentQuery(World& world, ObjectHandle component, ComponentQuery& query) noexcept {
     bool found = false;
     (void)world.With<PrimitiveComponent>(component, [&](PrimitiveComponent& primitive) noexcept {
-        query.body = primitive.BodyHandle();
+        // weld면 루트 body의 내 부분이다(UE OverlapMulti의 weld 경로 — 7.1.23절).
+        query.body = primitive.PhysicsBody();
+        query.part = primitive.IsWelded() ? component : ObjectHandle{};
         auto resolved = primitive.TryResolveCollision();
         if (query.body.IsNull() || !resolved) {
             return Result<void>::Success();
@@ -333,6 +337,12 @@ Result<bool> ComponentTraceAll(World& world, ObjectHandle component, const Vec3d
         return Result<bool>::Success(false);
     }
 
+    // weld된 컴포넌트는 자기 물리 객체가 없어 쓸 형상이 없다(UE GetPhysicsObjectById가 null —
+    // PrimitiveComponentPhysics.cpp:1598-1611, 7.1.23절). 크기 0 line trace는 그 앞이다(UE 순서).
+    if (!query.part.IsNull()) {
+        return Result<bool>::Success(false);
+    }
+
     auto traced = scene->TraceBody(query.body, start, end, rotation, query.filter, params, hits);
     if (!traced) {
         hits.Clear();
@@ -352,8 +362,8 @@ Result<bool> ComponentOverlapAll(World& world, ObjectHandle component, const Vec
         return Result<bool>::Success(false);
     }
 
-    auto overlapped =
-        scene->OverlapBody(query.body, position, rotation, query.filter, params, overlaps);
+    auto overlapped = scene->OverlapBody(query.body, query.part, position, rotation, query.filter,
+                                         params, overlaps);
     if (!overlapped) {
         overlaps.Clear();
         return overlapped;

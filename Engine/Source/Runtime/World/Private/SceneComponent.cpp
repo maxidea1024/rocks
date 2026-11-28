@@ -191,7 +191,9 @@ void SceneComponent::PropagateTransformUpdated() noexcept {
     for (usize index = 0; index < children_.Size(); ++index) {
         const ObjectHandle child = children_[index];
         auto notified = world.With<SceneComponent>(child, [](SceneComponent& component) noexcept {
+            component.transformFromParent_ = true;
             component.PropagateTransformUpdated();
+            component.transformFromParent_ = false;
         });
         (void)notified;
     }
@@ -310,7 +312,9 @@ void SceneComponent::NotifyChildSocketsChanged() noexcept {
         auto notified =
             world.With<SceneComponent>(children_[index], [](SceneComponent& component) noexcept {
                 component.MarkDirty();
+                component.transformFromParent_ = true;
                 component.NotifyTransformUpdated();
+                component.transformFromParent_ = false;
             });
         (void)notified;
     }
@@ -693,6 +697,7 @@ Result<void> SceneComponent::AttachTo(ObjectHandle parent, const AttachmentRules
     worldDirty_ = false;
     MarkDirty();
     NotifyTransformUpdated();
+    OnAttachedToParent(rules);
     return Result<void>::Success();
 }
 
@@ -734,8 +739,10 @@ Result<void> SceneComponent::LinkParent(ObjectHandle parent, StringView socket) 
         current = next.Value();
     }
 
-    // 같은 부모의 다른 socket으로 옮기면 자식 목록은 그대로다.
+    // 같은 부모의 다른 socket으로 옮기면 자식 목록은 그대로다. 떼기 알림은 검증이 끝난 뒤다(UE
+    // AttachToComponent → DetachFromComponent — 같은 부모·socket이면 부르지 않는다, 7.1.23절).
     if (parent == parent_) {
+        OnDetachingFromParent();
         attachSocket_ = Move(socketName);
         worldDirty_ = false;
         MarkDirty();
@@ -750,6 +757,7 @@ Result<void> SceneComponent::LinkParent(ObjectHandle parent, StringView socket) 
     }
 
     if (!parent_.IsNull()) {
+        OnDetachingFromParent();
         auto removed = world.With<SceneComponent>(
             parent_, [self](SceneComponent& component) noexcept { component.RemoveChild(self); });
         (void)removed;
@@ -803,6 +811,7 @@ Result<void> SceneComponent::Detach(AttachmentRule rule) noexcept {
         relative = current.Value();
     }
 
+    OnDetachingFromParent();
     const ObjectHandle self = Handle();
     auto removed = GetWorld().With<SceneComponent>(
         parent_, [self](SceneComponent& component) noexcept { component.RemoveChild(self); });
@@ -826,6 +835,7 @@ void SceneComponent::DetachForDestroy() noexcept {
 
     // 파괴 정리는 Mobility와 무관하게 뗀다(상대 값 유지).
     if (!parent_.IsNull()) {
+        OnDetachingFromParent();
         const ObjectHandle self = Handle();
         auto removed = GetWorld().With<SceneComponent>(
             parent_, [self](SceneComponent& component) noexcept { component.RemoveChild(self); });
@@ -844,6 +854,13 @@ void SceneComponent::DetachForDestroy() noexcept {
     // 낸 뒤 모두 고아로 만들고 나서 통지한다.
     World& world = GetWorld();
     const ObjectHandle self = Handle();
+    // 자식이 고아가 되기 전 떼기 알림이다(weld가 루트를 잃지 않게 — PhysicsModule 7.1.23절).
+    for (usize index = 0; index < children_.Size(); ++index) {
+        (void)world.With<SceneComponent>(children_[index], [](SceneComponent& component) noexcept {
+            component.OnDetachingFromParent();
+        });
+    }
+
     Array<ObjectHandle> orphans(Move(children_));
     children_ = Array<ObjectHandle>(orphans.GetAllocator());
     for (const ObjectHandle child : orphans) {

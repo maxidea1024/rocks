@@ -255,6 +255,36 @@ TEST(MaterialParameter_SharedIdAndTableOrder) {
     }
 
     CHECK(constants.members[0].step + 1 == constants.steps.Size());
+
+    // 출처(12.8절 MS3d1): 주 그래프 파라미터는 소유 null·Global·빈 경로, 이름은 노드 parameterName.
+    REQUIRE(out.module.ParameterOrigins().Size() == 2);
+    const IrParameterOrigin* origin = out.module.FindParameterOrigin(RoughnessId);
+    REQUIRE(origin != nullptr);
+    CHECK(origin->owner == Guid{});
+    CHECK(origin->parameterId == RoughnessId);
+    CHECK(origin->scope == ParameterScopeKind::Global);
+    CHECK(origin->callPath.IsEmpty());
+    CHECK(origin->name.View() == StringView("Roughness"));
+}
+
+// 같은 ParameterId를 다른 기본값으로 두 번 쓰면 ParameterConflict다(UE
+// r.Material.PedanticErrorChecksEnabled 검사 — 쿠킹 파라미터 표가 어느 노드를 골라도 같게).
+TEST(MaterialParameter_ConflictingDefaults) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    const Guid first = AddScalar(fixture, RoughnessId, 0.5f);
+    const Guid second = AddScalar(fixture, RoughnessId, 0.75f);
+    const Guid sum = fixture.Add("Material.Add");
+    fixture.Connect(first, "Result", sum, "A");
+    fixture.Connect(second, "Result", sum, "B");
+    fixture.Connect(sum, "Result", OutputNodeId, "AmbientOcclusion");
+    REQUIRE(fixture.ready);
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWith(fixture, Traits(), out, {}));
+    CHECK(!out.succeeded);
+    CHECK(CountDiagnostics(out, MaterialDiagnosticCode::ParameterConflict,
+                           nodegraph::GraphDiagnosticSeverity::Error) == 1);
 }
 
 // 접지 않는 연산(Lerp)과 빈도가 높은 값(TexCoord)에 닿는 파라미터는 그 자체가 출력이다. Constant

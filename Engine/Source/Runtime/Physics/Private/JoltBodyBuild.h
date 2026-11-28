@@ -13,10 +13,12 @@
 #include <Core/Math/Quaternion.h>
 #include <Core/Math/Vector3.h>
 #include <Core/Result.h>
+#include <Object/ObjectHandle.h>
 #include <Physics/PhysicsSettings.h>
 #include <World/Physics/BodyGeometry.h>
 #include <World/Physics/BodyMotion.h>
 #include <World/Physics/BodyShapeElement.h>
+#include <World/Physics/BodyWeldDesc.h>
 
 // Jolt.h가 Jolt의 모든 헤더보다 먼저 와야 한다(Core.h의 설정).
 // clang-format off
@@ -55,29 +57,38 @@ inline constexpr double FallbackBodyInertiaKilogramSquareCentimeters = 5.24e5;
 // MassProperties.cpp:24-38).
 inline constexpr double InertiaDiagonalTolerance = 1.0e-8;
 
-// 원소 잎 형상 user data 배치다(7.1.21절): 표지 bit | 원소 충돌 켬(bit 32–39) | 원소 번호(bit
-// 0–31). compound·감싸기 형상은 0이다(표지 없음 — 필터 통과).
+// 원소 잎 형상 user data 배치다(7.1.21·7.1.22절): 표지 bit | 부분 번호(bit 40–55) | 원소 충돌
+// 켬(bit 32–39) | 원소 번호(bit 0–31). compound·감싸기 형상은 0이다(표지 없음 — 필터 통과).
 inline constexpr JPH::uint64 ElementUserDataTag = JPH::uint64(1) << 63;
 inline constexpr uint32 ElementEnabledShift = 32;
 inline constexpr JPH::uint64 ElementEnabledMask = 0xff;
+inline constexpr uint32 ElementPartShift = 40;
+inline constexpr JPH::uint64 ElementPartMask = NumericLimits<uint16>::Max();
 inline constexpr JPH::uint64 ElementIndexMask = NumericLimits<uint32>::Max();
 
-// 원소 잎 형상의 user data다.
-inline JPH::uint64 PackElementUserData(uint32 index, CollisionEnabled enabled) noexcept {
-    return ElementUserDataTag |
-           (static_cast<JPH::uint64>(static_cast<uint8>(enabled)) << ElementEnabledShift) |
-           static_cast<JPH::uint64>(index);
+// 잎 형상 user data가 가리키는 원소다: 원소 번호(부분 순서로 이은 번호 — UE ShapeIndex), 부분
+// 번호(0 = 루트), 원소의 충돌 켬(weld 부분은 자식 값과 교집합한 값).
+struct ElementTag {
+    uint32 index = 0;
+    uint32 part = 0;
+    CollisionEnabled enabled = CollisionEnabled::NoCollision;
+};
+
+inline JPH::uint64 PackElementUserData(const ElementTag& tag) noexcept {
+    return ElementUserDataTag | (static_cast<JPH::uint64>(tag.part) << ElementPartShift) |
+           (static_cast<JPH::uint64>(static_cast<uint8>(tag.enabled)) << ElementEnabledShift) |
+           static_cast<JPH::uint64>(tag.index);
 }
 
 // user data를 읽는다. 표지가 없으면 거짓이다(compound·감싸기 형상 — 원소 아님).
-inline bool UnpackElementUserData(JPH::uint64 data, uint32& index,
-                                  CollisionEnabled& enabled) noexcept {
+inline bool UnpackElementUserData(JPH::uint64 data, ElementTag& tag) noexcept {
     if ((data & ElementUserDataTag) == 0) {
         return false;
     }
 
-    index = static_cast<uint32>(data & ElementIndexMask);
-    enabled = static_cast<CollisionEnabled>((data >> ElementEnabledShift) & ElementEnabledMask);
+    tag.index = static_cast<uint32>(data & ElementIndexMask);
+    tag.part = static_cast<uint32>((data >> ElementPartShift) & ElementPartMask);
+    tag.enabled = static_cast<CollisionEnabled>((data >> ElementEnabledShift) & ElementEnabledMask);
     return true;
 }
 
@@ -130,56 +141,78 @@ BodyMassValues MassValuesOf(const BodySettings* settings) noexcept;
 // 질량 assert·NaN 시뮬레이션을 막는다).
 bool AreMassValuesValid(const BodyMassValues& mass) noexcept;
 
-// 질량 중심 이동(cm, body 공간) × 컴포넌트 scale이다(UE MassModifierTransform — 형상 감싸기와 관성
-// 보정이 같은 값을 쓴다).
-Vec3d ScaledCenterOfMassOffset(const BodyMassValues& mass, const Vec3d& scale) noexcept;
-
-// 원소 하나의 Jolt 잎 형상과 body 원점 기준 자리(scale을 구운 cm·회전)다(7.1.21절 — 컴포넌트
-// sweep이 원소마다 쓴다). kind는 원소 종류(impactNormal 규칙의 질의 형상 종류)다.
+// 원소 하나의 Jolt 잎 형상과 자리다(7.1.21·7.1.22절 — 컴포넌트 sweep·overlap이 원소마다 쓴다):
+// position·rotation은 body(루트) 원점 기준, partPosition·partRotation은 그 부분 컴포넌트 원점
+// 기준(scale을 구운 cm·회전)이다. kind는 원소 종류(impactNormal 규칙의 질의 형상 종류)다.
 struct ElementShape {
     JPH::RefConst<JPH::Shape> shape;
     Vec3d position = Vec3d::Zero();
     Quatd rotation = Quatd::Identity();
+    Vec3d partPosition = Vec3d::Zero();
+    Quatd partRotation = Quatd::Identity();
     BodyGeometryKind kind = BodyGeometryKind::None;
     uint32 index = 0;
+    uint32 part = 0;
 };
 
-// body 형상이다: shape는 body에 넣는 형상(질량 중심 이동이 있으면 OffsetCenterOfMassShape로
-// 감쌈), inner는 그 안의 원소 묶음(질량 계산에 쓴다).
+// body 부분 하나(0 = 루트, 그 뒤 weld 자식 — 7.1.22절)다: 원소 범위, 루트 기준 상대
+// transform(루트는 항등 — scale 포함), 질량 칸(그 부분 body 값 — UE 원래 body별 질량), 질의·접촉
+// hit가 내는 컴포넌트·Actor. welded면 원소 충돌 켬을 collisionEnabled(자식 실효 값)와 교집합해
+// 굽는다.
+struct ShapePart {
+    usize first = 0;
+    usize count = 0;
+    Transform relative;
+    bool welded = false;
+    CollisionEnabled collisionEnabled = CollisionEnabled::QueryAndPhysics;
+    BodyMassValues mass;
+    ObjectHandle component;
+    ObjectHandle actor;
+};
+
+// body 형상이다: inner는 원소 묶음(질량 중심 감싸기 전), mixedCollision은 잎의 충돌 켬이 서로
+// 다른지다(그런 body는 Jolt manifold reduction을 끈다 — 합친 manifold는 하위 형상 ID 하나만 남겨
+// 원소별 probe 판정이 섞인다, Body.h:88-91, 7.1.21절).
 struct BodyShape {
-    JPH::RefConst<JPH::Shape> shape;
     JPH::RefConst<JPH::Shape> inner;
+    bool mixedCollision = false;
 };
 
-// 원소 값·월드 scale·장면 값·질량 값으로 body 형상을 만든다(MakeJoltShape + 질량 중심 이동 ×
-// scale — UE MassModifierTransform). elements가 null이 아니면 원소 잎 형상을 그 끝에 더한다.
-// 오류: MakeJoltShape와 같다.
-Result<BodyShape> MakeBodyShape(Span<const BodyShapeElement> geometry, const Vec3d& scale,
-                                const BodyShapeOptions& options, const BodyMassValues& mass,
+// 원소 값·부분·월드 scale·장면 값으로 body 형상을 만든다(MakeJoltShape). elements는 원소 잎 형상을
+// 받는다(질량 계산이 쓴다 — null이 아니어야 한다). 오류: MakeJoltShape와 같다.
+Result<BodyShape> MakeBodyShape(Span<const BodyShapeElement> geometry, Span<const ShapePart> parts,
+                                const Vec3d& scale, const BodyShapeOptions& options,
                                 Array<ElementShape>* elements) noexcept;
 
-// 원소의 충돌 켬이 서로 다른지다. 그런 body는 Jolt manifold reduction을 끈다(합친 manifold는
-// 하위 형상 ID 하나만 남겨 원소별 probe 판정이 섞인다 — Body.h:88-91, 7.1.21절).
-bool MixesElementCollision(Span<const BodyShapeElement> geometry) noexcept;
-
-// inner에 질량 중심 이동 × scale 감싸기를 씌운다(이동이 0이면 inner 그대로).
-JPH::RefConst<JPH::Shape> WrapCenterOfMass(const JPH::RefConst<JPH::Shape>& inner,
-                                           const BodyMassValues& mass, const Vec3d& scale) noexcept;
+// body 질량 결과다: properties는 합친 질량·관성(질량 중심 기준, Jolt 축·단위), shape는 inner를 합친
+// 질량 중심으로 옮긴 형상(body에 넣는다 — 옮김이 0이면 inner), shift는 inner 질량 중심에서 옮긴
+// 양(Jolt m — 형상 교체가 필요한지 비교한다).
+struct BodyMass {
+    JPH::MassProperties properties;
+    JPH::RefConst<JPH::Shape> shape;
+    JPH::Vec3 shift = JPH::Vec3::sZero();
+};
 
 // 관성(Jolt 텐서)의 UE 주값(Rocks 축, kg·cm²)이다(UE GetLocalInertiaTensor — Chaos
 // TransformToLocalSpace, 7.1.21절): 거의 대각이면 축 대각, 아니면 UE 식의 고유값(m00 최대, m11
 // 최소, m22 가운데).
 Vec3d PrincipalInertia(const JPH::Mat44& inertia) noexcept;
 
-// UE 질량 규칙으로 Jolt 질량 속성을 만든다(UE BodyUtils::ApplyMassPropertiesModifiers —
-// 7.1.15절): inner(재질 밀도로 만든 원소 묶음 — 질량에 넣지 않는 원소는 밀도 0)의 균일 밀도 질량
-// (0이면 UE 대체값 — 7.1.21절) → 거듭제곱·배율(또는 덮어쓰기)·
-// 하한 1 g → 관성 × 비율 → 관성 배율(Chaos ScaleInertia, 질량 미포함) → 질량 중심 이동의 축별 대각
-// 보정(m·d² — UE p.ComNudgeAffectsInertia). scale은 컴포넌트 월드 scale이다.
-JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValues& mass,
-                                    const Vec3d& scale) noexcept;
+// UE 질량 규칙으로 body 질량을 만든다(UE BodyUtils::ApplyMassPropertiesModifiers — 7.1.15절,
+// weld는 UpdateMassProperties의 원래 body별 계산 + Chaos Combine — BodyInstance.cpp:3422-3480,
+// 7.1.22절). 부분마다: 그 부분 잎(재질 밀도 — 질량에 넣지 않는 원소는 밀도 0)의 균일 밀도 질량 →
+// 거듭제곱·배율(또는 덮어쓰기)·하한 1 g → 관성 × 비율 → 관성 배율(Chaos ScaleInertia, 질량 미포함)
+// → 질량 중심 이동(relative 회전 · (relative scale ⊙ 루트 scale)로 옮김 — UE
+// MassModifierTransform)과 축별 대각 보정(m·d² — UE p.ComNudgeAffectsInertia). 부분이 여럿이면
+// 질량을 더하고 질량 가중 질량 중심에 평행축 정리로 관성을 합친다(질량에 넣는 원소가 없는 부분은
+// 빠진다). 루트만이면 원시 질량은 inner 값이고 0이면 UE 대체값이다(7.1.21절 — 부분이 모두 빠져도
+// 같다). scale은 루트 월드 scale이다.
+BodyMass ComputeBodyMass(const JPH::RefConst<JPH::Shape>& inner, Span<const ElementShape> elements,
+                         Span<const ShapePart> parts, const Vec3d& scale) noexcept;
 
-// 원소 값(scale 전 cm)과 월드 scale로 Jolt 형상을 만든다(어댑터 경계 4절 UE scale 규칙,
+// 원소 값(scale 전 cm)·부분(루트 + weld 자식 — 7.1.22절, 부분 원소는 루트 scale ⊙ relative scale로
+// 크기를 굽고 중심은 relative를 거쳐 루트 scale을 곱한다 — UE GetFinalScaled(Scale3D,
+// RelativeTM))과 월드 scale로 Jolt 형상을 만든다(어댑터 경계 4절 UE scale 규칙,
 // PhysicsModule 7.1.3·7.1.21절): 원소마다 UE GetFinalScaled로 크기를 굽고(box 반폭 × |scale| 원소
 // 축별, 구 반경 × min |scale|, 캡슐·테이퍼드 캡슐 반높이 × |Z|·반경 × max(|X|, |Y|)), 중심 ×
 // scale에 둔다. 원소 하나(중심 0·회전 없음)는 그 형상, 이동·회전이 있으면 RotatedTranslatedShape,
@@ -190,8 +223,10 @@ JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValue
 // BodyGeometryMaxElements·모르는 종류·비유한 값·정규화할 수 없는 회전·Jolt 형상
 // 실패(InvalidArgument), 할당 실패.
 Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(Span<const BodyShapeElement> geometry,
-                                                const Vec3d& scale, const BodyShapeOptions& options,
-                                                Array<ElementShape>* elements) noexcept;
+                                                Span<const ShapePart> parts, const Vec3d& scale,
+                                                const BodyShapeOptions& options,
+                                                Array<ElementShape>* elements,
+                                                bool* mixedCollision = nullptr) noexcept;
 
 // 질의 형상(cm)으로 Jolt 형상을 stack에 만들어 body(const JPH::Shape&)를 부르고 그 결과를 돌려준다
 // (PhysicsModule 7.1.8절 — 질의마다 힙에 할당하지 않는다, Jolt SetEmbedded). UE FCollisionShape

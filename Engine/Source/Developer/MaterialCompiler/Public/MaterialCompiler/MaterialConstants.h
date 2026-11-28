@@ -1,5 +1,6 @@
 #pragma once
 
+#include <MaterialSchema/MaterialConstantProgram.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
@@ -31,9 +32,6 @@ struct MaterialConstants {
     // 상수 블록의 float4 수다(0이면 상수 블록이 없다).
     uint32 floatVectors = 0;
 };
-
-// 프로그램 명령 형식 버전이다(바꾸면 올린다 — 번역 너겟 키).
-inline constexpr uint32 MaterialConstantProgramVersion = 1;
 
 // 상수 식 프로그램 연산인가(UE preshader 접기 목록 — 6.10절).
 ROCKS_MATERIALCOMPILER_API bool IsMaterialConstantProgramOp(IrOp op) noexcept;

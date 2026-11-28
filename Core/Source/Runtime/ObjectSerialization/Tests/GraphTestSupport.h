@@ -4,12 +4,15 @@
 #include <Object/ObjectHandle.h>
 #include <Serialization/Archive.h>
 
-// graph v2 byte를 wire 명세(Docs/Design/ObjectFoundations.ko.md 5.1절)로 직접 조립·검사하는 시험
-// 공용 도구다. 저장 구현의 판단을 재사용하지 않는다(상수도 명세에서 옮겨 적는다).
+// graph byte(형식 3)를 wire 명세(Docs/Design/ObjectFoundations.ko.md 5.1절)로 직접 조립·검사하는
+// 시험 공용 도구다. 저장 구현의 판단을 재사용하지 않는다(상수도 명세에서 옮겨 적는다).
 namespace rocks::test::graph {
 
 inline constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'G', 'R', 'F'};
-inline constexpr uint32 FormatVersion = 2;
+inline constexpr uint32 FormatVersion = 3;
+// NodeTable 노드 종류다(형식 3 — 항목 앞 byte, Docs/Design/Prefab 10.4절).
+inline constexpr uint8 NodeKindObject = 0;
+inline constexpr uint8 NodeKindDeclaredSubobject = 1;
 inline constexpr uint32 NodeTableFlag = 1;
 inline constexpr uint32 BaseOuterFlag = 2;
 inline constexpr uint32 ExternalBit = 0x80000000u;
@@ -20,12 +23,14 @@ inline constexpr usize NodeCountOffset = 16;
 inline constexpr usize ExternalCountOffset = 20;
 inline constexpr usize HeaderBytes = 24;
 
-// 노드 하나다. NodeTable을 쓰면 type·outer·name을, 아니면 record만 쓴다.
+// 노드 하나다. NodeTable을 쓰면 kind·type·outer·name을, 아니면 record만 쓴다(선언 subobject
+// 항목은 type 칸에 SubobjectGuid를, outer에 소유 노드를 싣고 name은 비운다).
 struct Node {
     TypeId type{};
     uint32 outer = 0;
     StringView name{};
     Span<const uint8> record{};
+    uint8 kind = NodeKindObject;
 };
 
 // header 값이다(nodeCount는 nodes 수다 — 다른 값은 PatchU32로 바꾼다).
@@ -51,7 +56,11 @@ inline Result<Array<uint8>> Build(Allocator& allocator, Span<const Node> nodes,
 
     for (usize index = 0; written && (header.flags & NodeTableFlag) != 0 && index < nodes.Size();
          ++index) {
-        written = writer.WriteGuid(nodes[index].type);
+        written = writer.WriteU8(nodes[index].kind);
+        if (written) {
+            written = writer.WriteGuid(nodes[index].type);
+        }
+
         if (written) {
             written = writer.WriteU32(nodes[index].outer);
         }
@@ -112,9 +121,10 @@ inline uint64 ReadU64(Span<const uint8> bytes, usize at) noexcept {
 }
 
 // 저장한 그래프(BaseOuter 없음)의 node번째 노드 Record다. header의 NodeTable 표지가 있으면 노드
-// 항목(type Guid 16 + outer u32 + 이름 u64 길이·byte)을 건너뛰고, 앞 노드의 Bytes(u64 길이 +
-// Record)를 지나 그 노드의 Record를 돌려준다(명세 5.1절 순서).
+// 항목(종류 u8 + type Guid 16 + outer u32 + 이름 u64 길이·byte)을 건너뛰고, 앞 노드의 Bytes(u64
+// 길이 + Record)를 지나 그 노드의 Record를 돌려준다(명세 5.1절 순서).
 inline Span<const uint8> NodeRecordAt(Span<const uint8> graph, usize node) noexcept {
+    constexpr usize KindBytes = 1;
     constexpr usize GuidBytes = 16;
     constexpr usize OuterBytes = 4;
     constexpr usize LengthBytes = 8;
@@ -122,7 +132,7 @@ inline Span<const uint8> NodeRecordAt(Span<const uint8> graph, usize node) noexc
     usize at = HeaderBytes;
     if ((ReadU32(graph, FlagsOffset) & NodeTableFlag) != 0) {
         for (uint32 index = 0; index < count; ++index) {
-            at += GuidBytes + OuterBytes;
+            at += KindBytes + GuidBytes + OuterBytes;
             at += LengthBytes + static_cast<usize>(ReadU64(graph, at));
         }
     }

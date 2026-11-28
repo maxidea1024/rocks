@@ -24,9 +24,9 @@
 namespace rocks {
 
 // 값 형식 버전이다(배치가 바뀌면 올린다 — MaterialTranslationNuggetId 버전도 바꾼다).
-inline constexpr uint32 MaterialTranslationValueVersion = 1;
+inline constexpr uint32 MaterialTranslationValueVersion = 2;
 // 값 part 수다(머리 포함).
-inline constexpr uint32 MaterialTranslationValueParts = 13;
+inline constexpr uint32 MaterialTranslationValueParts = 15;
 // 셰이더 집합 형식 버전이다(8.6절 — 바꾸면 모든 셰이더 집합 id가 바뀐다).
 inline constexpr uint32 MaterialShaderSetFormatVersion = 2;
 
@@ -57,5 +57,10 @@ ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
 // 실패.
 ROCKS_MATERIALCOOK_API Result<Sha256Digest>
 MaterialShaderSetId(const MaterialTranslationValue& value) noexcept;
+
+// value의 layout 서명이다(8.6절 — float4 수와 멤버마다 칸 종류·float4 번호·첫 성분·성분 수의
+// SHA-256, IR 번호 제외 — 셰이더 집합 id와 artifact가 같은 값을 쓴다). 오류: 할당 실패.
+ROCKS_MATERIALCOOK_API Result<Sha256Digest>
+MaterialLayoutSignature(const MaterialTranslationValue& value) noexcept;
 
 } // namespace rocks

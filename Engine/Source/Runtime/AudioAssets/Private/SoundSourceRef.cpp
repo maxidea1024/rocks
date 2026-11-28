@@ -94,6 +94,20 @@ Result<void> ValidateSoundAttenuation(const SoundAttenuation& value) noexcept {
         return fail();
     }
 
+    if (value.busSendCount > MaxMixBusSends) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (uint32 index = 0; index < value.busSendCount; ++index) {
+        if (value.busSends[index].stage != MixBusSendStage::PostAttenuation) {
+            return fail();
+        }
+
+        if (auto valid = ValidateMixBusSendValue(value.busSends[index]); !valid) {
+            return valid;
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -129,6 +143,23 @@ Result<SoundSourceRef> SoundSourceRef::TryCreate(Allocator& allocator,
 
     if (playable.category) {
         if (auto valid = ValidateSoundCategoryChain(*playable.category.Get()); !valid) {
+            return Created::Failure(valid.Error());
+        }
+    }
+
+    // 버스(3.45.7절): 기본 버스 사슬과 send 값.
+    if (playable.bus) {
+        if (auto valid = ValidateMixBusChain(*playable.bus.Get()); !valid) {
+            return Created::Failure(valid.Error());
+        }
+    }
+
+    if (playable.busSendCount > MaxMixBusSends) {
+        return Created::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    for (uint32 index = 0; index < playable.busSendCount; ++index) {
+        if (auto valid = ValidateMixBusSendValue(playable.busSends[index]); !valid) {
             return Created::Failure(valid.Error());
         }
     }

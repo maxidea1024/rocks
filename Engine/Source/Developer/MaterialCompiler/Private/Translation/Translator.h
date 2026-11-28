@@ -204,6 +204,12 @@ public:
     // 호출 노드)다.
     Guid ParameterIdentity(Guid node, Guid parameterId, bool shared) const noexcept;
 
+    // 파라미터 노드 node(펼친 id)의 출처를 IR 빌더에 기록한다(12.8절 MS3d1): 소유 에셋, 원본 호출
+    // 경로(바깥 → 안), 가장 안쪽 레이어 합성 호출의 레이어. 공유 파라미터는 경로·레이어 없이
+    // Global이다(IR 정체가 호출·레이어를 섞지 않는다). 오류: 할당 실패.
+    Result<void> RecordParameterOrigin(Guid node, Guid identity, Guid parameterId, StringView name,
+                                       bool shared) noexcept;
+
     // consumer 사본 노드의 속성이 가리키는 원본 그래프 노드 id를 같은 호출의 사본 id로 바꾼다
     // (NamedRerouteUsage declaration — 6.12절 MS2e2 노드 id 속성). 주 그래프 노드면 그대로다.
     Guid CopiedNodeId(Guid consumer, Guid original) const noexcept;
@@ -452,6 +458,13 @@ private:
     Array<const MaterialGraphSnapshot*> snapshots_;
     // 레이어 합성 호출 → 그 레이어 노드다(진단 위치).
     HashMap<Guid, Guid> syntheticOwners_;
+    // 레이어 합성 호출 → (layerId, 혼합 함수인가)다(파라미터 출처의 레이어 scope).
+    struct SyntheticLayer {
+        Guid layer;
+        bool blend = false;
+    };
+
+    HashMap<Guid, SyntheticLayer> syntheticLayers_;
     HashMap<Guid, LayerResult> layers_;
     // 레이어 검사 문구다(LayerResult 범위).
     Array<String> layerDiagnostics_;

@@ -221,11 +221,43 @@ Result<LeafShape> MakeLeafShape(const BodyShapeElement& element, const Vec3d& sc
 
 } // namespace
 
+namespace {
+
+bool IsFiniteElement(const BodyShapeElement& element) noexcept {
+    return IsFiniteShapeVector(element.center) && IsFiniteShapeVector(element.halfExtent) &&
+           math::IsFinite(element.radius) && math::IsFinite(element.radius1) &&
+           math::IsFinite(element.halfHeight) && math::IsFinite(element.rotation.x) &&
+           math::IsFinite(element.rotation.y) && math::IsFinite(element.rotation.z) &&
+           math::IsFinite(element.rotation.w);
+}
+
+// 부분 표가 원소를 빈틈없이 순서대로 덮고 relative가 유효한지다.
+bool ArePartsValid(Span<const BodyShapeElement> geometry, Span<const ShapePart> parts) noexcept {
+    if (parts.IsEmpty() || parts.Size() > BodyWeldMaxParts) {
+        return false;
+    }
+
+    usize next = 0;
+    for (const ShapePart& part : parts) {
+        if (part.first != next || part.count == 0 || !part.relative.IsValid()) {
+            return false;
+        }
+
+        next += part.count;
+    }
+
+    return next == geometry.Size();
+}
+
+} // namespace
+
 Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(Span<const BodyShapeElement> geometry,
-                                                const Vec3d& scale, const BodyShapeOptions& options,
-                                                Array<ElementShape>* elements) noexcept {
+                                                Span<const ShapePart> parts, const Vec3d& scale,
+                                                const BodyShapeOptions& options,
+                                                Array<ElementShape>* elements,
+                                                bool* mixedCollision) noexcept {
     if (geometry.IsEmpty() || geometry.Size() > BodyGeometryMaxElements ||
-        !IsFiniteShapeVector(scale)) {
+        !IsFiniteShapeVector(scale) || !ArePartsValid(geometry, parts)) {
         return Invalid();
     }
 
@@ -236,69 +268,116 @@ Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(Span<const BodyShapeElement> geo
         }
     }
 
-    // 크기 0·음수는 거부하지 않고 UE처럼 clamp한다(형상 setter는 0을 허용한다 — UE도 body를 만든다,
-    // PrimitiveComponent.cpp:909-925·ChaosInterfaceUtils.cpp:139-177).
-    const Vec3d magnitude(SafeScaleAxis(scale.x), SafeScaleAxis(scale.y), SafeScaleAxis(scale.z));
     JPH::StaticCompoundShapeSettings compound;
     JPH::RefConst<JPH::Shape> single;
     Vec3d singlePosition = Vec3d::Zero();
     Quatd singleRotation = Quatd::Identity();
-    for (usize index = 0; index < geometry.Size(); ++index) {
-        const BodyShapeElement& element = geometry[index];
-        const bool finite =
-            IsFiniteShapeVector(element.center) && IsFiniteShapeVector(element.halfExtent) &&
-            math::IsFinite(element.radius) && math::IsFinite(element.radius1) &&
-            math::IsFinite(element.halfHeight) && math::IsFinite(element.rotation.x) &&
-            math::IsFinite(element.rotation.y) && math::IsFinite(element.rotation.z) &&
-            math::IsFinite(element.rotation.w);
-        if (!finite) {
+    bool contributes = false;
+    bool mixed = false;
+    CollisionEnabled firstEnabled = CollisionEnabled::NoCollision;
+    for (usize partIndex = 0; partIndex < parts.Size(); ++partIndex) {
+        const ShapePart& part = parts[partIndex];
+        auto partRotation = part.relative.rotation.TryNormalize();
+        if (!partRotation) {
             return Invalid();
         }
 
-        auto normalized = element.rotation.TryNormalize();
-        if (!normalized) {
-            return Invalid();
-        }
+        // 부분 원점의 루트 공간 자리(cm — relative 이동 × 루트 scale)와 그 역회전이다(부분 공간
+        // 자세 — UE RootSpaceToWeldedSpace).
+        const Vec3d& relativeTranslation = part.relative.translation;
+        const Vec3d partOrigin(relativeTranslation.x * scale.x, relativeTranslation.y * scale.y,
+                               relativeTranslation.z * scale.z);
+        const Quatd toPart = partRotation.Value().Conjugate();
 
-        auto rotation = ScaledElementRotation(normalized.Value(), scale);
-        if (!rotation) {
-            return Invalid();
-        }
+        // 부분 원소의 크기 scale = 루트 scale ⊙ relative scale(UE SetupNonUniformHelper(Scale3D *
+        // RelativeTM.GetScale3D())). 크기 0·음수는 거부하지 않고 UE처럼 clamp한다(형상 setter는 0을
+        // 허용한다 — UE도 body를 만든다,
+        // PrimitiveComponent.cpp:909-925·ChaosInterfaceUtils.cpp:139-177).
+        const Vec3d& relativeScale = part.relative.scale;
+        const Vec3d combined(scale.x * relativeScale.x, scale.y * relativeScale.y,
+                             scale.z * relativeScale.z);
+        const Vec3d magnitude(SafeScaleAxis(combined.x), SafeScaleAxis(combined.y),
+                              SafeScaleAxis(combined.z));
+        for (usize index = part.first; index < part.first + part.count; ++index) {
+            const BodyShapeElement& element = geometry[index];
+            if (!IsFiniteElement(element)) {
+                return Invalid();
+            }
 
-        auto leaf = MakeLeafShape(element, scale, magnitude, options);
-        if (!leaf) {
-            return Result<JPH::RefConst<JPH::Shape>>::Failure(leaf.Error());
-        }
+            auto normalized = element.rotation.TryNormalize();
+            if (!normalized) {
+                return Invalid();
+            }
 
-        JPH::Shape& shape = *leaf.Value().shape;
-        // 질량에 넣지 않는 원소는 밀도 0이다(Jolt compound 질량은 자식 질량 합 — 어댑터 경계 4절
-        // J21). 잎은 모두 볼록 형상이다.
-        static_cast<JPH::ConvexShape&>(shape).SetDensity(
-            element.contributeToMass ? MaterialDensity() : 0.0f);
-        shape.SetUserData(
-            PackElementUserData(static_cast<uint32>(index), element.collisionEnabled));
-        // 중심 × scale(성분 곱, 부호 유지 — UE GetFinalScaled), 회전은 원소 회전(거울 scale이면 UE
-        // 거울 회전)이다. 잎 원점 이동은 그 회전으로 돌린다.
-        const Vec3d center(element.center.x * scale.x, element.center.y * scale.y,
-                           element.center.z * scale.z);
-        const Vec3d position = center + rotation.Value().RotateVector(leaf.Value().offset);
-        if (elements != nullptr) {
-            ElementShape placed;
-            placed.shape = leaf.Value().shape;
-            placed.position = position;
-            placed.rotation = rotation.Value();
-            placed.kind = element.kind;
-            placed.index = static_cast<uint32>(index);
-            (void)elements->TryPushBack(Move(placed));
-        }
+            // 회전: relative scale 거울을 원소 축에, 루트 scale 거울을 relative 회전 뒤(루트 축)에
+            // 적용한다(UE FKBoxElem: GetTransform() * RelativeTM * ScaleTransform(Scale3D) —
+            // BodySetup.cpp:2048-2064, 7.1.22절). 루트만이면 7.1.21절 그대로다.
+            auto localRotation = ScaledElementRotation(normalized.Value(), relativeScale);
+            if (!localRotation) {
+                return Invalid();
+            }
 
-        if (geometry.Size() == 1) {
-            single = leaf.Value().shape;
-            singlePosition = position;
-            singleRotation = rotation.Value();
-        } else {
-            compound.AddShape(ToJoltDisplacement(position), ToJoltRotation(rotation.Value()),
-                              leaf.Value().shape.GetPtr());
+            auto rootRotation =
+                ScaledElementRotation(partRotation.Value() * localRotation.Value(), scale);
+            if (!rootRotation) {
+                return Invalid();
+            }
+
+            auto leaf = MakeLeafShape(element, combined, magnitude, options);
+            if (!leaf) {
+                return Result<JPH::RefConst<JPH::Shape>>::Failure(leaf.Error());
+            }
+
+            ElementTag tag;
+            tag.index = static_cast<uint32>(index);
+            tag.part = static_cast<uint32>(partIndex);
+            tag.enabled = part.welded ? CollisionEnabledIntersection(part.collisionEnabled,
+                                                                     element.collisionEnabled)
+                                      : element.collisionEnabled;
+            if (index == 0) {
+                firstEnabled = tag.enabled;
+            }
+
+            mixed = mixed || tag.enabled != firstEnabled;
+            contributes = contributes || element.contributeToMass;
+            JPH::Shape& shape = *leaf.Value().shape;
+            // 질량에 넣지 않는 원소는 밀도 0이다(Jolt compound 질량은 자식 질량 합 — 어댑터 경계
+            // 4절 J21). 잎은 모두 볼록 형상이다.
+            static_cast<JPH::ConvexShape&>(shape).SetDensity(
+                element.contributeToMass ? MaterialDensity() : 0.0f);
+            shape.SetUserData(PackElementUserData(tag));
+            // 루트 공간 중심: relative로 옮긴 중심 × 루트 scale(UE
+            // RelativeTM.TransformPosition(Center)
+            // * Scale3D). 잎 원점 이동은 원소 회전으로 돌린다. 부분 공간 자세는 루트 공간 자세에
+            // 부분 원점·회전의 역을 적용한 것이다(같은 형상 — UE RootSpaceToWeldedSpace).
+            const Vec3d offset = leaf.Value().offset;
+            const Vec3d relativeCenter = part.relative.TransformPoint(element.center);
+            const Vec3d rootCenter(relativeCenter.x * scale.x, relativeCenter.y * scale.y,
+                                   relativeCenter.z * scale.z);
+            const Vec3d position = rootCenter + rootRotation.Value().RotateVector(offset);
+            if (elements != nullptr) {
+                ElementShape placed;
+                placed.shape = leaf.Value().shape;
+                placed.position = position;
+                placed.rotation = rootRotation.Value();
+                placed.partPosition = toPart.RotateVector(position - partOrigin);
+                placed.partRotation = toPart * rootRotation.Value();
+                placed.kind = element.kind;
+                placed.index = static_cast<uint32>(index);
+                placed.part = static_cast<uint32>(partIndex);
+                // 용량을 앞에서 잡았으므로 실패하지 않는다.
+                (void)elements->TryPushBack(Move(placed));
+            }
+
+            if (geometry.Size() == 1) {
+                single = leaf.Value().shape;
+                singlePosition = position;
+                singleRotation = rootRotation.Value();
+            } else {
+                compound.AddShape(ToJoltDisplacement(position),
+                                  ToJoltRotation(rootRotation.Value()),
+                                  leaf.Value().shape.GetPtr());
+            }
         }
     }
 
@@ -321,27 +400,16 @@ Result<JPH::RefConst<JPH::Shape>> MakeJoltShape(Span<const BodyShapeElement> geo
 
     // 질량에 넣는 원소가 없으면 UE 대체값의 질량 중심은 body 원점이다(MassProperties.cpp:474-483).
     // Jolt 원소 하나·compound가 아닌 형상은 그 원소의 질량 중심을 두므로 원점으로 되돌린다.
-    bool contributes = false;
-    for (const BodyShapeElement& element : geometry) {
-        contributes = contributes || element.contributeToMass;
-    }
-
     const JPH::Vec3 center = inner->GetCenterOfMass();
     if (!contributes && center != JPH::Vec3::sZero()) {
         inner = new JPH::OffsetCenterOfMassShape(inner.GetPtr(), -center);
     }
 
-    return Result<JPH::RefConst<JPH::Shape>>::Success(inner);
-}
-
-bool MixesElementCollision(Span<const BodyShapeElement> geometry) noexcept {
-    for (const BodyShapeElement& element : geometry) {
-        if (element.collisionEnabled != geometry[0].collisionEnabled) {
-            return true;
-        }
+    if (mixedCollision != nullptr) {
+        *mixedCollision = mixed;
     }
 
-    return false;
+    return Result<JPH::RefConst<JPH::Shape>>::Success(inner);
 }
 
 namespace {
@@ -516,35 +584,16 @@ bool AreMassValuesValid(const BodyMassValues& mass) noexcept {
            finite(mass.centerOfMassOffset) && finite(mass.inertiaTensorScale);
 }
 
-Vec3d ScaledCenterOfMassOffset(const BodyMassValues& mass, const Vec3d& scale) noexcept {
-    return Vec3d(mass.centerOfMassOffset.x * scale.x, mass.centerOfMassOffset.y * scale.y,
-                 mass.centerOfMassOffset.z * scale.z);
-}
-
-JPH::RefConst<JPH::Shape> WrapCenterOfMass(const JPH::RefConst<JPH::Shape>& inner,
-                                           const BodyMassValues& mass,
-                                           const Vec3d& scale) noexcept {
-    // 질량 중심 이동은 컴포넌트 scale을 곱한다(UE MassModifierTransform —
-    // BodyInstance.cpp:3488-3491).
-    const Vec3d offset = ScaledCenterOfMassOffset(mass, scale);
-    if (offset == Vec3d::Zero()) {
-        return inner;
-    }
-
-    return new JPH::OffsetCenterOfMassShape(inner.GetPtr(), ToJoltDisplacement(offset));
-}
-
-Result<BodyShape> MakeBodyShape(Span<const BodyShapeElement> geometry, const Vec3d& scale,
-                                const BodyShapeOptions& options, const BodyMassValues& mass,
+Result<BodyShape> MakeBodyShape(Span<const BodyShapeElement> geometry, Span<const ShapePart> parts,
+                                const Vec3d& scale, const BodyShapeOptions& options,
                                 Array<ElementShape>* elements) noexcept {
-    auto inner = MakeJoltShape(geometry, scale, options, elements);
+    BodyShape built;
+    auto inner = MakeJoltShape(geometry, parts, scale, options, elements, &built.mixedCollision);
     if (!inner) {
         return Result<BodyShape>::Failure(inner.Error());
     }
 
-    BodyShape built;
     built.inner = inner.Value();
-    built.shape = WrapCenterOfMass(inner.Value(), mass, scale);
     return Result<BodyShape>::Success(built);
 }
 
@@ -597,19 +646,33 @@ Vec3d PrincipalInertia(const JPH::Mat44& inertia) noexcept {
     return Vec3d(largest, smallest, middle);
 }
 
-JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValues& mass,
-                                    const Vec3d& scale) noexcept {
-    JPH::MassProperties properties = inner.GetMassProperties();
-    // 질량에 넣는 원소가 없으면(모두 밀도 0) UE 대체값이다(7.1.21절 — 그 뒤 수정자는 그대로).
-    if (!(properties.mMass > 0.0f)) {
-        const float fallbackInertia =
-            static_cast<float>(math::KilogramSquareCentimetersToKilogramSquareMeters(
-                FallbackBodyInertiaKilogramSquareCentimeters));
-        properties.mMass = static_cast<float>(FallbackBodyMassKilograms);
-        properties.mInertia = JPH::Mat44::sScale(JPH::Vec3::sReplicate(fallbackInertia));
-    }
+namespace {
 
-    const double raw = static_cast<double>(properties.mMass);
+using Matrix3 = double[3][3];
+
+// 부분 하나의 질량(질량 중심 기준 관성 — Rocks 축, kg·m²)과 질량 중심(Rocks 축, m)이다.
+struct PartMass {
+    double mass = 0.0;
+    double inertia[3][3] = {};
+    Vec3d center = Vec3d::Zero();
+};
+
+// m(|d|²E − d dᵀ)를 inertia에 더한다(평행축 정리 — Chaos CombineWorldSpace).
+void AddParallelAxis(Matrix3& inertia, double mass, const Vec3d& offset, double sign) noexcept {
+    const double d[3] = {offset.x, offset.y, offset.z};
+    const double lengthSquared = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            const double identity = row == column ? lengthSquared : 0.0;
+            inertia[row][column] += sign * mass * (identity - d[row] * d[column]);
+        }
+    }
+}
+
+// 원시 질량(raw — 질량 중심 기준 관성)에 UE 수정자를 적용한다(UE ApplyMassPropertiesModifiers).
+// nudge는 질량 중심 이동을 body(루트) 공간 cm로 옮긴 값이다.
+void ApplyMassModifiers(PartMass& part, const BodyMassValues& mass, const Vec3d& nudge) noexcept {
+    const double raw = part.mass;
     double target = 0.0;
     if (!mass.overrideMass) {
         // 균일 밀도 질량을 거듭제곱해 표면 쪽이 무거운 물체를 흉내 낸다(UE RaiseMassToPower —
@@ -622,10 +685,8 @@ JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValue
     }
 
     const double ratio = raw > 0.0 ? target / raw : 1.0;
-    properties.mMass = static_cast<float>(target);
-    double inertia[3][3];
-    InertiaToRocks(properties.mInertia, inertia);
-    for (auto& row : inertia) {
+    part.mass = target;
+    for (auto& row : part.inertia) {
         for (double& value : row) {
             value *= ratio;
         }
@@ -636,6 +697,7 @@ JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValue
     if (math::Abs(factor.x - 1.0) > InertiaScaleTolerance ||
         math::Abs(factor.y - 1.0) > InertiaScaleTolerance ||
         math::Abs(factor.z - 1.0) > InertiaScaleTolerance) {
+        auto& inertia = part.inertia;
         const double s[3] = {math::Abs(factor.x), math::Abs(factor.y), math::Abs(factor.z)};
         const double half = 0.5 * (inertia[0][0] + inertia[1][1] + inertia[2][2]);
         double squared[3];
@@ -654,25 +716,195 @@ JPH::MassProperties ComputeBodyMass(const JPH::Shape& inner, const BodyMassValue
         inertia[1][2] = inertia[2][1] = yz;
     }
 
-    // 질량 중심 이동의 축별 대각 보정(UE BodyUtils.cpp:101-111 — m·d², m 단위).
-    const Vec3d offset = ScaledCenterOfMassOffset(mass, scale);
-    const double meters[3] = {math::CentimetersToMeters(offset.x),
-                              math::CentimetersToMeters(offset.y),
-                              math::CentimetersToMeters(offset.z)};
-    for (int axis = 0; axis < 3; ++axis) {
-        inertia[axis][axis] += target * meters[axis] * meters[axis];
+    // 질량 중심 이동과 축별 대각 보정(UE BodyUtils.cpp:85-111 — m·d², m 단위).
+    const Vec3d meters(math::CentimetersToMeters(nudge.x), math::CentimetersToMeters(nudge.y),
+                       math::CentimetersToMeters(nudge.z));
+    part.center = part.center + meters;
+    part.inertia[0][0] += target * meters.x * meters.x;
+    part.inertia[1][1] += target * meters.y * meters.y;
+    part.inertia[2][2] += target * meters.z * meters.z;
+}
+
+// 부분 p 잎들의 원시 질량이다(Jolt 잎 질량 속성을 원소 자리로 옮겨 더함 — Jolt CompoundShape
+// GetMassProperties와 같은 식). 질량이 없으면 거짓이다.
+bool AccumulatePartMass(Span<const ElementShape> elements, uint32 partIndex,
+                        PartMass& part) noexcept {
+    double mass = 0.0;
+    Vec3d moment = Vec3d::Zero();
+    double inertia[3][3] = {};
+    const Vec3d basis[3] = {Vec3d(1.0, 0.0, 0.0), Vec3d(0.0, 1.0, 0.0), Vec3d(0.0, 0.0, 1.0)};
+    for (const ElementShape& element : elements) {
+        if (element.part != partIndex) {
+            continue;
+        }
+
+        const JPH::MassProperties leaf = element.shape->GetMassProperties();
+        const double leafMass = static_cast<double>(leaf.mMass);
+        if (!(leafMass > 0.0)) {
+            continue;
+        }
+
+        double local[3][3];
+        InertiaToRocks(leaf.mInertia, local);
+        // 원소 회전 R(열 = R·eⱼ)로 R I Rᵀ다.
+        double rotation[3][3];
+        for (int column = 0; column < 3; ++column) {
+            const Vec3d axis = element.rotation.RotateVector(basis[column]);
+            rotation[0][column] = axis.x;
+            rotation[1][column] = axis.y;
+            rotation[2][column] = axis.z;
+        }
+
+        double rotated[3][3] = {};
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                for (int a = 0; a < 3; ++a) {
+                    for (int b = 0; b < 3; ++b) {
+                        rotated[row][column] +=
+                            rotation[row][a] * local[a][b] * rotation[column][b];
+                    }
+                }
+            }
+        }
+
+        const Vec3d leafCenter =
+            element.position +
+            element.rotation.RotateVector(FromJoltDisplacement(element.shape->GetCenterOfMass()));
+        const Vec3d center(math::CentimetersToMeters(leafCenter.x),
+                           math::CentimetersToMeters(leafCenter.y),
+                           math::CentimetersToMeters(leafCenter.z));
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                inertia[row][column] += rotated[row][column];
+            }
+        }
+
+        AddParallelAxis(inertia, leafMass, center, 1.0);
+        mass += leafMass;
+        moment = moment + center * leafMass;
+    }
+
+    if (!(mass > 0.0)) {
+        return false;
+    }
+
+    part.mass = mass;
+    part.center = moment * (1.0 / mass);
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            part.inertia[row][column] = inertia[row][column];
+        }
+    }
+
+    // 원점 기준 관성을 질량 중심 기준으로 옮긴다.
+    AddParallelAxis(part.inertia, mass, part.center, -1.0);
+    return true;
+}
+
+// 질량 중심 이동을 body 공간 cm로 옮긴다(UE MassModifierTransform.TransformVector(COMNudge) —
+// relative 회전 · (relative scale ⊙ 루트 scale)).
+Vec3d MassNudge(const ShapePart& part, const Vec3d& scale) noexcept {
+    const Vec3d& offset = part.mass.centerOfMassOffset;
+    const Vec3d& relativeScale = part.relative.scale;
+    const Vec3d scaled(offset.x * relativeScale.x * scale.x, offset.y * relativeScale.y * scale.y,
+                       offset.z * relativeScale.z * scale.z);
+    return part.relative.rotation.RotateVector(scaled);
+}
+
+} // namespace
+
+BodyMass ComputeBodyMass(const JPH::RefConst<JPH::Shape>& inner, Span<const ElementShape> elements,
+                         Span<const ShapePart> parts, const Vec3d& scale) noexcept {
+    const Vec3d innerCenter = FromJoltDisplacement(inner->GetCenterOfMass());
+    const Vec3d innerCenterMeters(math::CentimetersToMeters(innerCenter.x),
+                                  math::CentimetersToMeters(innerCenter.y),
+                                  math::CentimetersToMeters(innerCenter.z));
+    PartMass total;
+    usize combined = 0;
+    if (parts.Size() > 1) {
+        // weld: 부분마다 따로 계산해 합친다(UE UpdateMassProperties — 질량에 넣는 원소가 없는
+        // 부분은 빠진다).
+        double mass = 0.0;
+        Vec3d moment = Vec3d::Zero();
+        for (usize index = 0; index < parts.Size(); ++index) {
+            PartMass part;
+            if (!AccumulatePartMass(elements, static_cast<uint32>(index), part)) {
+                continue;
+            }
+
+            ApplyMassModifiers(part, parts[index].mass, MassNudge(parts[index], scale));
+            mass += part.mass;
+            moment = moment + part.center * part.mass;
+            ++combined;
+        }
+
+        if (combined != 0) {
+            total.mass = mass;
+            total.center = moment * (1.0 / mass);
+            for (usize index = 0; index < parts.Size(); ++index) {
+                PartMass part;
+                if (!AccumulatePartMass(elements, static_cast<uint32>(index), part)) {
+                    continue;
+                }
+
+                ApplyMassModifiers(part, parts[index].mass, MassNudge(parts[index], scale));
+                for (int row = 0; row < 3; ++row) {
+                    for (int column = 0; column < 3; ++column) {
+                        total.inertia[row][column] += part.inertia[row][column];
+                    }
+                }
+
+                AddParallelAxis(total.inertia, part.mass, part.center - total.center, 1.0);
+            }
+        }
+    }
+
+    if (combined == 0) {
+        // 루트만(또는 모든 부분이 빠짐): 원시 질량은 inner 값이다(Jolt compound 합 — 0이면 UE
+        // 대체값, 질량 중심은 원점 — 7.1.21절).
+        const JPH::MassProperties raw = inner->GetMassProperties();
+        if (raw.mMass > 0.0f) {
+            total.mass = static_cast<double>(raw.mMass);
+            InertiaToRocks(raw.mInertia, total.inertia);
+            total.center = innerCenterMeters;
+        } else {
+            const double fallback = math::KilogramSquareCentimetersToKilogramSquareMeters(
+                FallbackBodyInertiaKilogramSquareCentimeters);
+            total.mass = FallbackBodyMassKilograms;
+            for (int axis = 0; axis < 3; ++axis) {
+                total.inertia[axis][axis] = fallback;
+            }
+
+            total.center = innerCenterMeters;
+        }
+
+        const ShapePart root = parts.IsEmpty() ? ShapePart{} : parts[0];
+        ApplyMassModifiers(total, root.mass, MassNudge(root, scale));
     }
 
     // 0이 된 주축(관성 배율 0 등)은 아주 작은 값으로 둔다(Jolt 역관성 무한대 방지 — 위 상수).
-    const double largest = math::Max(inertia[0][0], math::Max(inertia[1][1], inertia[2][2]));
+    const double largest =
+        math::Max(total.inertia[0][0], math::Max(total.inertia[1][1], total.inertia[2][2]));
     const double floor = math::Max(largest * MinPrincipalInertiaRatio,
                                    math::KindaSmallNumber<double> * MinBodyMassKilograms);
     for (int axis = 0; axis < 3; ++axis) {
-        inertia[axis][axis] = math::Max(inertia[axis][axis], floor);
+        total.inertia[axis][axis] = math::Max(total.inertia[axis][axis], floor);
     }
 
-    InertiaFromRocks(inertia, properties.mInertia);
-    return properties;
+    BodyMass result;
+    result.properties.mMass = static_cast<float>(total.mass);
+    InertiaFromRocks(total.inertia, result.properties.mInertia);
+    // 형상 질량 중심을 합친 질량 중심으로 옮긴다(UE 질량 중심 이동·weld 가중 — 7.1.15·7.1.22절).
+    const Vec3d shiftMeters = total.center - innerCenterMeters;
+    const Vec3d shift(math::MetersToCentimeters(shiftMeters.x),
+                      math::MetersToCentimeters(shiftMeters.y),
+                      math::MetersToCentimeters(shiftMeters.z));
+    result.shift = ToJoltDisplacement(shift);
+    result.shape = result.shift == JPH::Vec3::sZero()
+                       ? inner
+                       : JPH::RefConst<JPH::Shape>(
+                             new JPH::OffsetCenterOfMassShape(inner.GetPtr(), result.shift));
+    return result;
 }
 
 JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion,

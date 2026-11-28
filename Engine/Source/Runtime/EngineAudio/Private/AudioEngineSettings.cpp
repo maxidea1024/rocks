@@ -56,6 +56,11 @@ constinit cvar::BootCVar<int32> MixerBlockFramesVar =
         .Help("Mixer block size in frames: 64, 128, 256, 512 or 1024. Fixed after startup.")
         .Range(int32{audio::MinMixBlockFrames}, int32{audio::MaxMixBlockFrames});
 
+constinit cvar::BootCVar<int32> MixerMaxBusesVar =
+    cvar::Boot("audio.mixer.maxbuses", int32{audio::DefaultMaxBuses})
+        .Help("Mixer bus slots including the master bus. Fixed after startup.")
+        .Range(1, int32{audio::MaxMixerBuses});
+
 constinit cvar::BootCVar<int32> MixerBufferCountVar =
     cvar::Boot("audio.mixer.buffercount", 0)
         .Help("Output ring buffer count. 0 uses the computed count (at least 2). Fixed after "
@@ -193,12 +198,12 @@ VirtualizationSettings VirtualizationFromSettings() noexcept {
 Result<void> RegisterEngineAudioSettings(config::ConfigContext& context) noexcept {
     using namespace engine_audio_detail;
     return context.Register(
-        MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar, MixerBufferCountVar,
-        MixerSampleRateVar, MaxVoicesVar, StreamRingFramesVar, StreamMaxStreamsVar,
-        StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar, FocusInitializeOnFirstUpdateVar,
-        MusicVolumeVar, EffectsVolumeVar, DialogueVolumeVar, InterfaceVolumeVar,
-        OcclusionCheckIntervalVar, OcclusionDisableVar, OcclusionFilterScaleVar, VirtualEnabledVar,
-        VirtualAllowPlayWhenSilentVar, VirtualUpdateMinVar, VirtualUpdateMaxVar,
+        MasterVolumeVar, UnfocusedVolumeVar, MixerBlockFramesVar, MixerMaxBusesVar,
+        MixerBufferCountVar, MixerSampleRateVar, MaxVoicesVar, StreamRingFramesVar,
+        StreamMaxStreamsVar, StreamDefaultLoadingVar, ConcurrencyMinDistanceDeltaVar,
+        FocusInitializeOnFirstUpdateVar, MusicVolumeVar, EffectsVolumeVar, DialogueVolumeVar,
+        InterfaceVolumeVar, OcclusionCheckIntervalVar, OcclusionDisableVar, OcclusionFilterScaleVar,
+        VirtualEnabledVar, VirtualAllowPlayWhenSilentVar, VirtualUpdateMinVar, VirtualUpdateMaxVar,
         VirtualPerfDistanceVar, VirtualForceUpdateDistanceVar, VirtualMaxWorldDistanceVar);
 }
 
