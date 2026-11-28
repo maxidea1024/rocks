@@ -19,8 +19,8 @@
 // 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 4.2·4.6·19.9절, UE UMaterial).
 namespace rocks {
 
-// 그래프(EditorOnly)와 기본 속성·사용 대상·물리 재질 필드를 가진다. 쿠킹 데이터(번역 결과)는 MS3이
-// 더한다.
+// 그래프(EditorOnly)와 기본 속성·사용 대상·물리 재질 필드, 쿠킹 데이터(파라미터 표·artifact —
+// 쿠킹 처리기가 쓰기 동안만 채운다, 12.8절 MS3d2)를 가진다.
 //
 // 사용 예:
 //   auto material = package.NewAsset<Material>(...);

@@ -9,6 +9,7 @@
 #include <MaterialCook/MaterialCookSources.h>
 #include <MaterialCook/MaterialTranslationKey.h>
 #include <MaterialCook/MaterialTranslationNugget.h>
+#include <MaterialSchema/MaterialArtifactValidation.h>
 #include <MaterialSchema/MaterialAttributeTable.h>
 #include <ShaderCore/ShaderLibrary.h>
 
@@ -391,7 +392,8 @@ TEST(MaterialCook_TranslationValueOriginsAndArtifact) {
     MaterialTranslationValue sink(env.allocator);
     CHECK(ReadMaterialTranslationNugget(badScope.View(), sink).Error() == ErrorCode::CorruptData);
 
-    // artifact: 파라미터 하나를 Material::parameters 3번에 잇는다.
+    // artifact: 파라미터 하나를 Material::parameters 3번에 잇는다(명령 [3]은 artifact 번호 0
+    // 그대로).
     constexpr uint32 ParameterSlot = 3;
     const uint32 parameterLinks[] = {ParameterSlot};
     MaterialArtifactLinks links;
@@ -405,7 +407,7 @@ TEST(MaterialCook_TranslationValueOriginsAndArtifact) {
     for (const MaterialConstantInstruction& instruction : artifact.program) {
         if (instruction.op == MaterialConstantOp::Parameter) {
             parameterSeen = true;
-            CHECK(instruction.immediates[3] == ParameterSlot);
+            CHECK(instruction.immediates[MaterialConstantTableImmediate] == 0);
             CHECK(instruction.scalar == MaterialConstantScalar::Float);
         }
     }
@@ -421,11 +423,164 @@ TEST(MaterialCook_TranslationValueOriginsAndArtifact) {
     CHECK(artifact.layoutSignature == layout.Value());
     CHECK(!artifact.traits.IsEmpty());
 
+    // 구조 검증: 표 크기 안이면 통과, 파라미터 표가 작으면 CorruptData다.
+    CHECK(ValidateMaterialArtifact(artifact, MaterialArtifactTables{ParameterSlot + 1, 0, 0}));
+    CHECK(ValidateMaterialArtifact(artifact, MaterialArtifactTables{ParameterSlot, 0, 0}).Error() ==
+          ErrorCode::CorruptData);
+
+    // 프로그램 밖 연산(Select)은 해석이 손상으로 본다(artifact 변환까지 가지 않는다).
+    CHECK(ReadEdited(env, parts.View(), [](MaterialTranslationValue& probe) noexcept {
+              IrValue select;
+              select.op = IrOp::Select;
+              (void)probe.steps.TryPushBack(select);
+          }) == ErrorCode::CorruptData);
+
+    // links에 없음 표지가 있으면 InvalidArgument다.
+    const uint32 missingLinks[] = {NoMaterialReference};
+    MaterialArtifactLinks missing;
+    missing.parameters = missingLinks;
+    MaterialArtifact unlinked(env.allocator);
+    CHECK(MakeMaterialArtifact(read, env.names, missing, unlinked).Error() ==
+          ErrorCode::InvalidArgument);
+
     // links 길이가 값과 다르면 InvalidArgument다.
     MaterialArtifactLinks empty;
     MaterialArtifact rejected(env.allocator);
     CHECK(MakeMaterialArtifact(read, env.names, empty, rejected).Error() ==
           ErrorCode::InvalidArgument);
+}
+
+// 손으로 만든 값의 artifact 변환(12.8절 MS3d2): 파라미터 텍스처 slot(출처·종류·샘플러·번호)과
+// TextureSize의 logicalSize, Double 파라미터의 tile·offset 칸, 구조 검증의 손상 판정, IR 연산
+// 대응표의 완전성(상수 프로그램 연산이면 변환되고 아니면 InvalidArgument).
+TEST(MaterialCook_ArtifactFromHandValue) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    constexpr Guid TextureParameterId{0x54505241ull, 1};
+    constexpr uint32 MaterialTextureIndex = 2;
+    constexpr uint32 MaterialParameterIndex = 4;
+    constexpr uint32 DoubleParameterIndex = 5;
+    constexpr uint8 SizeComponents = 2;
+
+    MaterialTranslationValue value(env.allocator);
+    IrTexture texture;
+    texture.source = IrTextureSource::Parameter;
+    texture.id = TextureParameterId;
+    texture.kind = IrTextureKind::Texture2D;
+    texture.sampler = IrTextureSampler::SharedWrap;
+    REQUIRE(value.textures.TryPushBack(texture));
+    IrParameter wide;
+    wide.id = Guid{0x44424c45ull, 1};
+    wide.kind = IrParameterKind::DoubleVector;
+    wide.type = IrDouble(MaxIrComponents);
+    REQUIRE(value.parameters.TryPushBack(wide));
+
+    IrValue textureStep;
+    textureStep.op = IrOp::Texture;
+    textureStep.type.scalar = IrScalar::Texture;
+    textureStep.type.components = 0;
+    textureStep.type.texture = IrTextureKind::Texture2D;
+    textureStep.immediate[MaterialConstantTableImmediate] = 0;
+    IrValue size;
+    size.op = IrOp::TextureSize;
+    size.type = IrFloat(SizeComponents);
+    size.operandCount = 1;
+    size.operands[0] = 0;
+    IrValue parameter;
+    parameter.op = IrOp::Parameter;
+    parameter.type = IrDouble(MaxIrComponents);
+    parameter.immediate[MaterialConstantTableImmediate] = 0;
+    REQUIRE(value.steps.TryPushBack(textureStep));
+    REQUIRE(value.steps.TryPushBack(size));
+    REQUIRE(value.steps.TryPushBack(parameter));
+
+    MaterialConstantMember tile;
+    tile.step = 2;
+    tile.kind = MaterialConstantSlotKind::DoubleTile;
+    tile.vector = 0;
+    tile.components = MaxIrComponents;
+    MaterialConstantMember offset = tile;
+    offset.kind = MaterialConstantSlotKind::DoubleOffset;
+    offset.vector = 1;
+    MaterialConstantMember sizeMember;
+    sizeMember.step = 1;
+    sizeMember.vector = 2;
+    sizeMember.components = SizeComponents;
+    REQUIRE(value.members.TryPushBack(tile));
+    REQUIRE(value.members.TryPushBack(offset));
+    REQUIRE(value.members.TryPushBack(sizeMember));
+    value.floatVectors = 3;
+
+    const uint32 parameterLinks[] = {DoubleParameterIndex};
+    const uint32 textureLinks[] = {MaterialTextureIndex};
+    const uint32 textureParameterLinks[] = {MaterialParameterIndex};
+    MaterialArtifactLinks links;
+    links.parameters = parameterLinks;
+    links.textures = textureLinks;
+    links.textureParameters = textureParameterLinks;
+    MaterialArtifact artifact(env.allocator);
+    REQUIRE(MakeMaterialArtifact(value, env.names, links, artifact));
+    REQUIRE(artifact.textures.Size() == 1);
+    const MaterialTextureSlot& slot = artifact.textures[0];
+    CHECK(slot.source == MaterialTextureSource::Parameter);
+    CHECK(slot.kind == MaterialTextureKind::Texture2D);
+    CHECK(slot.sampler == MaterialSamplerSource::SharedWrap);
+    CHECK(slot.parameter == MaterialParameterIndex);
+    CHECK(slot.texture == MaterialTextureIndex);
+    CHECK(slot.logicalSize);
+    REQUIRE(artifact.program.Size() == 3);
+    CHECK(artifact.program[0].scalar == MaterialConstantScalar::Texture);
+    CHECK(artifact.program[0].components == 0);
+    CHECK(artifact.program[1].operands[0] == 0);
+    CHECK(artifact.program[1].operands[1] == 0);
+    CHECK(artifact.program[2].scalar == MaterialConstantScalar::Double);
+    REQUIRE(artifact.constants.Size() == 3);
+    CHECK(artifact.constants[0].kind == MaterialConstantSlotKind::DoubleTile);
+    CHECK(artifact.constants[1].kind == MaterialConstantSlotKind::DoubleOffset);
+    CHECK(artifact.constants[2].instruction == 1);
+
+    const MaterialArtifactTables tables{DoubleParameterIndex + 1, MaterialTextureIndex + 1, 0};
+    CHECK(ValidateMaterialArtifact(artifact, tables));
+    // 손상: Double 명령의 칸이 Value, TextureSize 아닌 명령이 Texture를 읽음, 텍스처 번호가 표 밖.
+    artifact.constants[0].kind = MaterialConstantSlotKind::Value;
+    CHECK(ValidateMaterialArtifact(artifact, tables).Error() == ErrorCode::CorruptData);
+    artifact.constants[0].kind = MaterialConstantSlotKind::DoubleTile;
+    artifact.program[1].op = MaterialConstantOp::Abs;
+    CHECK(ValidateMaterialArtifact(artifact, tables).Error() == ErrorCode::CorruptData);
+    artifact.program[1].op = MaterialConstantOp::TextureSize;
+    CHECK(ValidateMaterialArtifact(
+              artifact, MaterialArtifactTables{DoubleParameterIndex + 1, MaterialTextureIndex, 0})
+              .Error() == ErrorCode::CorruptData);
+
+    // 파라미터 텍스처 slot인데 파라미터 번호가 없으면 InvalidArgument다.
+    const uint32 noParameter[] = {NoMaterialReference};
+    MaterialArtifactLinks broken = links;
+    broken.textureParameters = noParameter;
+    MaterialArtifact rejected(env.allocator);
+    CHECK(MakeMaterialArtifact(value, env.names, broken, rejected).Error() ==
+          ErrorCode::InvalidArgument);
+
+    // 대응표 완전성: 명령 하나짜리 값으로 IR 연산마다 변환 성공 여부가 상수 프로그램 연산 집합과
+    // 같다(Texture는 위에서 본다).
+    for (uint32 code = 0; code < IrOpCount; ++code) {
+        const IrOp op = static_cast<IrOp>(code);
+        if (op == IrOp::Texture) {
+            continue;
+        }
+
+        MaterialTranslationValue single(env.allocator);
+        REQUIRE(single.parameters.TryPushBack(wide));
+        IrValue step;
+        step.op = op;
+        step.type = IrFloat(1);
+        REQUIRE(single.steps.TryPushBack(step));
+        const uint32 singleParameter[] = {0};
+        MaterialArtifactLinks singleLinks;
+        singleLinks.parameters = singleParameter;
+        MaterialArtifact converted(env.allocator);
+        const bool expected = op == IrOp::Constant || IsMaterialConstantProgramOp(op);
+        CHECK(MakeMaterialArtifact(single, env.names, singleLinks, converted).IsOk() == expected);
+    }
 }
 
 } // namespace material_translation_nugget_tests_file

@@ -13,7 +13,8 @@
 // 머티리얼 artifact 하나다(Docs/Design/MaterialSystem 12.4절, 12.8절 MS3d2 — UE FMaterialResource의
 // 쿠킹 부분). 번역 결과 하나의 실행 데이터이고 순수 값이다(텍스처·컬렉션은 Material의 Hard 참조
 // 필드 번호로, 파라미터는 Material::parameters 번호로 가리킨다). 셰이더 코드는 들지 않는다 —
-// 셰이더 라이브러리에서 셰이더 집합 id로 연다(12.6절).
+// 셰이더 라이브러리에서 셰이더 집합 id로 연다(12.6절). 번호 필드는 리플렉션 해석이 대조하지
+// 않으므로 로드가 ValidateMaterialArtifact로 한 번 검증한 뒤에 쓴다(손상은 CorruptData).
 //
 // 사용 예:
 //   const MaterialArtifact& artifact = material.artifacts[entry.artifact];
@@ -39,7 +40,8 @@ struct MaterialArtifact {
     ROCKS_PROPERTY() uint32 floatVectors = 0;
     ROCKS_PROPERTY() Array<MaterialConstantSlot> constants;
     ROCKS_PROPERTY() Array<MaterialConstantInstruction> program;
-    // 번역 파라미터 표 순(Parameter 명령의 즉시값 [3]) → Material::parameters 번호다.
+    // artifact 파라미터 번호(Parameter 명령의 즉시값 [MaterialConstantTableImmediate] — 번역
+    // 파라미터 표 순) → Material::parameters 번호다.
     ROCKS_PROPERTY() Array<uint32> parameters;
     // 텍스처 slot이다(MaterialTexture<k> 순).
     ROCKS_PROPERTY() Array<MaterialTextureSlot> textures;

@@ -29,16 +29,24 @@
 | 대상 프로필과 출력 설정 | 프로필 id·출력 설정은 넣지 않는다 — 번역이 읽는 프로필 값은 모두 번역 대상 바이트에 들어간다(텍스처 너겟이 결과에 닿지 않는 칸을 고정하는 것과 같은 규칙) |
 | 의존 입력 | (역할 문자열, AssetId, 의존 키) 정렬 목록(역할: Function·Material·ColorCurve·CurveAtlas·Collection·Texture). 의존 키: 함수 = SHA-256(함수 그래프 semantic hash, usage, 표시 이름, 그 함수의 의존 목록 — 중첩 의존이 재귀로 든다), 함수 인스턴스 = SHA-256(override 정규 바이트, 부모 함수 키), MaterialSample 대상 머티리얼 = (그래프 semantic hash, 표시 이름 — snapshot에 기본 속성이 없어 번역이 읽지 않는다), 컬렉션 = layout 서명(base 사슬 포함), 색 커브 = 커브 내용 정규 바이트의 SHA-256(네 채널 키·조정), 커브 atlas = 행 AssetId 목록의 SHA-256, 텍스처 = (참조한 노드 id·속성 경로, AssetId, `MaterialTextureFacts` 정규 바이트) — 파라미터 노드의 기본 텍스처 필드만 AssetId 없이 사실로(기본 텍스처를 사실이 같은 텍스처로 바꾸면 적중한다, MS3d1 정정). static 변형은 루트 머티리얼(역할 Root)의 그래프 semantic hash와 의존을 넣고, 중간 인스턴스의 정체성은 넣지 않는다. AssetSystem 9절의 "같은 처리기 build key"를 일반화한다(16절 MAS6). **구현(MS3c)**: 재귀 키 대신 모은 닫힘 전체를 (역할, AssetId) 순 평평한 목록으로 쓴다 — 함수의 함수·커브까지 같은 목록에 들어 무효화 결과가 같다. 텍스처 역할은 목록에서 빼고 참조 위치 목록(그래프 asset·노드 id·필드 순 정렬)이 대신한다 |
 
-값(`.rnug` 부분):
+값(`.rnug` 부분 — 구현 part 번호, 12.8절 MS3c·MS3d2):
+0. 머리(형식 버전 2, part 수 15, 진단 수)
 1. 생성 원문(`/Engine/Generated/Material.rsh` 텍스트)
-2. 상수 블록 layout 표와 서명
-3. 상수 식 프로그램
-4. 텍스처 slot 목록(출처·종류·샘플러 출처)과 파라미터 출처(`ParameterKey`·이름 — 12.8절 MS3d2). 기본값과 기본 텍스처 AssetId는 넣지 않는다(쿠킹 처리기가 노드 hook으로 그래프에서 읽는다, 4.5절). 샘플 종류는 사용마다 Texture 값에 있고, 논리 크기 사용은 프로그램에서 유도하고, 전체 상주 표지는 MS4다
+2. 상수 블록 layout 표(float4 수·멤버)
+3. 상수 식 프로그램과 파라미터 표(기본값 0 — 처리기가 노드 hook으로 채운다)
+4. 텍스처 slot 목록(출처·정체·종류·샘플러 출처 — 기본 텍스처 AssetId는 넣지 않는다, 4.5절)
 5. `MaterialShaderTraits`
-6. 텍스처 sampling scale 표(12.5절)
+6. 텍스처 sampling scale 표(12.5절 — MS4까지 빈 목록)
 7. 원문 위치 지도(7.6절)
-8. 진단·통계(IR 값 수·텍스처·보간·상수 블록 크기)
+8. 통계(IR 값 수)
 9. IR hash
+10. 진단(경고·정보)
+11. `userSceneTextures`
+12. `consultedTarget`
+13. 파라미터 출처(수 파라미터·파라미터 텍스처마다 `ParameterKey`·이름 — 정체 순)
+14. 컬렉션(모듈 순 — AssetId·float4 수)
+
+샘플 종류는 사용마다 Texture 값에 있고, 논리 크기 사용은 프로그램에서 유도하고, 전체 상주 표지는 MS4다.
 
 ### 12.3 셰이더 job
 
@@ -142,11 +150,11 @@ MS3(15.2절)은 다섯 묶음으로 나눈다. 묶음마다 교차 리뷰(두 �
 - **MS3d2 값 v2와 런타임 형.**
   - 번역 값 형식 버전 2(part 15개, 번역 너겟 정체 버전 2): 새 part 13에 수 파라미터·파라미터 텍스처의 출처(정체 순 — 정체·소유 Guid·parameterId·scope 종류 u8·layer·callPath 목록·이름), part 14에 컬렉션(모듈 순 — `MaterialCollection<k>`, AssetId·float4 수 — 컬렉션 layout 서명은 키가 이미 담는다)을 더한다. 해석 의미 검사에 scope 종류 범위, 출처의 정체 순·중복 없음, 수 파라미터·파라미터 텍스처마다 출처가 있음을 더한다. 텍스처 slot의 논리 크기 사용은 값에 넣지 않고 변환이 프로그램(TextureSize 명령의 slot)에서 유도한다. 전체 상주 표지(7.4절)는 상주 mip helper(MS4 TextureStreaming 연결)까지 늘 거짓이다(TODO). 샘플 종류는 slot이 아니라 Texture 값 즉시값에 사용마다 있으므로 slot에 두지 않는다. sampling scale(part 6)은 12.5절 IR 분석과 함께 MS4로 넘긴다(TODO — 지금 빈 목록).
   - 런타임 형(실행 시 로드가 읽으므로 Runtime 모듈 — 컴파일러 형을 쓰지 않는다). artifact는 **순수 값**이다(`ObjectRef`는 복사·이동이 막혀 배열 원소로 둘 수 없다 — UE도 텍스처 uniform 식이 `ReferencedTextures` 번호를 가진다, `MaterialUniformExpressions.h:451–458`):
-    - MaterialSchema: `MaterialConstantOp`(6.10절 프로그램 연산 집합과 Constant·Parameter·Texture·TextureSize — UE `EPreshaderOpcode` 대응 표를 enum 주석에), `MaterialConstantInstruction`(op·scalar(Float·Double·Texture)·components·operandCount·operands[4]·immediates[4] — 즉시값 부호화는 IR 그대로, Parameter·Texture의 즉시값 [3]은 artifact 파라미터·텍스처 slot 번호, `MaterialConstantProgramVersion`), `MaterialConstantSlot`(칸 종류 Value·DoubleTile·DoubleOffset·float4 번호·첫 성분·성분 수·명령 번호), `MaterialParameterInfo`(`ParameterKey`·이름·그룹·sortPriority·`MaterialParameterType`·`defaults[4]`·기본 텍스처 번호).
-    - Material: `MaterialTextureSlot`(출처 Asset·Parameter, 종류, 샘플러 출처 None·Own·SharedWrap·SharedClamp, 파라미터면 `parameters` 번호, `texture` = `Material::referencedTextures` 번호(Hard 간선은 그 필드가 이미 가진다), `logicalSize`, `wholeResident`), `MaterialArtifact`(`shaderSetId`, layout 서명(인스턴스 패키지의 부모 layout 대조 — 12.4절), traits 정규 바이트, float4 수, 상수 칸, 프로그램, 파라미터 번호 목록(모듈 파라미터 표 순 → `Material::parameters` 번호), 텍스처 slot, 컬렉션 = `Material::parameterCollections` 번호 목록(모듈 순), `userSceneTextures`), `MaterialFormatArtifact`(형식 id·quality·artifact 번호 — 품질은 여기에만 둔다, artifact는 품질 사이에 공유된다).
+    - 모두 MaterialSchema(순수 값이라 런타임 형 모듈): `MaterialConstantOp`(6.10절 프로그램 연산 집합과 Constant·Parameter·Texture·TextureSize — UE `EPreshaderOpcode` 대응 표를 enum 주석에), `MaterialConstantProgram.h`(형식 버전 `MaterialConstantProgramVersion`·즉시값 규칙·Swizzle bit·TextureSize 모드·Double tile 크기 — 컴파일러도 이것을 쓴다), `MaterialConstantInstruction`(op·scalar(Float·Double·Texture)·components·operandCount·operands[4]·immediates[4] — Parameter·Texture의 즉시값 [3]은 artifact 파라미터 번호(번역 표 순)·텍스처 slot 번호, operandCount 밖 칸은 0), `MaterialConstantSlot`(칸 종류 Value·DoubleTile·DoubleOffset·float4 번호·첫 성분·성분 수·명령 번호), `MaterialParameterInfo`(`ParameterKey`·이름·`MaterialParameterType`·primitiveDataIndex·`defaults[4]`·기본 텍스처 번호 — 그룹·정렬 순위는 UE처럼 에디터 정보라 쿠킹 데이터에 두지 않는다).
+    - `MaterialTextureSlot`(출처 Asset·Parameter, 종류, 샘플러 출처 None·Own·SharedWrap·SharedClamp, 파라미터면 `parameters` 번호, `texture` = `Material::referencedTextures` 번호(Hard 간선은 그 필드가 이미 가진다), `logicalSize`, `wholeResident`), `MaterialArtifact`(`shaderSetId`, layout 서명(인스턴스 패키지의 부모 layout 대조 — 12.4절), traits 정규 바이트, float4 수, 상수 칸, 프로그램, 파라미터 번호 목록(모듈 파라미터 표 순 → `Material::parameters` 번호), 텍스처 slot, 컬렉션 = `Material::parameterCollections` 번호 목록(모듈 순), `userSceneTextures`), `MaterialFormatArtifact`(형식 id·quality·artifact 번호 — 품질은 여기에만 둔다, artifact는 품질 사이에 공유된다). 번호 필드는 리플렉션 해석이 대조하지 않으므로 로드가 `ValidateMaterialArtifact(artifact, 표 크기)`로 한 번 검증한다(명령 연산·형·피연산자·표 번호, 칸 범위·형, 파라미터·텍스처·컬렉션 번호 — 위반 CorruptData, MS3d5가 로드에서 부른다).
     - `Material` 필드: `parameters : Array<MaterialParameterInfo>`(머티리얼 단위 파라미터 표 — UE cached expression data의 파라미터 목록, `ParameterKey` 순, 모든 artifact의 파라미터 합집합. 인스턴스 override 해석(MS6)이 이 표를 본다), `artifacts`, `formatArtifacts`. 에디터 패키지에서는 빈다 — 처리기가 쓰기 동안만 채운다. 새 `ROCKS_PROPERTY`는 `.rocksids.json`에 등록하고, Material 클래스 기본값 지문이 바뀌어 머티리얼 전체가 다시 쿠킹된다.
     - 12.4절 표의 "평탄화 기본값 배열"은 이 파라미터 표다(인스턴스의 평탄화 배열은 MS6).
-  - 변환 `MakeMaterialArtifact`(MaterialCook): IR 연산 → `MaterialConstantOp`(집합 밖은 InvalidArgument — 상수 빌더 계약 위반), IR 텍스처 종류·샘플러 → 런타임 enum.
+  - 변환 `MakeMaterialArtifact`(MaterialCook): IR 연산 → `MaterialConstantOp`(집합 밖은 InvalidArgument — 상수 프로그램 빌더 계약 위반), IR 텍스처 종류·샘플러 → 런타임 enum(값이 같음을 static_assert로 고정). links 번호가 없음 표지이거나 텍스처 파라미터 번호가 slot 출처와 어긋나면 InvalidArgument다. 해석한 값은 의미 검사가 연산 집합·형·Texture 쓰임(TextureSize 피연산자만)·칸 형(Double ↔ tile·offset, 성분 수 같음)·출처 scope·컬렉션 순서를 이미 거르므로 손상은 CorruptData(다시 번역)로 간다.
 - **MS3d3 처리기** `MaterialCookProcessor`(MaterialCook, `TypeIdOf<Material>()` — `RegisterMaterialCookProcessor(state, table)`). 등록 state(`MaterialCookServices` — 아래)가 카탈로그, 알려진 형식 정의 전부의 형식 사실(`Span<const ShaderFormatFacts>` — 등록 때는 프로필을 모르므로 Cook이 `context.profile`의 형식을 이 표에서 고른다), custom 속성 표(null이면 내장)를 준다.
   - **정체·cookKey.** 처리기 버전 Guid는 artifact 배치·처리 규칙이 바뀌면 올린다. `WriteSettingsKey`는 패키지 cookKey에 번역 결과를 바꾸지만 패키지 콘텐츠·SCC에 없는 입력을 쓴다: 엔진 노드 정의 서명(타입·schema·lowering 버전 전부), custom 속성 표 서명, 알려진 형식 사실 전부의 digest, `MaterialCommonContractVersion`·상수 프로그램·traits·번역 값·셰이더 집합 형식 버전. 그러면 형식 정의나 lowering만 바뀌어도 패키지가 재사용되지 않는다.
   1. 대표 에셋이 `Material`이 아니면 TypeMismatch, `context.dependencies`가 null이면 InvalidArgument.
@@ -155,7 +163,7 @@ MS3(15.2절)은 다섯 묶음으로 나눈다. 묶음마다 교차 리뷰(두 �
   4. 대상마다: 앞선 대상의 결과 중 `consultedTarget` 칸이 모두 같은 것이 있으면 그 값을 쓰고 자기 키로 Put한다(번역 안 함 — `verifyNuggets`면 번역해 byte 대조). 아니면 키 → Get(bucket `material_translation`) → 해석. 미적중·손상·verify면 번역 → 생성 원문 → 상수 → traits → 값, verify면 byte 대조(다르면 NuggetMismatch), 성공 값만 Put. **artifact·진단 재생은 늘 값(해석본)에서 만든다**(적중·미적중이 같은 길 — MS-T1 byte 동일).
   5. 번역 오류면 `MaterialTranslationFailed`(detail = 첫 오류 코드 — MAS11로 보고서 `setting`에 간다). 경고는 `MaterialTranslationWarning`(경고, setting = 진단 코드, related = 진단 asset — 루트면 쿠킹 대상)으로 `context.warnings`에 옮기고, 대상 사이 같은 (asset, node, code, 문구)는 한 번만이다. 노드·문구는 `CookDiagnostic`에 칸이 없으므로 영어 Log(Warning·Error — 카테고리 LogMaterialCook)로 남긴다. Info는 Log만.
   6. 미적중으로 번역했으면 `MaterialTranslation.dependencies` ⊆ 모은 참조인지 대조한다. 밖이면 `MaterialDependencyUndeclared`(오류, related = 그 AssetId — 노드 참조 선언 결함).
-  7. 파라미터 표: 값마다 출처로 소유 그래프(루트 또는 모은 snapshot)에서 parameterId가 같은 파라미터 노드를 모두 찾아 hook과 `ResolveParameterDefaults`로 읽고, 종류·이름·기본값이 서로 다르면 `MaterialTranslationFailed`(setting = `ParameterConflict`)다 — 기본값은 semantic hash 밖이라 적중이면 번역의 충돌 진단이 돌지 않는다(UE는 cached expression data 쪽에서 본다). 노드가 하나도 없으면 InvalidArgument. 기본 텍스처·참조 텍스처는 `referencedTextures`에서, 컬렉션은 `parameterCollections`에서 번호를 찾는다(없으면 2단계가 이미 실패했다 — InvalidArgument).
+  7. 파라미터 표: custom primitive data 파라미터는 IR 파라미터를 만들지 않으므로 처리기가 루트·모은 그래프의 파라미터 노드를 hook으로 훑어 `primitiveDataIndex`가 있는 것도 표에 넣는다(UE `GatherDefaultCustomPrimitiveDataParametersFromMaterials`가 머티리얼에서 이름으로 찾는다). 값마다 출처로 소유 그래프(루트 또는 모은 snapshot)에서 parameterId가 같은 파라미터 노드를 모두 찾아 hook과 `ResolveParameterDefaults`로 읽고, 종류·이름·기본값이 서로 다르면 `MaterialTranslationFailed`(setting = `ParameterConflict`)다 — 기본값은 semantic hash 밖이라 적중이면 번역의 충돌 진단이 돌지 않는다(UE는 cached expression data 쪽에서 본다). 노드가 하나도 없으면 InvalidArgument. 기본 텍스처·참조 텍스처는 `referencedTextures`에서, 컬렉션은 `parameterCollections`에서 번호를 찾는다(없으면 2단계가 이미 실패했다 — InvalidArgument).
   8. artifact: 정규 byte(리플렉션 부호화)가 같은 것은 하나다. 셰이더 집합 id만 같고 프로그램·slot이 다르면(형식 스위치가 uniform 식을 고름) 다른 artifact다. 순서는 대상 순 첫 등장, `formatArtifacts`는 대상 순이다.
   9. 셰이더 묶음 Record: bucket `material_shader_bundles`, 키 = 너겟 키 머리 + 쿠킹 대상 AssetId + 패키지 cookKey(MAS9 `CookContext::cookKey`), 값 = 머리 part와 셰이더 집합마다(형식 id·품질·집합 id·layout 서명·생성 원문·traits 정규 바이트 — 같은 집합 id는 원문·traits를 한 번만), 정점 입력 타입 id 목록. 같은 내용을 실행 안 표(`MaterialCookServices`)에도 넣는다.
   10. 쓰기: 파라미터 표·artifact를 대상 객체에 옮겨 넣고 `WriteCookedPackage`로 쓴 뒤 성공·실패 모두 빈 값으로 되돌린다(CurveTable 처리기 규칙 — 순수 값 배열이라 이동·되돌리기가 할당하지 않는다).

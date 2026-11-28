@@ -1,5 +1,6 @@
 #include <MaterialCompiler/MaterialIrOp.h>
 #include <MaterialCook/MaterialArtifactBuild.h>
+#include <MaterialSchema/MaterialReferenceIndex.h>
 #include <MaterialSchema/MaterialShaderTraits.h>
 
 // 번역 값 → 런타임 artifact 변환이다(Docs/Design/MaterialSystem 12.8절 MS3d2).
@@ -8,6 +9,40 @@ namespace rocks {
 namespace {
 
 using material::IrOp;
+
+// IR 텍스처 enum과 런타임 enum은 같은 값이다(변환이 값을 그대로 옮긴다).
+static_assert(static_cast<uint8>(material::IrTextureSource::Asset) ==
+                      static_cast<uint8>(material::MaterialTextureSource::Asset) &&
+                  static_cast<uint8>(material::IrTextureSource::Parameter) ==
+                      static_cast<uint8>(material::MaterialTextureSource::Parameter),
+              "MaterialTextureSource must match IrTextureSource");
+static_assert(static_cast<uint8>(material::IrTextureKind::None) ==
+                      static_cast<uint8>(material::MaterialTextureKind::None) &&
+                  static_cast<uint8>(material::IrTextureKind::Texture2D) ==
+                      static_cast<uint8>(material::MaterialTextureKind::Texture2D) &&
+                  static_cast<uint8>(material::IrTextureKind::TextureCube) ==
+                      static_cast<uint8>(material::MaterialTextureKind::TextureCube) &&
+                  static_cast<uint8>(material::IrTextureKind::Texture2DArray) ==
+                      static_cast<uint8>(material::MaterialTextureKind::Texture2DArray) &&
+                  static_cast<uint8>(material::IrTextureKind::TextureCubeArray) ==
+                      static_cast<uint8>(material::MaterialTextureKind::TextureCubeArray) &&
+                  static_cast<uint8>(material::IrTextureKind::Texture3D) ==
+                      static_cast<uint8>(material::MaterialTextureKind::Texture3D) &&
+                  static_cast<uint8>(material::IrTextureKind::External) ==
+                      static_cast<uint8>(material::MaterialTextureKind::External),
+              "MaterialTextureKind must match IrTextureKind");
+static_assert(static_cast<uint8>(material::IrTextureSampler::None) ==
+                      static_cast<uint8>(material::MaterialSamplerSource::None) &&
+                  static_cast<uint8>(material::IrTextureSampler::Own) ==
+                      static_cast<uint8>(material::MaterialSamplerSource::Own) &&
+                  static_cast<uint8>(material::IrTextureSampler::SharedWrap) ==
+                      static_cast<uint8>(material::MaterialSamplerSource::SharedWrap) &&
+                  static_cast<uint8>(material::IrTextureSampler::SharedClamp) ==
+                      static_cast<uint8>(material::MaterialSamplerSource::SharedClamp),
+              "MaterialSamplerSource must match IrTextureSampler");
+static_assert(material::MaterialConstantOperands == material::MaxIrOperands &&
+                  material::MaterialConstantImmediates == material::IrImmediateSlots,
+              "Constant instruction slots must match the IR value slots");
 using material::MaterialConstantOp;
 
 // IR 연산 → 상수 식 연산이다(상수 빌더 집합 밖이면 false).
@@ -184,6 +219,33 @@ Result<void> MakeMaterialArtifact(const MaterialTranslationValue& value, NamePoo
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 번호는 모두 있어야 하고(없음 표지는 처리기의 잘못), 텍스처 파라미터 번호는 파라미터 slot에만
+    // 있다.
+    const auto present = [](Span<const uint32> list) noexcept {
+        for (uint32 index : list) {
+            if (index == material::NoMaterialReference) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    if (!present(links.parameters) || !present(links.textures) || !present(links.collections)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < value.textures.Size(); ++index) {
+        const bool parameterSlot =
+            value.textures[index].source == material::IrTextureSource::Parameter;
+        if (parameterSlot != (links.textureParameters[index] != material::NoMaterialReference)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    out.shaderSetId = Sha256Digest{};
+    out.layoutSignature = Sha256Digest{};
+    out.floatVectors = 0;
     out.traits.Clear();
     out.constants.Clear();
     out.program.Clear();
@@ -227,23 +289,22 @@ Result<void> MakeMaterialArtifact(const MaterialTranslationValue& value, NamePoo
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // operandCount 밖 칸은 0이다(IR의 NoIrValue를 옮기지 않는다 — MaterialConstantProgram.h).
         instruction.operandCount = step.operandCount;
         for (usize index = 0; index < material::MaterialConstantOperands; ++index) {
-            instruction.operands[index] = step.operands[index];
+            instruction.operands[index] = index < step.operandCount ? step.operands[index] : 0;
         }
 
         for (usize index = 0; index < material::MaterialConstantImmediates; ++index) {
             instruction.immediates[index] = step.immediate[index];
         }
 
-        // Parameter는 Material::parameters 번호를, Texture는 artifact 텍스처 slot 번호(값과 같은
-        // 순서)를 즉시값 [3]에 둔다.
-        if (step.op == IrOp::Parameter) {
-            if (step.immediate[3] >= links.parameters.Size()) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            instruction.immediates[3] = links.parameters[static_cast<usize>(step.immediate[3])];
+        // Parameter·Texture의 즉시값 [3]은 artifact 파라미터·텍스처 slot 번호 그대로다(값의 표와
+        // 같은 순서 — artifact.parameters가 Material::parameters로 잇는다).
+        const uint64 table = step.immediate[material::MaterialConstantTableImmediate];
+        if ((step.op == IrOp::Parameter && table >= value.parameters.Size()) ||
+            (step.op == IrOp::Texture && table >= value.textures.Size())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         if (auto pushed = out.program.TryPushBack(instruction); !pushed) {

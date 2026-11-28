@@ -1616,7 +1616,7 @@
       "name": "rocks::material::MaterialParameterInfo::group",
       "id": "9a6fbfd4411844c2b8f46caa67fed5c7",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -1644,7 +1644,7 @@
       "name": "rocks::material::MaterialParameterInfo::sortPriority",
       "id": "77df9a8dff6d444385874f9bae979ac4",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",

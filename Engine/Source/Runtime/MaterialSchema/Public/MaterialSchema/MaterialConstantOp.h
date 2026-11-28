@@ -8,11 +8,14 @@
 // Texture다. 실행 시 상수 블록 평가가 읽는다(컴파일러 IR 연산 번호와 독립 — 쿠킹이 옮긴다).
 //
 // UE EPreshaderOpcode(RE/Public/Shader/Preshader.h:19–75) 대응: Constant = ConstantZero·Constant,
-// Parameter = Parameter, TextureSize = TextureSize·TexelSize, 사칙·Min·Max·Abs·Floor·Ceil·Round·
-// Trunc·Frac·Saturate·Sign·Sqrt·Rcp·Length·Normalize·Dot·Cross·Sin·Cos·Tan·Asin·Acos·Atan·Atan2·Exp·
-// Exp2·Log·Log2·Log10·Fmod·Modulo·Neg, Clamp(UE는 Min·Max 조합), Splat·ComponentSwizzle(Swizzle)·
-// AppendVector(Append), 형 바꿈(Convert). Texture는 TextureSize의 피연산자 slot 값이다(UE는 텍스처
-// index 즉시값).
+// Parameter = Parameter, TextureSize = TextureSize·TexelSize, 사칙·Min·Max·Clamp·Abs·Floor·Ceil·
+// Round·Trunc·Frac·Saturate·Sign·Sqrt·Rcp·Length·Normalize·Dot·Cross·Sin·Cos·Tan·Asin·Acos·Atan·
+// Atan2·Exp·Exp2·Log·Log2·Log10·Fmod·Modulo·Neg,
+// Splat·ComponentSwizzle(Swizzle)·AppendVector(Append), 형 바꿈(Convert). Texture는 TextureSize의
+// 피연산자 slot 값이다(UE는 텍스처 index 즉시값). UE에만 있는 것:
+// Fractional·비교·Assign·PushValue(UE도 접지 않거나 평가 내부용 — 9.4절),
+// ExternalTextureCoordinateScaleRotation·Offset(MPQ-ExternalTexture), RuntimeVirtualTextureUniform
+// (MPQ-VirtualTexture), SparseVolumeTextureUniform(MPQ-SparseVolumeTexture).
 namespace rocks::material {
 
 ROCKS_ENUM()

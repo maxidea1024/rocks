@@ -2,6 +2,7 @@
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
 #include <Core/Move.h>
+#include <MaterialCompiler/MaterialConstants.h>
 #include <MaterialCompiler/MaterialIrOp.h>
 #include <MaterialCook/MaterialTranslationNugget.h>
 
@@ -22,6 +23,9 @@ constexpr uint8 LastTextureSource = static_cast<uint8>(material::IrTextureSource
 constexpr uint8 LastTextureSampler = static_cast<uint8>(material::IrTextureSampler::SharedClamp);
 constexpr uint8 LastSeverity = static_cast<uint8>(nodegraph::GraphDiagnosticSeverity::Error);
 constexpr uint8 LastScope = static_cast<uint8>(material::ParameterScopeKind::LayerBlend);
+// 부호화한 Guid·원소 수의 byte 수다.
+constexpr usize GuidBytes = 2 * sizeof(uint64);
+constexpr usize CountBytes = sizeof(uint32);
 
 void WriteGuid(ByteWriter& writer, Guid value) noexcept {
     writer.WriteLittleEndian<uint64>(value.high);
@@ -73,8 +77,8 @@ Result<void> WriteCount(ByteWriter& writer, usize count) noexcept {
 // 원소 수다(남은 byte로 상한 — 손상된 수가 큰 할당을 일으키지 않게).
 bool ReadCount(ByteReader& reader, usize minimumElementBytes, uint32& count) noexcept {
     count = reader.ReadLittleEndian<uint32>();
-    return !reader.Failed() &&
-           static_cast<usize>(count) * minimumElementBytes <= reader.Remaining();
+    // 나누기로 상한을 본다(32-bit usize에서 곱이 넘치지 않게).
+    return !reader.Failed() && count <= reader.Remaining() / minimumElementBytes;
 }
 
 void WriteType(ByteWriter& writer, const material::IrType& type) noexcept {
@@ -505,8 +509,8 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
         break;
     case 13: {
         uint32 count = 0;
-        // 정체·소유·ParameterId·scope·layer·경로 수·이름 길이.
-        constexpr usize OriginBytes = 16 * 4 + 1 + 4 + 4;
+        // 정체·소유·ParameterId·layer(Guid 넷), scope, 경로 수, 이름 길이.
+        constexpr usize OriginBytes = GuidBytes * 4 + 1 + CountBytes + CountBytes;
         if (!ReadCount(reader, OriginBytes, count)) {
             return false;
         }
@@ -519,7 +523,7 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             const uint8 scope = reader.ReadU8();
             origin.layer = ReadGuid(reader);
             uint32 calls = 0;
-            constexpr usize CallBytes = 16;
+            constexpr usize CallBytes = GuidBytes;
             if (reader.Failed() || scope > LastScope || !ReadCount(reader, CallBytes, calls)) {
                 return false;
             }
@@ -551,7 +555,7 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
     }
     case 14: {
         uint32 count = 0;
-        constexpr usize CollectionBytes = 16 + 4;
+        constexpr usize CollectionBytes = GuidBytes + sizeof(uint32);
         if (!ReadCount(reader, CollectionBytes, count)) {
             return false;
         }
@@ -581,56 +585,121 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
 }
 
 // 해석한 값의 의미 검사다(12.8절 — 손상된 값이 상수 평가에서 범위 밖을 읽지 않게).
+bool GuidBefore(Guid left, Guid right) noexcept {
+    return left.high < right.high || (left.high == right.high && left.low < right.low);
+}
+
+// 정체 순 출처 표에서 identity가 있는가(이진 탐색).
+bool HasOrigin(Span<const material::IrParameterOrigin> origins, Guid identity) noexcept {
+    usize low = 0;
+    usize high = origins.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (origins[middle].identity == identity) {
+            return true;
+        }
+
+        if (GuidBefore(origins[middle].identity, identity)) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return false;
+}
+
+// 상수 프로그램 명령 하나의 연산·형이 상수 빌더 계약 안인가(artifact 변환의 전제 — 12.8절 MS3d2).
+bool ProgramStep(const IrValue& step) noexcept {
+    if (step.op == material::IrOp::Texture) {
+        return step.type.scalar == material::IrScalar::Texture && step.operandCount == 0;
+    }
+
+    const bool leaf = step.op == material::IrOp::Constant || step.op == material::IrOp::Parameter;
+    return (leaf || material::IsMaterialConstantProgramOp(step.op)) &&
+           (!leaf || step.operandCount == 0) &&
+           (step.type.scalar == material::IrScalar::Float ||
+            step.type.scalar == material::IrScalar::Double) &&
+           step.type.rows <= 1 && step.type.components >= 1;
+}
+
+// 해석한 값의 의미 검사다(12.8절 — 손상된 값이 상수 평가·artifact 변환에서 범위 밖을 읽거나 계약
+// 위반으로 실패하지 않게, 손상은 다시 번역한다).
 bool Consistent(const MaterialTranslationValue& value) noexcept {
     for (usize index = 0; index < value.steps.Size(); ++index) {
         const IrValue& step = value.steps[index];
+        if (!ProgramStep(step)) {
+            return false;
+        }
+
+        // 피연산자는 앞 명령이고, Texture 명령은 TextureSize의 피연산자로만 쓴다.
         for (uint8 operand = 0; operand < step.operandCount; ++operand) {
             if (step.operands[operand] >= index) {
                 return false;
             }
+
+            const bool texture = value.steps[step.operands[operand]].op == material::IrOp::Texture;
+            if (texture != (step.op == material::IrOp::TextureSize)) {
+                return false;
+            }
         }
 
-        if ((step.op == material::IrOp::Texture && step.immediate[3] >= value.textures.Size()) ||
-            (step.op == material::IrOp::Parameter &&
-             step.immediate[3] >= value.parameters.Size())) {
+        const uint64 table = step.immediate[material::MaterialConstantTableImmediate];
+        if ((step.op == material::IrOp::TextureSize && step.operandCount != 1) ||
+            (step.op == material::IrOp::Texture && table >= value.textures.Size()) ||
+            (step.op == material::IrOp::Parameter && table >= value.parameters.Size())) {
             return false;
         }
     }
 
+    // 칸의 성분 수는 그 명령과 같고, Double 명령은 tile·offset 칸, Float 명령은 Value 칸이다.
     for (const material::MaterialConstantMember& member : value.members) {
         if (member.step >= value.steps.Size() || member.vector >= value.floatVectors ||
             member.firstComponent + member.components > material::MaxIrComponents) {
             return false;
         }
-    }
 
-    // 출처는 정체 순이고(중복 없음) 수 파라미터·파라미터 텍스처마다 하나 있다(12.8절 MS3d2).
-    for (usize index = 1; index < value.origins.Size(); ++index) {
-        const Guid left = value.origins[index - 1].identity;
-        const Guid right = value.origins[index].identity;
-        if (!(left.high < right.high || (left.high == right.high && left.low < right.low))) {
+        const IrValue& step = value.steps[member.step];
+        const bool wide = step.type.scalar == material::IrScalar::Double;
+        const bool wideSlot = member.kind != material::MaterialConstantSlotKind::Value;
+        if (step.op == material::IrOp::Texture || member.components != step.type.components ||
+            wide != wideSlot) {
             return false;
         }
     }
 
-    const auto hasOrigin = [&](Guid identity) noexcept {
-        for (const material::IrParameterOrigin& origin : value.origins) {
-            if (origin.identity == identity) {
-                return true;
-            }
+    // 출처는 정체 순이고(중복 없음) 수 파라미터·파라미터 텍스처마다 하나 있다(12.8절 MS3d2).
+    // scope가 FunctionCall이면 경로가 있고, Global·FunctionCall이면 레이어가 없다.
+    for (usize index = 0; index < value.origins.Size(); ++index) {
+        const material::IrParameterOrigin& origin = value.origins[index];
+        if ((index > 0 && !GuidBefore(value.origins[index - 1].identity, origin.identity)) ||
+            (origin.scope == material::ParameterScopeKind::FunctionCall &&
+             origin.callPath.IsEmpty()) ||
+            ((origin.scope == material::ParameterScopeKind::Global ||
+              origin.scope == material::ParameterScopeKind::FunctionCall) &&
+             !(origin.layer == Guid{}))) {
+            return false;
         }
-
-        return false;
-    };
+    }
 
     for (const material::IrParameter& parameter : value.parameters) {
-        if (!hasOrigin(parameter.id)) {
+        if (!HasOrigin(value.origins.View(), parameter.id)) {
             return false;
         }
     }
 
     for (const material::IrTexture& texture : value.textures) {
-        if (texture.source == material::IrTextureSource::Parameter && !hasOrigin(texture.id)) {
+        if (texture.source == material::IrTextureSource::Parameter &&
+            !HasOrigin(value.origins.View(), texture.id)) {
+            return false;
+        }
+    }
+
+    // 컬렉션은 asset 순(중복 없음)이고 null이 아니다(모듈 표와 같다).
+    for (usize index = 0; index < value.collections.Size(); ++index) {
+        const Guid asset = value.collections[index].asset;
+        if (asset == Guid{} ||
+            (index > 0 && !GuidBefore(value.collections[index - 1].asset, asset))) {
             return false;
         }
     }
