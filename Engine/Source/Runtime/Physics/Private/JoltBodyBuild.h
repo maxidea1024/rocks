@@ -168,6 +168,12 @@ struct ShapePart {
     BodyMassValues mass;
     ObjectHandle component;
     ObjectHandle actor;
+    // 부분 필터 값이다(7.1.24절 — 원래 body의 object type·응답 묶음·알림 표지와 그로 만든 층). 루트
+    // 부분의 응답 묶음은 body 칸 것이다.
+    CollisionChannel objectType = CollisionChannel::WorldStatic;
+    uint32 responseSet = 0;
+    bool notifyContacts = false;
+    JPH::ObjectLayer layer = 0;
 };
 
 // body 형상이다: inner는 원소 묶음(질량 중심 감싸기 전), mixedCollision은 잎의 충돌 켬이 서로
@@ -285,6 +291,10 @@ Result<bool> WithJoltQueryShape(const CollisionShape& shape, Body&& body) noexce
 // 켬에서, 응답 묶음 색인은 responseSet(ResponseSetTable::Acquire가 준 값).
 JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion,
                                 uint32 responseSet) noexcept;
+
+// 충돌 켬·object type으로 같은 층을 만든다(부분 층 — 7.1.24절).
+JPH::ObjectLayer ObjectLayerFor(CollisionEnabled enabled, CollisionChannel objectType,
+                                BodyMotion motion, uint32 responseSet) noexcept;
 
 // 운동 종류를 Jolt로 바꾼다.
 JPH::EMotionType ToJoltMotion(BodyMotion motion) noexcept;

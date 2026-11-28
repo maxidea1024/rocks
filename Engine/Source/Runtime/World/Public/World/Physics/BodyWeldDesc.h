@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Collision/BodySettings.h>
+#include <Collision/CollisionResponses.h>
 #include <Collision/CollisionTypes.h>
 #include <Core/Containers/Span.h>
 #include <Core/Math/Transform.h>
@@ -30,10 +31,13 @@ struct BodyWeldDesc {
     // 자식 월드 transform의 루트 월드 기준 상대 transform이다(scale 포함 — UE
     // TheirTM.GetRelativeTransform(MyTM)).
     Transform relative;
-    // 자식의 실효 충돌 켬이다(원소 값과 교집합 — UE가 원래 body 값으로 형상 필터를 만든다).
+    // 자식의 실효 충돌이다(UE가 원래 body 값으로 형상 filter data를 만든다 — 7.1.24절): 충돌
+    // 켬(원소 값과 교집합), object type, 응답.
     CollisionEnabled collisionEnabled = CollisionEnabled::QueryAndPhysics;
-    // 자식 body 값이다(질량 칸 — UE는 weld body의 질량을 원래 body별로 계산해 합친다). nullptr이면
-    // 기본값이다. WeldBody 호출 동안만 읽는다.
+    CollisionChannel objectType = CollisionChannel::WorldStatic;
+    CollisionResponses responses;
+    // 자식 body 값이다(질량 칸 — UE는 weld body의 질량을 원래 body별로 계산해 합친다 — 와 접촉 알림
+    // 표지). nullptr이면 기본값이다. WeldBody 호출 동안만 읽는다.
     const BodySettings* settings = nullptr;
 };
 

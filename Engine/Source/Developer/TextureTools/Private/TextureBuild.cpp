@@ -669,7 +669,8 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
                     return Fail(out, AssetDiagnosticCode::None, reserved.Error(), 0);
                 }
 
-                if (auto made = GenerateMipChain(allocator, mipParams, level, 1, next); !made) {
+                if (auto made = GenerateMipChain(allocator, mipParams, level, 1, next, execution);
+                    !made) {
                     return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
                 }
 
@@ -708,7 +709,8 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
 
     (void)mips.TryPushBack(rocks::Move(level));
     // 나머지 사슬(UE TCM 4642 — 자리는 위에서 chain개 예약했다).
-    if (auto made = GenerateMipChain(allocator, mipParams, mips[0], chain - 1, mips); !made) {
+    if (auto made = GenerateMipChain(allocator, mipParams, mips[0], chain - 1, mips, execution);
+        !made) {
         return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
     }
 
@@ -719,7 +721,9 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
     // 6. NormalizeNormals(사슬을 다 만든 뒤 mip 0 포함 — UE NormalizeMip).
     if (settings.normalizeNormals) {
         for (Level& mip : mips) {
-            NormalizeNormals(mip);
+            if (auto normalized = NormalizeNormals(mip, execution); !normalized) {
+                return Fail(out, AssetDiagnosticCode::None, normalized.Error(), 0);
+            }
         }
     }
 

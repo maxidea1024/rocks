@@ -42,6 +42,11 @@ inline constexpr JPH::uint BroadPhaseLayerCount = 3;
 inline constexpr uint32 LayerParticipationPhysics = 1u << 0;
 inline constexpr uint32 LayerParticipationQuery = 1u << 1;
 inline constexpr uint32 LayerParticipationProbe = 1u << 2;
+// compound 층 표지다(7.1.24절): 참여 bit 셋 모두 — 충돌 켬 값에서는 나오지 않는 조합(Physics와
+// Probe를 함께 갖는 값이 없다). 부분이 둘 이상인 body(weld)는 이 층을 두고 채널·응답 판정을 잎 단계
+// 필터의 부분 층에 미룬다.
+inline constexpr uint32 LayerParticipationCompound =
+    LayerParticipationPhysics | LayerParticipationQuery | LayerParticipationProbe;
 
 // 칸 값으로 object 층을 만든다. 범위를 넘는 칸은 잘린다(호출자가 범위를 지킨다).
 constexpr JPH::ObjectLayer MakeObjectLayer(uint32 channel, LayerMotion motion, uint32 participation,
@@ -67,6 +72,16 @@ constexpr uint32 ObjectLayerChannel(JPH::ObjectLayer layer) noexcept {
 
 constexpr uint32 ObjectLayerResponseSet(JPH::ObjectLayer layer) noexcept {
     return (static_cast<uint32>(layer) >> LayerResponseSetShift) & LayerResponseSetMask;
+}
+
+// compound 층(7.1.24절)인지다.
+constexpr bool IsCompoundLayer(JPH::ObjectLayer layer) noexcept {
+    return ObjectLayerParticipation(layer) == LayerParticipationCompound;
+}
+
+// 운동 묶음 motion의 compound 층이다(채널·응답 묶음 0).
+constexpr JPH::ObjectLayer MakeCompoundLayer(LayerMotion motion) noexcept {
+    return MakeObjectLayer(0, motion, LayerParticipationCompound, 0);
 }
 
 class ResponseSetTable;
