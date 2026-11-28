@@ -76,7 +76,7 @@
 
 | 순서 | 내용 | 완료 기준 |
 |---|---|---|
-| CH-B0 | 문서 일괄 개정(스펙 먼저): Crypto 101행·D7(1099행), ContentSigning, AssetSystem(패키지·매니페스트·너겟 형식), ShaderSystem(job 키·라이브러리·도구 검사), Rockpile(CH8 목록), UnrealExchange(번들 형식), 리플렉션 문서(타입 표). 에셋 세션의 원본 확인(CH7) | 문서 개정 번호, 원본 누락 없음 확인 |
+| CH-B0(완료 2026-11-28 — 각 문서 머리에 전환 예고, Crypto 101행·D7 수정, ShaderSystem 개정 68. 본문 치환은 일괄 B와 같이) | 문서 일괄 개정(스펙 먼저): Crypto 101행·D7(1099행), ContentSigning, AssetSystem(패키지·매니페스트·너겟 형식), ShaderSystem(job 키·라이브러리·도구 검사), Rockpile(CH8 목록), UnrealExchange(번들 형식), 리플렉션 문서(타입 표). 에셋 세션의 원본 확인(CH7) | 문서 개정 번호, 원본 누락 없음 확인 |
 | H0 | 해시 폴더 이동(2절 H0) | 빌드·format·policy, Sha256 시험 |
 | CH-B1 | 제3자 `Blake3`: 공식 C 구현을 릴리스 태그와 archive SHA-256으로 고정한다. 라이선스(CC0-1.0 / Apache-2.0 계열)와 `test_vectors/test_vectors.json`(`c/` 밖이라 `files`에 포함)을 manifest에 넣고, `Rocks.patch`(CH4 pragma, CH10 감지)와 `pragmaDirectives`·`globalState`를 기록한다. 대상 매트릭스: Windows X64·Arm64, Android Arm64·X64, Mac Arm64(Mac은 미빌드라 확인은 그 플랫폼 빌드 때) | 공식 벡터 전체(길이 0–102,400, chunk 경계), 커널별 대조(시험 hook mask). 이 CPU에 없는 커널(예: AVX-512)은 건너뛰었다고 진단을 남긴다. 처리량을 작은 입력(64 B·1 KiB)과 큰 입력(1 MiB·22 MB)에서 Debug·Release로 재고, SHA-256 HW와 비교해 기록한다 |
 | CH-B2 | Core `ContentHash`·`SeededHash`, `BuildFingerprint`, 모듈 `ContentHashing`(`ContentHasher`·`HashFileContent`·`ActiveKernelName`), 리플렉션 타입 교체(CH13) | API 시험, 리플렉션 왕복, MetaCompiler 형식 표·시험 |

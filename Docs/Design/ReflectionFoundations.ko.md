@@ -2,6 +2,8 @@
 
 기준일: 2026-11-13, 초안 3(교차검증 3건 — 빌드 실현성·런타임 값 모델·소비자 적합성 — 과 최종 검증 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-B 단계와 5.6절의 상세다. 현재 구현은 [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md)·[직렬화](../Implementation/Serialization.ko.md)에 있다. 패키지 형식(A1)·텍스처 설정(12.4절)·graph v2(A0-O)·World 객체·UI·Sparks가 이 기반을 쓴다. UE 대조 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`)이다 — 본문의 UE 사실 서술은 2026-11-15에 5.8 원본으로 다시 확인했고, 날짜를 적은 설계 교차검증 기록(4.6·5.6·7.1·9.1절 확정안 머리)의 UE 대조는 당시 기준 UE 5.6이다. A0-O 다음 단계인 리플렉션 B9가 이 문서의 값 종류·지정자·경로·텍스트 표기를 넓힌다 — [리플렉션 보강(리플렉션 B9) 설계](ReflectionExtensions.ko.md)(이하 RX).
 
+> **콘텐츠 해시 전환(예정, [ContentHash](ContentHash.ko.md), 2026-11-28).** 이 문서가 콘텐츠 주소·동일성 판정으로 정한 SHA-256 값(반사 필드 타입 `Sha256Digest`(wire `Digest256`은 그대로, C++ 타입은 `ContentHash` — CH13. 전환 뒤 `Sha256Digest`는 반사할 수 없다))은 `ContentHash`(BLAKE3-256, 32 byte)로 바뀐다. 하위 호환 없이 일괄 B(CH-B3b)에서 한 번에 바뀌고, 그때 본문과 형식 버전을 고친다. 외부 무결성·프로토콜 SHA-256(CH5)은 남는다.
+
 원칙:
 
 - UE 5.8 대응: UHT → MetaCompiler, `FProperty` → `FieldSchema` + 생성 typed thunk, `UENUM`(`UMETA(DisplayName)` 포함)·`USTRUCT`·`TArray`·`TSoftObjectPtr`·상속되는 클래스 플래그. UE의 클래스명과 메모리 offset 기반 property 접근은 복제하지 않는다 — 필드 접근은 생성 코드의 멤버 포인터 thunk만 쓴다(raw offset·주소 공개 없음).
