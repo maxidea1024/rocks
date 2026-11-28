@@ -3,7 +3,7 @@
 #include <AssetRuntime/AssetManager.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Containers/Span.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Graphics/Device.h>

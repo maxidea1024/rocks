@@ -3,8 +3,8 @@
 #include "../Private/TextureImportInternal.h"
 
 #include <Compression/Compression.h>
-#include <Core/Encoding/Crc32.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Crc32.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/ModuleRegistration.h>

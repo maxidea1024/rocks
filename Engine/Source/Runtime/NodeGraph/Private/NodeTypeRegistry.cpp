@@ -1,6 +1,6 @@
 #include "GraphMutatorCore.h"
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/NamePool.h>
 #include <NodeGraph/GraphSemantic.h>
 #include <NodeGraph/NodeTypeRegistry.h>

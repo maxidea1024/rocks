@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringBuilder.h>

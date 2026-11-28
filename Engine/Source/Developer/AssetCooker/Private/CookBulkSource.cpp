@@ -1,6 +1,6 @@
 #include <AssetCooker/CookBulkSource.h>
 #include <AssetRuntime/BulkStore.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 
 // 쿠킹 처리기의 연쇄 bulk 원본이다(Docs/Design/AssetSystem 12.14절 9번).
 namespace rocks {

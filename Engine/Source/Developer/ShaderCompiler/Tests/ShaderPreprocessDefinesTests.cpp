@@ -1,6 +1,6 @@
 #include "ShaderSourceTestSupport.h"
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
 #include <Base/InitializerList.h>

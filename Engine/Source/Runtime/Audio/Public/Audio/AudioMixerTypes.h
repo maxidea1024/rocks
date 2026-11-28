@@ -30,6 +30,9 @@ inline constexpr uint32 MaxClipSampleRate = 384000;
 // voice 파라미터 범위다. pitch는 UE GlobalMin/MaxPitchScale 기본값이다.
 inline constexpr float MaxVoiceGain = 4.0f;
 
+// attenuationGain(거리 감쇠 × 차폐 볼륨)의 상한이다(감쇠는 키우지 않는다).
+inline constexpr float MaxAttenuationGain = 1.0f;
+
 // 마스터 이득의 상한과 기본값이다(SetMasterGain).
 inline constexpr float MaxMasterGain = 4.0f;
 inline constexpr float DefaultMasterGain = 1.0f;
@@ -42,6 +45,28 @@ inline constexpr uint32 DefaultParamRampFrames = 256;
 
 // 장면 일시정지의 fade 길이다(3.44.5절 — 0에서 1까지 전체 길이, 중간에서 바뀌면 남은 비율만큼).
 inline constexpr uint32 PauseFadeFrames = 64;
+
+// 버스 칸 수의 기본값과 상한이다(3.45.3절, Master 칸 포함).
+inline constexpr uint32 DefaultMaxBuses = 64;
+inline constexpr uint32 MaxMixerBuses = 256;
+
+// voice 하나의 send 수 상한(기본 버스 send 포함)과, 빠지는 중인 칸까지 센 RT 칸 수다(3.45.5절).
+inline constexpr uint32 MaxVoiceSends = 8;
+inline constexpr uint32 MaxVoiceSendSlots = 16;
+
+// 채택되지 않은 plan 수의 상한이다(3.5절·3.45.4절). plan 버퍼는 이것보다 하나 많다.
+inline constexpr uint32 MaxPendingPlans = 2;
+
+// 버스 gain(output·wet·dry, 선형)의 상한이다.
+inline constexpr float MaxBusGain = 4.0f;
+
+// send 필터 차단 주파수 범위다(UE FSoundSubmixSendInfoBase LPFCutoff·HPFCutoff).
+inline constexpr float MinSendFilterHz = 20.0f;
+inline constexpr float MaxSendFilterHz = 20000.0f;
+
+// dry 경로를 건너뛰는 판정 허용치다(UE FMath::IsNearlyZero·IsNearlyEqual 기본 UE_SMALL_NUMBER —
+// 3.45.3절).
+inline constexpr float NegligibleBusGain = 1.0e-8f;
 
 // 다음 블록 시작에 실행하라는 mixFrame 표지다. 호출자가 RenderBlock 전에 블록 시작 frame으로
 // 바꾼다.
@@ -75,6 +100,56 @@ inline constexpr uint32 StreamStartFrames = 4096;
 struct AudioClipId {
     uint32 index = 0;
     uint32 generation = 0;
+};
+
+// 버스 칸 handle이다(3.45.3절). generation 0은 무효다. Master는 AudioMixer::MasterBus()다.
+struct AudioBusHandle {
+    uint32 index = 0;
+    uint32 generation = 0;
+};
+
+// Master 칸의 색인과 generation이다(늘 plan에 있고 놓을 수 없다).
+inline constexpr uint32 MasterBusIndex = 0;
+inline constexpr uint32 MasterBusGeneration = 1;
+
+// send를 갈라 내는 신호 지점이다(UE ESubmixSendStage — 3.45.5절). post는 필터·거리 감쇠 뒤, pre는
+// 그 앞이다.
+enum class AudioSendStage : uint8 {
+    PostAttenuation,
+    PreAttenuation
+};
+
+// voice 하나의 send다. 필터는 켰을 때만 [MinSendFilterHz, MaxSendFilterHz] 차단 주파수를 본다.
+struct AudioVoiceSend {
+    AudioBusHandle bus;
+    float level = 1.0f;
+    AudioSendStage stage = AudioSendStage::PostAttenuation;
+    bool lowPassEnabled = false;
+    float lowPassCutoffHz = MaxSendFilterHz;
+    bool highPassEnabled = false;
+    float highPassCutoffHz = MinSendFilterHz;
+};
+
+// voice 라우팅이다(3.45.5절). 기본 버스 send도 한 칸이다. 같은 버스가 둘 이상이면 안 된다.
+struct AudioVoiceRoute {
+    uint32 sendCount = 0;
+    AudioVoiceSend sends[MaxVoiceSends] = {};
+};
+
+// 버스 파라미터다(선형, [0, MaxBusGain] — 3.45.3절). 버스 출력 = output × (wet 경로 + dry × 입력).
+// wet은 효과 체인(AU7g)이 있을 때만 건다.
+struct AudioBusParams {
+    float outputGain = 1.0f;
+    float wetGain = 1.0f;
+    float dryGain = 0.0f;
+};
+
+// plan의 버스 연결이다(3.45.4절). parent는 Master거나 같은 plan의 다른 버스다. initialParams는 이
+// generation이 처음 plan에 들어올 때 ramp 없이 쓰는 값이다.
+struct AudioBusLink {
+    AudioBusHandle bus;
+    AudioBusHandle parent;
+    AudioBusParams initialParams;
 };
 
 // 소유하지 않는 planar float PCM이다. 메모리는 UnregisterClip이 성공할 때까지 살아 있어야 한다.
@@ -112,7 +187,8 @@ enum class AudioPanMode : uint8 {
     Azimuth
 };
 
-// voice 파라미터다. 거리 감쇠·분류 gain은 제어 쪽이 gain에 곱해 넣는다.
+// voice 파라미터다. 분류·사용자·동시 발음 gain은 제어 쪽이 gain에 곱해 넣고, 거리 감쇠 × 차폐
+// 볼륨은 attenuationGain이다(3.45.5절).
 struct AudioVoiceParams {
     float gain = 1.0f;
     float pitch = 1.0f;
@@ -124,6 +200,9 @@ struct AudioVoiceParams {
     AudioOmniMode omniMode = AudioOmniMode::OmniDirectional;
     float lowPassCutoffHz = 20000.0f;
     float highPassCutoffHz = 0.0f;
+    // 거리 감쇠 × 차폐 볼륨이다([0, 1] — 3.45.5절). LPF·HPF 뒤에 건다(post 신호). gain은 그
+    // 앞에 건다(pre 신호).
+    float attenuationGain = 1.0f;
     // 장면 일시정지다(3.44.5절). 켜지면 PauseFadeFrames 동안 줄인 뒤 원본을 읽지 않고(출력 0),
     // 꺼지면 같은 길이로 이어 낸다. 시작 전 voice는 시작을 미룬다. 정지 중 voice는 일시정지되면
     // 소리 없이 정지 fade만 마친다.
@@ -198,6 +277,9 @@ struct AudioVoiceStatus {
     uint64 unreadFrames = 0;
     uint64 unreadAsOfFrame = UnsetMixFrame;
     bool pausedAtAsOf = false;
+    // 읽지 않은 누적 seqlock을 MaxUnreadReadAttempts번 모두 찢어진 채로 읽었다(값을 모른다 — 0으로
+    // 보지 말고 다음 조회에 다시 본다).
+    bool unreadReadFailed = false;
 };
 
 // CollectFinished가 돌려주는 terminal 기록이다.
@@ -226,6 +308,12 @@ struct AudioMixerCounters {
     uint64 streamStartDelayFrames = 0;
     // 지금 일시정지로 원본을 읽지 않는(Paused·시작 미룸) voice 수다(누적이 아닌 현재값 — 3.44.5절).
     uint64 pausedVoices = 0;
+    // 채택한 plan에 없는 버스로 가는 send를 건너뛴 수(계약 위반 방어 — 정상 0)와, send 칸이 넘쳐
+    // 빠지는 중인 send를 끊은 수다(3.45.4·3.45.5절).
+    uint64 staleBusSends = 0;
+    uint64 cutBusSends = 0;
+    // 지금 채택한 plan의 버스 칸 수(Master 포함, 현재값)다.
+    uint64 activeBuses = 0;
 };
 
 // 마스터 limiter 기본 프리셋이다(3.22.7절): −1 dBFS, 지연 0, 즉시 어택, 100 ms 릴리스.
@@ -249,6 +337,8 @@ struct AudioMixerConfig {
     uint32 blockFrames = DefaultMixBlockFrames;
     uint32 maxVoices = DefaultMaxVoices;
     uint32 maxClips = DefaultMaxClips;
+    // 버스 칸 수다([1, MaxMixerBuses], Master 포함 — 3.45.3절).
+    uint32 maxBuses = DefaultMaxBuses;
     DynamicsSettings masterLimiter = DefaultMasterLimiterSettings();
     bool masterLimiterEnabled = true;
     // 스트림 링이 refill 수위(용량의 절반) 아래로 내려가면 블록 끝에 Signal할 신호다(디코드

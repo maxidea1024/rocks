@@ -1,5 +1,9 @@
-#include <Core/Encoding/Sha256.h>
+#include <Base/Compiler.h>
+#include <Core/Hash/Sha256.h>
+#include <Core/Private/Hash/Sha256Kernels.h>
+#include <Platform/Cpu.h>
 #include <TestSupport/Test.h>
+#include <stdio.h>
 #include <string.h>
 
 using namespace rocks;
@@ -83,4 +87,155 @@ TEST(Sha256_HexRoundTripAndRejectsInvalidText) {
     CHECK(Sha256Digest::ParseHex("zz7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
               .Error() == ErrorCode::InvalidArgument);
 }
+
+namespace {
+
+// 커널 대조 시험의 최대 블록 수와 최대 입력 길이다(CoreDataFoundations 6절 시험).
+constexpr usize KernelMaxBlocks = 65;
+constexpr usize KernelMaxBytes = KernelMaxBlocks * 64u;
+
+constexpr uint32 InitialState[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                                    0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+
+// 스칼라 커널만으로 계산한 SHA-256이다(패딩 포함). 활성 커널과 대조하는 기준이다.
+Sha256Digest ScalarHash(const uint8* data, usize length) noexcept {
+    uint32 state[8];
+    memcpy(state, InitialState, sizeof(state));
+    const usize full = length / 64u;
+    detail::Sha256BlocksScalar(state, data, full);
+    uint8 tail[128] = {};
+    const usize rest = length - full * 64u;
+    memcpy(tail, data + full * 64u, rest);
+    tail[rest] = 0x80u;
+    const usize tailBlocks = rest + 9u <= 64u ? 1u : 2u;
+    const uint64 bits = static_cast<uint64>(length) * 8u;
+    for (uint32 index = 0; index < 8; ++index) {
+        tail[tailBlocks * 64u - 1u - index] = static_cast<uint8>(bits >> (index * 8u));
+    }
+
+    detail::Sha256BlocksScalar(state, tail, tailBlocks);
+    Sha256Digest digest;
+    for (uint32 index = 0; index < 8; ++index) {
+        digest.bytes[index * 4u] = static_cast<uint8>(state[index] >> 24);
+        digest.bytes[index * 4u + 1u] = static_cast<uint8>(state[index] >> 16);
+        digest.bytes[index * 4u + 2u] = static_cast<uint8>(state[index] >> 8);
+        digest.bytes[index * 4u + 3u] = static_cast<uint8>(state[index]);
+    }
+
+    return digest;
+}
+
+// 결정적 의사 난수 byte다(xorshift32).
+void FillPattern(uint8* data, usize bytes, uint32 seed) noexcept {
+    uint32 value = seed;
+    for (usize index = 0; index < bytes; ++index) {
+        value ^= value << 13;
+        value ^= value >> 17;
+        value ^= value << 5;
+        data[index] = static_cast<uint8>(value);
+    }
+}
+
+// 스칼라로 압축한 뒤 state[0]의 한 bit를 뒤집는 결함 커널이다(자가 시험 거부 확인).
+void BrokenBlocks(uint32* state, const uint8* blocks, usize count) noexcept {
+    detail::Sha256BlocksScalar(state, blocks, count);
+    state[0] ^= 1u;
+}
+
+} // namespace
+
+TEST(Sha256_KernelSelectionFollowsCpuFeatures) {
+    const platform::CpuFeatures none{};
+    CHECK(detail::SelectSha256Kernel(none) == detail::Sha256Kernel::Scalar);
+    platform::CpuFeatures shaOnly{};
+    shaOnly.sha = true;
+    shaOnly.sse42 = true;
+    CHECK(detail::SelectSha256Kernel(shaOnly) == detail::Sha256Kernel::Scalar);
+    platform::CpuFeatures noSse41{};
+    noSse41.sha = true;
+    noSse41.ssse3 = true;
+    CHECK(detail::SelectSha256Kernel(noSse41) == detail::Sha256Kernel::Scalar);
+    platform::CpuFeatures x64{};
+    x64.sha = true;
+    x64.ssse3 = true;
+    x64.sse41 = true;
+    platform::CpuFeatures arm64{};
+    arm64.neon = true;
+    arm64.armSha2 = true;
+#if ROCKS_ARCH_X64
+    CHECK(detail::SelectSha256Kernel(x64) == detail::Sha256Kernel::X64Sha);
+    CHECK(detail::SelectSha256Kernel(arm64) == detail::Sha256Kernel::Scalar);
+    CHECK(detail::Sha256KernelBlocks(detail::Sha256Kernel::X64Sha) != nullptr);
+    CHECK(detail::Sha256KernelBlocks(detail::Sha256Kernel::Arm64Sha2) == nullptr);
+#elif ROCKS_ARCH_ARM64
+    CHECK(detail::SelectSha256Kernel(arm64) == detail::Sha256Kernel::Arm64Sha2);
+    CHECK(detail::SelectSha256Kernel(x64) == detail::Sha256Kernel::Scalar);
+    CHECK(detail::Sha256KernelBlocks(detail::Sha256Kernel::Arm64Sha2) != nullptr);
+    CHECK(detail::Sha256KernelBlocks(detail::Sha256Kernel::X64Sha) == nullptr);
+#endif
+    CHECK(detail::Sha256KernelBlocks(detail::Sha256Kernel::Scalar) == &detail::Sha256BlocksScalar);
+    CHECK(strcmp(detail::Sha256KernelName(detail::Sha256Kernel::X64Sha), "X64Sha") == 0);
+}
+
+TEST(Sha256_SelfTestRejectsBrokenKernel) {
+    CHECK(detail::CheckSha256Kernel(&detail::Sha256BlocksScalar));
+    CHECK(!detail::CheckSha256Kernel(&BrokenBlocks));
+    CHECK(!detail::CheckSha256Kernel(nullptr));
+}
+
+TEST(Sha256_ActiveKernelIsSelectedHardwareKernel) {
+    // 하드웨어 커널이 바르면 자가 시험을 통과해 선택 결과가 그대로 활성 커널이다.
+    const detail::Sha256Kernel selected = detail::SelectSha256Kernel(platform::QueryCpuFeatures());
+    CHECK(detail::ActiveSha256Kernel() == selected);
+    printf("  Sha256_ActiveKernelIsSelectedHardwareKernel: active kernel %s\n",
+           detail::Sha256KernelName(detail::ActiveSha256Kernel()));
+}
+
+TEST(Sha256_HardwareKernelMatchesScalar) {
+    const detail::Sha256Kernel selected = detail::SelectSha256Kernel(platform::QueryCpuFeatures());
+    if (selected == detail::Sha256Kernel::Scalar) {
+        printf("  Sha256_HardwareKernelMatchesScalar: skipped, CPU lacks SHA-NI+SSE4.2 (x64) or "
+               "SHA2 (arm64)\n");
+        return;
+    }
+
+    const detail::Sha256BlocksFunction blocks = detail::Sha256KernelBlocks(selected);
+    REQUIRE(blocks != nullptr);
+    CHECK(detail::CheckSha256Kernel(blocks));
+    static uint8 data[KernelMaxBytes + 1];
+    FillPattern(data, sizeof(data), 0x9e3779b9u);
+    // 블록 수 1-65를 한 번에 넘기고, 정렬하지 않은 시작(+1)과 서로 다른 시작 상태로 대조한다.
+    for (usize count = 1; count <= KernelMaxBlocks; ++count) {
+        for (usize offset = 0; offset <= 1; ++offset) {
+            uint32 expected[8];
+            uint32 actual[8];
+            for (uint32 index = 0; index < 8; ++index) {
+                expected[index] = InitialState[index] ^ static_cast<uint32>(count * 0x01000193u);
+                actual[index] = expected[index];
+            }
+
+            detail::Sha256BlocksScalar(expected, data + offset, count);
+            blocks(actual, data + offset, count);
+            if (memcmp(expected, actual, sizeof(expected)) != 0) {
+                printf("  mismatch at %zu blocks, offset %zu\n", count, offset);
+                CHECK(false);
+                return;
+            }
+        }
+    }
+}
+
+TEST(Sha256_PublicHashMatchesScalarReference) {
+    // 공개 API는 활성 커널을 쓴다. 길이 0-4160 byte 모두 스칼라 기준과 같아야 한다.
+    static uint8 data[KernelMaxBytes];
+    FillPattern(data, sizeof(data), 0x2545f491u);
+    for (usize length = 0; length <= KernelMaxBytes; ++length) {
+        if (!(Sha256::Hash(Span<const uint8>(data, length)) == ScalarHash(data, length))) {
+            printf("  mismatch at length %zu\n", length);
+            CHECK(false);
+            return;
+        }
+    }
+}
+
 } // namespace sha256_tests_file

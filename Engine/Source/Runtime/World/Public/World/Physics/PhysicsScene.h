@@ -86,9 +86,10 @@ public:
     // 형상 값(scale 전 cm)을 바꾼다(2.3.1절 — body의 지금 scale로 형상을 다시 만들고 깨운다).
     // 질량은 body를 만들 때의 BodySettings::updateMassWhenScaleChanges가 참이면 새 형상으로 다시
     // 계산하고, 거짓이면 그대로 둔다(UE UpdateBodyScale). 오류: 없는 handle·옛 세대(StaleHandle),
-    // 형상 없음·비유한 값(InvalidArgument — 이전 형상을 둔다).
+    // 형상 없음·비유한 값(InvalidArgument — 이전 형상을 둔다), 할당 실패. geometry는 호출 동안만
+    // 읽는다.
     virtual Result<void> SetBodyGeometry(PhysicsBodyHandle body,
-                                         const BodyGeometry& geometry) noexcept = 0;
+                                         Span<const BodyShapeElement> geometry) noexcept = 0;
 
     // 시뮬레이션 접촉 hit를 모을지 바꾼다(BodySettings::notifyRigidBodyCollision — 7.1.12절).
     // 다음 step부터 적용된다. 없는 handle·옛 세대는 무시한다.

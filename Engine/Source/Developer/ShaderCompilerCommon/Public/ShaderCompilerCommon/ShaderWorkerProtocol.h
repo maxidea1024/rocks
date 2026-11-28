@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>

@@ -4,7 +4,7 @@
 #include <Base/Types.h>
 #include <Core/Diagnostics/LogStructure.h>
 #include <Core/Diagnostics/SourceLocation.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/FormatParse.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>

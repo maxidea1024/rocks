@@ -97,13 +97,13 @@ struct ContactScene {
         }
     }
 
-    PhysicsBodyHandle Add(uint32 tag, BodyGeometry geometry, const Vec3d& at, BodyMotion motion,
+    PhysicsBodyHandle Add(uint32 tag, BodyShapeElement geometry, const Vec3d& at, BodyMotion motion,
                           const BodySettings& settings,
                           CollisionEnabled enabled = CollisionEnabled::QueryAndPhysics) noexcept {
         BodyCreateDesc desc;
         desc.component = FakeHandle(tag);
         desc.actor = FakeHandle(tag + ActorSlotOffset);
-        desc.geometry = geometry;
+        desc.geometry = Span<const BodyShapeElement>(&geometry, 1);
         desc.worldTransform.translation = at;
         desc.motion = motion;
         desc.collision.collisionEnabled = enabled;
@@ -116,7 +116,7 @@ struct ContactScene {
     }
 
     PhysicsBodyHandle Floor(const BodySettings& settings) noexcept {
-        BodyGeometry box;
+        BodyShapeElement box;
         box.kind = BodyGeometryKind::Box;
         box.halfExtent = Vec3d(FloorHalfExtent, FloorHalfExtent, FloorHalfThickness);
         return Add(1, box, Vec3d(0.0, 0.0, -FloorHalfThickness), BodyMotion::Static, settings);
@@ -125,7 +125,7 @@ struct ContactScene {
     PhysicsBodyHandle
     Sphere(uint32 tag, double radius, const Vec3d& at, const BodySettings& settings,
            CollisionEnabled enabled = CollisionEnabled::QueryAndPhysics) noexcept {
-        BodyGeometry sphere;
+        BodyShapeElement sphere;
         sphere.kind = BodyGeometryKind::Sphere;
         sphere.radius = radius;
         return Add(tag, sphere, at, BodyMotion::Dynamic, settings, enabled);
@@ -229,7 +229,7 @@ TEST(Physics_ContactHitContinuousCollisionUsesEstimate) {
         bulletSettings.enableGravity = false;
         bulletSettings.notifyRigidBodyCollision = true;
         bulletSettings.continuousCollision = continuous;
-        BodyGeometry wall;
+        BodyShapeElement wall;
         wall.kind = BodyGeometryKind::Box;
         wall.halfExtent = Vec3d(WallHalfThickness, WallHalfSize, WallHalfSize);
         const PhysicsBodyHandle wallBody =

@@ -44,32 +44,6 @@ struct RecordingObserver final : AssetLoaderObserver {
     AssetId lastAsset{};
 };
 
-bool WriteWholeFile(StringView path, Span<const uint8> bytes) noexcept {
-    platform::File file;
-    if (!file.Open(platform::PhysicalFileSystem(), path.Data(), path.ByteCount(),
-                   platform::FileOpenMode::CreateAlways)) {
-        return false;
-    }
-
-    auto written = file.WriteAll(bytes.Data(), bytes.Size());
-    return written.status && written.bytes == bytes.Size() && file.Close();
-}
-
-// path의 부모 디렉터리를 만든다.
-bool MakeParent(StringView path) noexcept {
-    usize slash = path.ByteCount();
-    while (slash > 0 && path.Data()[slash - 1] != '/') {
-        --slash;
-    }
-
-    if (slash <= 1) {
-        return true;
-    }
-
-    return static_cast<bool>(
-        platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.Data(), slash - 1));
-}
-
 bool InFrameAlways(void*) noexcept {
     return true;
 }

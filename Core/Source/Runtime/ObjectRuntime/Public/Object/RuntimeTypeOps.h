@@ -4,7 +4,7 @@
 #include <Object/ReferenceLayout.h>
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Move.h>
 #include <Core/Text/Name.h>
@@ -813,6 +813,14 @@ struct RuntimeTypeOps {
     // null). base 것을 부르지 않는다 — 런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다
     // (Docs/Design/Prefab 10.2절). World 없이 값만 설정한다(생성자 결정성 계약과 같다).
     Result<void> (*initSubobjectDefaults)(SubobjectDefaultsContext&) noexcept = nullptr;
+    // 소유 구조 클래스 지정자(SubobjectList·SubobjectRoot·SubobjectAttach) 필드의 주소 접근자다
+    // (Docs/Design/Prefab 10.3절). 그 지정자를 **선언한 클래스**만 싣고(필드가 private일 수 있어
+    // 파생이 접근하지 못한다), ConstructionContext가 base 사슬을 걸어 처음 만나는 접근자를 쓴다.
+    // 순서대로 ObjectRefArray<T>·ObjectRef<T>·WeakObjectRef<T> 객체의 주소다(셋 다
+    // standard-layout이라 첫 멤버 — 배열 저장소·handle — 와 주소가 같다).
+    void* (*subobjectListAccess)(Object& owner) noexcept = nullptr;
+    void* (*subobjectRootAccess)(Object& owner) noexcept = nullptr;
+    void* (*subobjectAttachAccess)(Object& owner) noexcept = nullptr;
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.

@@ -23,15 +23,6 @@ void JoltPhysicsScene::RebuildMass(BodySlot& slot, const BodyMassValues& mass) n
         return;
     }
 
-    auto shape = MakeBodyShape(slot.geometry, slot.scale, shapeOptions_, mass);
-    if (!shape) {
-        Log::Warning(LogPhysics,
-                     "Physics body #{Slot} kept its previous mass; the shape could not be rebuilt "
-                     "({Code})",
-                     static_cast<uint32>(&slot - slots_.Data()), DiagBodyMassUpdateFailed);
-        return;
-    }
-
     // 질량 중심 이동이 바뀐 때만 감싸기를 바꾼다(형상 교체는 broadphase·접촉 cache를 새로 한다).
     // 깨우지 않는다(UE UpdateMassProperties).
     const Vec3d before = ScaledCenterOfMassOffset(slot.mass, slot.scale);
@@ -39,11 +30,12 @@ void JoltPhysicsScene::RebuildMass(BodySlot& slot, const BodyMassValues& mass) n
     const bool moved = before != after;
     slot.mass = mass;
     if (moved) {
-        system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
+        const JPH::RefConst<JPH::Shape> wrapped = WrapCenterOfMass(slot.inner, mass, slot.scale);
+        system_.GetBodyInterface().SetShape(slot.body, wrapped.GetPtr(), false,
                                             JPH::EActivation::DontActivate);
     }
 
-    slot.massProperties = ComputeBodyMass(*shape.Value().inner, slot.mass, slot.scale);
+    slot.massProperties = ComputeBodyMass(*slot.inner, slot.mass, slot.scale);
     {
         JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
         if (lock.Succeeded()) {

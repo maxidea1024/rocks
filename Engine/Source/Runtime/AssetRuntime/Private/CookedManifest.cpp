@@ -3,7 +3,7 @@
 #include <AssetRuntime/CookedManifest.h>
 
 #include <Base/Endian.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Text/NameComponent.h>
 #include <Serialization/Archive.h>
 

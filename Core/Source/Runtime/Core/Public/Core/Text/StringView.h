@@ -278,8 +278,8 @@ private:
 };
 
 // ASCII 대소문자만 무시한 byte 같음이다(A–Z와 a–z만 접는다. 그 밖의 byte는 정확히 비교한다).
-// HashStringBytesIgnoringAsciiCase(Core/Hash.h)와 짝이 맞는 같음이며, constexpr이라 컴파일 타임
-// 비교에도 쓴다.
+// HashStringBytesIgnoringAsciiCase(Core/Hash/TypeHash.h)와 짝이 맞는 같음이며, constexpr이라 컴파일
+// 타임 비교에도 쓴다.
 //
 // 사용 예:
 //   static_assert(EqualsIgnoringAsciiCase("Graphics", "GRAPHICS"));

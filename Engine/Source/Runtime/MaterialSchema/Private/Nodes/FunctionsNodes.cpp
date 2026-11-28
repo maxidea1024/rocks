@@ -20,6 +20,12 @@ namespace rocks::material::detail {
 
 namespace {
 
+// 속성 에셋 참조 선언이다(Docs/Design/MaterialSystem 19.4.3절 "참조 선언").
+constexpr MaterialAssetReferenceField FunctionReference[] = {
+    {"materialFunction", MaterialAssetReferenceRole::Function}};
+constexpr MaterialAssetReferenceField MaterialReference[] = {
+    {"materialReference", MaterialAssetReferenceRole::Material}};
+
 constexpr MaterialPropertyTextDefault FunctionInputTextDefaults[] = {{"inputName", "In"}};
 constexpr MaterialPropertyTextDefault FunctionOutputTextDefaults[] = {{"outputName", "Result"}};
 constexpr MaterialPinDefinition FunctionOutputPins[] = {
@@ -40,6 +46,7 @@ constexpr MaterialPinDefinition MaterialSamplePins[] = {
 
 constexpr MaterialNodeDefinition FunctionsDefinitions[] = {
     MaterialNode("Material.FunctionCall")
+        .AssetReferences(FunctionReference)
         .Properties(&GeneratedType<FunctionCallProperties>::Schema)
         .DynamicPins(&FunctionCallDynamicPins)
         .Menu("Function Call", "Functions", "Functions MaterialFunctionCall", "Function Call."),
@@ -62,6 +69,7 @@ constexpr MaterialNodeDefinition FunctionsDefinitions[] = {
         .Menu("Layer Output", "Functions", "MaterialLayerOutput", "Layer Output.")
         .GraphKinds(ToMask(MaterialGraphKind::Function)),
     MaterialNode("Material.MaterialSample")
+        .AssetReferences(MaterialReference)
         .Properties(&GeneratedType<MaterialSampleProperties>::Schema)
         .Pins(MaterialSamplePins)
         .Menu("Material Sample", "Functions", "", "Material Sample."),

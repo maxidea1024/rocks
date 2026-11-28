@@ -4,7 +4,7 @@
 #include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
 #include <Platform/Atomics.h>

@@ -1,6 +1,6 @@
 #include <Base/PlacementNew.h>
 #include <Core/Diagnostics/Log.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Launch/AndroidActivity.h>
 #include <Platform/Atomics.h>

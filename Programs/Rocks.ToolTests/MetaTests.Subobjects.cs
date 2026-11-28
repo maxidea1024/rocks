@@ -104,6 +104,14 @@ internal static partial class MetaTests
             // SubobjectRoot 필드 자신을 Subobject로.
             SubobjectOwner("ROCKS_PROPERTY(Subobject) rocks::ObjectRef<ScenePart> body;",
                 ownerSpecifiers: "SubobjectList = \"parts\", SubobjectRoot = \"body\""),
+            // 부착 부모 타입이 부착 필드 타입(WeakObjectRef<ScenePart>)의 파생이 아니다.
+            SubobjectOwner("ROCKS_PROPERTY(Subobject) rocks::ObjectRef<OtherPart> other;\nROCKS_PROPERTY(Subobject, AttachParent = \"other\") rocks::ObjectRef<ScenePart> body;")
+                .Replace("ROCKS_CLASS(SubobjectList", "ROCKS_CLASS(SubobjectAttach = \"link\")\nclass OtherPart : public Part {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                    "ROCKS_PROPERTY() rocks::WeakObjectRef<OtherPart> link;\n};\nROCKS_CLASS(SubobjectList", StringComparison.Ordinal),
+            // 소유 구조 지정자는 자기 필드만 가리킨다(base 필드 불가).
+            SubobjectOwner("", "ROCKS_CLASS()\nclass ListBase : public rocks::Object {\nROCKS_GENERATED_BODY()\npublic:\n" +
+                "explicit ListBase(rocks::Allocator& allocator) noexcept : items(allocator) {}\nROCKS_PROPERTY() rocks::ObjectRefArray<Part> items;\n};\n" +
+                "ROCKS_CLASS(SubobjectList = \"items\")\nclass ListHolder : public ListBase {\nROCKS_GENERATED_BODY()\npublic:\nusing ListBase::ListBase;\n};\n"),
             // 소유 구조 지정자가 EditorOnly 필드를 가리킨다.
             SubobjectOwner(EditorDataOpen + "ROCKS_PROPERTY(EditorOnly) rocks::ObjectRef<ScenePart> edRoot;\n#endif",
                 ownerSpecifiers: "SubobjectList = \"parts\", SubobjectRoot = \"edRoot\"")],

@@ -3,7 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Core/Algorithms.h>
 #include <Core/Assert.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/NamePool.h>
 #include <NodeGraph/GraphMutator.h>
 #include <NodeGraph/GraphNameOrder.h>

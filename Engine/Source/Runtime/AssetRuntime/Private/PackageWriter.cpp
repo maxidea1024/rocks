@@ -10,7 +10,7 @@
 #include <Core/Assert.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/FileError.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <AssetRuntime/PackageReader.h>
 #include <ObjectSerialization/ClassDefaults.h>
 #include <ObjectSerialization/ObjectGraph.h>

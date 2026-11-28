@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Span.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <Meta/TypeSchema.h>
 #include <Object/AssetId.h>
@@ -159,6 +159,16 @@ inline constexpr uint32 SidecarMaxHashBlockBytes = 1024 * 1024;
 // Sidecar 섹션의 고정 앞부분 크기다(fileBytes u64, sha256 32, hashBlockBytes u32, hashCount u32 —
 // 그 뒤 블록 SHA-256 × hashCount).
 inline constexpr uint32 SidecarSectionFixedBytes = 48;
+
+// sidecar 파일 머리(AS 20.1 3)에 있어야 할 값이다(ExpectedSidecarHeader가 패키지에서 만든다 — 범위
+// 읽기 손잡이는 이 값을 복사해 쥔다).
+struct SidecarHeaderExpectation {
+    uint32 bulkAlignment = 0;
+    // Sidecar 항목 수다.
+    uint32 entryCount = 0;
+    uint64 fileBytes = 0;
+    AssetId asset{};
+};
 
 // 패키지 Sidecar 섹션 값이다(검증을 지난 것 — sidecar 파일 크기·SHA-256과 블록 해시 표).
 struct PackageSidecarInfo {

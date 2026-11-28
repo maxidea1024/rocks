@@ -3,7 +3,7 @@
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 #include <Object/ObjectRegistry.h>

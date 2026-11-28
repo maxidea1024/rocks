@@ -109,7 +109,7 @@
 
 ### 9.7 파이프라인 캐시
 
-- 파이프라인 객체는 셰이더(VS·PS 또는 CS), 정점 배치, 래스터·깊이·블렌드 상태, 렌더 타깃 형식·샘플 수, 기본도형 종류를 담는다. 키는 그 내용과 셰이더 집합 epoch이며 계획 14.1절 PSO 캐시 키 항목(셰이더 hash·root signature·형식·샘플 수)을 포함한다. 키 hash는 Core `Core/Hash.h`, 디스크에 남기는 키는 SHA-256을 쓴다(공용 기능 중복 금지). root signature 캐시(셰이더 시스템 7.2절 4항)와 같은 계층에 둔다.
+- 파이프라인 객체는 셰이더(VS·PS 또는 CS), 정점 배치, 래스터·깊이·블렌드 상태, 렌더 타깃 형식·샘플 수, 기본도형 종류를 담는다. 키는 그 내용과 셰이더 집합 epoch이며 계획 14.1절 PSO 캐시 키 항목(셰이더 hash·root signature·형식·샘플 수)을 포함한다. 키 hash는 Core `Core/Hash/TypeHash.h`, 디스크에 남기는 키는 SHA-256을 쓴다(공용 기능 중복 금지). root signature 캐시(셰이더 시스템 7.2절 4항)와 같은 계층에 둔다.
 - 항목은 셰이더 집합의 lease를 잡는다. 집합이 `Retire`되면 그 집합 epoch의 항목도 함께 `Retire`한다.
 - UE는 이 캐시를 RHI 모듈에 둔다(`RHI/Public/PipelineStateCache.h`). Rocks는 RenderBase에 둔다: Graphics는 만들기만 하고, 캐시·수명·통계는 렌더 쪽 일이다.
 - `PipelineDesc`의 원문 경로는 SH2에서 없어진다(셰이더 시스템 결정 9).

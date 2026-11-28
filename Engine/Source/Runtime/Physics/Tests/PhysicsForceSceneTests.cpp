@@ -114,25 +114,25 @@ struct ForceScene {
 
     PhysicsBodyHandle Sphere(const BodySettings& settings, BodyMotion motion = BodyMotion::Dynamic,
                              const Quatd& rotation = Quatd::Identity()) noexcept {
-        BodyGeometry geometry;
+        BodyShapeElement geometry;
         geometry.kind = BodyGeometryKind::Sphere;
         geometry.radius = SphereRadius;
         return Make(settings, geometry, motion, rotation);
     }
 
     PhysicsBodyHandle Box(const BodySettings& settings, const Quatd& rotation) noexcept {
-        BodyGeometry geometry;
+        BodyShapeElement geometry;
         geometry.kind = BodyGeometryKind::Box;
         geometry.halfExtent = Vec3d(BoxHalfX, BoxHalfY, BoxHalfZ);
         return Make(settings, geometry, BodyMotion::Dynamic, rotation);
     }
 
-    PhysicsBodyHandle Make(const BodySettings& settings, const BodyGeometry& geometry,
+    PhysicsBodyHandle Make(const BodySettings& settings, const BodyShapeElement& geometry,
                            BodyMotion motion, const Quatd& rotation) noexcept {
         BodyCreateDesc desc;
         desc.component = ObjectHandle{FakeRegistry, ++tags, FakeGeneration};
         desc.actor = desc.component;
-        desc.geometry = geometry;
+        desc.geometry = Span<const BodyShapeElement>(&geometry, 1);
         desc.worldTransform.translation = Vec3d(static_cast<double>(tags) * BodySpacing, 0.0, 0.0);
         desc.worldTransform.rotation = rotation;
         desc.motion = motion;

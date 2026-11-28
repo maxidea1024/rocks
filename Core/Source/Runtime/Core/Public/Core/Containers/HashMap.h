@@ -4,7 +4,7 @@
 #include <Base/Checked.h>
 #include <Core/Containers/ContainerDetail.h>
 #include <Core/Containers/InsertOutcome.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Memory/Allocator.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>

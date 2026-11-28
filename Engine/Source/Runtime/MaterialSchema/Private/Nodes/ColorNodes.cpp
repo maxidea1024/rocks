@@ -13,6 +13,10 @@ namespace rocks::material::detail {
 
 namespace {
 
+// 속성 에셋 참조 선언이다(Docs/Design/MaterialSystem 19.4.3절 "참조 선언").
+constexpr MaterialAssetReferenceField CurveReference[] = {
+    {"colorCurve", MaterialAssetReferenceRole::ColorCurve}};
+
 constexpr MaterialPinDefinition DesaturationPins[] = {
     MaterialInput("Input", MaterialPinType::Numeric, "Input", {},
                   MaterialPinFlags::Required | MaterialPinFlags::HideValue),
@@ -64,6 +68,7 @@ constexpr MaterialNodeDefinition ColorDefinitions[] = {
         .Pins(BlackBodyPins)
         .Menu("BlackBody", "Color", "Utility", "BlackBody."),
     MaterialNode("Material.ColorRamp")
+        .AssetReferences(CurveReference)
         .Properties(&GeneratedType<ColorRampProperties>::Schema)
         .Pins(ColorRampPins)
         .Menu("Color Ramp", "Color", "Color", "Color Ramp."),

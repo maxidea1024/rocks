@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>

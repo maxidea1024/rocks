@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Build/EngineVersion.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 
 // 빌드가 실행 파일마다 주입하는 신원 값이다(Docs/Design/ReflectionFoundations.ko.md 8.1·8.2절).
 // 정의는 Rocks.Build가 이 헤더를 제공하는 Core에 닿는 실행 파일마다 만드는 생성 TU
