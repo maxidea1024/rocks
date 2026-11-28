@@ -43,6 +43,8 @@
 | isDefaultMaterial, isSpecialEngineMaterial | 엔진 기본 머티리얼 여부(항상 컴파일 대상) |
 | quality | 번역한 품질 수준 |
 
+**유도 규칙(MS3c — `MakeMaterialShaderTraits`).** domain·blendMode·twoSided는 번역 입력의 기본 속성 그대로다. quality는 번역이 품질 칸을 읽었을 때(`consultedTarget`의 Quality)만 번역 대상 품질이고 아니면 None이다 — 품질을 읽지 않은 번역은 수준마다 같은 결과라 셰이더 집합 id도 같아야 한다(8.5절 공유). shadingModels·customOutputs는 번역 결과 그대로(customOutputs는 결과가 있는 출력 이름, 6.11절 표 순서). translucencyPass는 반투명 블렌드 모드(Translucent 이상)일 때만 `translucency.pass`, 아니면 기본값이다. writesVelocity는 불투명·Masked면 메시 위치를 바꿀 수 있거나(UE `MaterialMayModifyMeshPosition` — WPO·PDO·first person 출력, displacement는 Rocks가 아직 lowering하지 않는다) `hasPixelAnimation`, 반투명이면 `outputTranslucentVelocity`다. castsShadow는 UE `ShouldCastDynamicShadows`다: shading model이 SingleLayerWater 하나뿐이면 false, 아니면 불투명·Masked이거나 반투명 전용 블렌드(Translucent·TranslucentColoredTransmittance — UE `IsTranslucentOnlyBlendMode`)이면서 `castDynamicShadowAsMasked`다(Additive·Modulate·AlphaComposite·AlphaHoldout은 false). usesWpo·usesPreviousWpo·usesPdo는 그 결과가 있고 상수 0이 아닐 때(생성 원문의 `MATERIAL_USES_*` 정의와 같은 판정 — 7.3절), usesOpacityMask는 Masked일 때다(생성 원문과 같다). requiredCapabilities는 정점 문맥(Vertex·VertexPrevious·정점 custom 출력)과 픽셀 문맥(그 밖 진입점)의 문맥 기능 합집합 둘과 번역이 기록한 최소 기능 등급이다. isDefaultMaterial·isSpecialEngineMaterial은 `engineDefaultMaterial`이다. **정규 바이트**(little-endian): 형식 버전 u32, domain·blendMode·translucencyPass·quality·최소 등급 u8, 불 값 8개 u8(twoSided·writesVelocity·castsShadow·usesWpo·usesPreviousWpo·usesPdo·usesOpacityMask·isDefaultMaterial), shadingModels u32, 정점·픽셀 기능 u32 둘, custom 출력 수 u32와 이름마다 길이 u32 + UTF-8.
+
 pass 셰이더 타입의 거르기 함수 서명은 `bool ShouldCompile(const MaterialShaderTraits&, VertexInputTypeId, PermutationId, FormatId)`이다. 정점 입력 타입의 거르기는 `bool ShouldCompile(const MaterialShaderTraits&, FormatId)`이다. 두 거르기는 결정적이어야 한다(등록 순서·실행 순서와 무관한 순수 함수). 셰이더 시스템 P14의 "형식·퍼뮤테이션 거르기 함수"에 머티리얼 인자를 더한 것이다(16절 MSR5). pass 셰이더 타입이 custom 출력을 요구하면 그 출력이 없는 머티리얼은 거른다.
 - 사용 대상(정점 입력 타입 집합)은 특성에 넣지 않는다. 원문과 무관한 쿠킹 입력이라 job 목록만 바꾼다(8.4절).
 - 쿠커가 두 거르기를 장치 없이 실행해야 하므로 pass 셰이더 타입은 `RendererShaders`(Renderer 3.2절)에, 정점 입력 타입 선언은 장치 없는 모듈(16절 MRB8)에 있어야 한다.
@@ -60,7 +62,7 @@ UE는 에디터에서 사용 플래그를 자동으로 켜고 패키지를 dirty
 
 ### 8.5 증가 억제와 보고
 
-- **품질 수준.** 쿠킹 품질 목록은 프로필이 정한다(기본은 하나). 그래프에 Quality Switch가 없거나 그 수준의 입력이 기본 입력과 같으면 그 수준은 기본 번역을 공유한다(UE와 같은 판정, `RE/Private/Materials/MaterialCachedData.cpp:625–637`). 공유하는 수준은 번역 키의 품질 항목에 "기본" 표지를 써서 키와 결과가 하나가 되게 한다.
+- **품질 수준.** 쿠킹 품질 목록은 프로필이 정한다(기본은 하나). 그래프에 Quality Switch가 없거나 그 수준의 입력이 기본 입력과 같으면 그 수준은 기본 번역을 공유한다(UE와 같은 판정, `RE/Private/Materials/MaterialCachedData.cpp:625–637`). 공유는 결과로 정한다: 번역 키에는 품질이 늘 들어가고, 품질 칸을 읽지 않은 번역(`consultedTarget`)은 같은 실행에서 다른 수준이 재사용하며, 결과가 같으면 셰이더 집합 id가 같아 artifact·셰이더가 하나다(12.8절).
 - **static 변형 공유.** (루트 머티리얼, 사슬 전체를 합쳐 정규화한 static 값, 합친 기본 속성 override)가 같으면 같은 변형이다. 중간 인스턴스가 달라도 이 셋이 같으면 번역 키가 같다(12.2절). 번역 결과가 같은 서로 다른 조합은 셰이더 집합 id가 같아(8.6절) 셰이더를 한 번만 담는다.
 - **dynamic 파라미터는 퍼뮤테이션을 만들지 않는다**(계획 14.1절). Dynamic Bool 파라미터는 셰이더 분기로 낸다. UE도 static bool의 `DynamicBranch`를 uniform 분기로 컴파일한다(`RE/Public/Materials/MaterialExpressionStaticBoolParameter.h:22, 31–32`, `RE/Private/Materials/HLSLMaterialTranslator.cpp:8925–8945`).
 - **보고.** 쿠커는 머티리얼마다 축별 수와 job 수, 프로필 전체 합계, 이전 쿠킹 대비 증감을 보고한다(계획 14.1절 "증가량을 cooker가 보고"). 머티리얼당 job 수가 프로젝트 설정 상한을 넘으면 경고, 프로필 상한을 넘으면 쿠킹 오류(설정으로 끌 수 있음)다.
@@ -70,5 +72,5 @@ UE는 에디터에서 사용 플래그를 자동으로 켜고 패키지를 dirty
 
 머티리얼 셰이더의 런타임 조회 키는 `(셰이더 타입, 정점 입력 타입, 머티리얼 셰이더 집합 id, 퍼뮤테이션 ID, 단계)`다.
 - 셰이더 시스템 12.2절 키 + RenderBase SX4(정점 입력 타입) + SX5(묶음 id)에 해당한다.
-- 머티리얼 셰이더 집합 id = SHA-256(셰이더 집합 형식 버전, 생성 원문, layout 서명, `MaterialShaderTraits` 정규 바이트)이다. 번역 결과 **내용**의 hash다. 번역 너겟 키에는 툴체인 지문이 들어가 호스트마다 다르므로(셰이더 시스템 10절) 키로 id를 만들면 쿠킹 패키지가 호스트마다 달라진다. 내용 hash는 호스트와 무관하고, 결과가 같은 서로 다른 번역 입력은 같은 id가 된다.
+- 머티리얼 셰이더 집합 id = SHA-256(셰이더 집합 형식 버전, 생성 원문(길이 앞붙임), layout 서명, `MaterialShaderTraits` 정규 바이트)이다. layout 서명은 셰이더가 보는 상수 블록 모양(float4 수와 멤버마다 칸 종류·float4 번호·첫 성분·성분 수)의 SHA-256이다 — IR 값 번호·프로그램 명령 번호는 셰이더 코드와 무관하므로 넣지 않는다. 번역 결과 **내용**의 hash다. 번역 너겟 키에는 툴체인 지문이 들어가 도구 빌드(툴체인)마다 다르므로(셰이더 시스템 10절) 키로 id를 만들면 쿠킹 패키지가 호스트마다 달라진다. 내용 hash는 호스트와 무관하고, 결과가 같은 서로 다른 번역 입력은 같은 id가 된다.
 - 엔진 전역 셰이더는 묶음 id 0이다(RenderBase SX5).

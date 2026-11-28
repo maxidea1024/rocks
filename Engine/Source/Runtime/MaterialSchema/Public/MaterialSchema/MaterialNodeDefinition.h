@@ -4,6 +4,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
+#include <MaterialSchema/MaterialAssetReferenceField.h>
 #include <MaterialSchema/MaterialContextFeature.h>
 #include <MaterialSchema/MaterialGraphKind.h>
 #include <MaterialSchema/MaterialPinDefinition.h>
@@ -103,6 +104,10 @@ struct MaterialNodeDefinition {
     MaterialContextFeatureMask features = NoMaterialContextFeatures;
     MaterialNodeStatus status = MaterialNodeStatus::Implemented;
     MaterialPrerequisite prerequisite = MaterialPrerequisite::None;
+    // 속성의 에셋 참조 선언이다(19.4.3절 "참조 선언" — Build 의존 hook·쿠킹 입력 모으기).
+    Span<const MaterialAssetReferenceField> assetReferences;
+    // lowering 규칙 버전이다(1 이상 — 규칙이 바뀌면 올린다, 번역 너겟 키, 12.2절).
+    uint32 loweringVersion = 1;
 
     // 아래 설정 함수는 값을 바꾼 사본을 돌려준다(constexpr 사슬 — 정적 정의 표를 쓰기 위함).
     constexpr MaterialNodeDefinition Version(uint32 value, nodegraph::MigrateFn fn) const noexcept {
@@ -189,6 +194,19 @@ struct MaterialNodeDefinition {
     }
 
     // 상태를 PrerequisiteMissing("TODO" 상태)으로 하고 선행을 정한다(19.2절).
+    constexpr MaterialNodeDefinition
+    AssetReferences(Span<const MaterialAssetReferenceField> value) const noexcept {
+        MaterialNodeDefinition copy = *this;
+        copy.assetReferences = value;
+        return copy;
+    }
+
+    constexpr MaterialNodeDefinition LoweringVersion(uint32 value) const noexcept {
+        MaterialNodeDefinition copy = *this;
+        copy.loweringVersion = value;
+        return copy;
+    }
+
     constexpr MaterialNodeDefinition Missing(MaterialPrerequisite value) const noexcept {
         MaterialNodeDefinition copy = *this;
         copy.status = MaterialNodeStatus::PrerequisiteMissing;

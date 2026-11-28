@@ -11,6 +11,7 @@
 #include <MaterialSchema/VertexInputUsage.h>
 #include <NodeGraph/GraphDocument.h>
 #include <Object/ObjectRefs.h>
+#include <Texture/Texture.h>
 
 // 그래프를 가진 머티리얼 에셋이다(Docs/Design/MaterialSystem 4.2·4.6·19.9절, UE UMaterial).
 namespace rocks {
@@ -33,7 +34,7 @@ public:
 #if ROCKS_WITH_EDITOR_DATA
           graph(allocator), layout(allocator),
 #endif
-          usage(allocator), parameterCollections(allocator),
+          usage(allocator), parameterCollections(allocator), referencedTextures(allocator),
           renderTracePhysicalMaterials(allocator) {
     }
 
@@ -53,6 +54,11 @@ public:
     // 그래프의 컬렉션 노드가 쓰는 파라미터 컬렉션(Hard — 실행 때 layout·기본값을 함께
     // 로드, 4.4·4.6.1절) 이다. 번역이 그래프에서 채운다.
     ROCKS_PROPERTY() ObjectRefArray<ParameterCollection> parameterCollections;
+    // 그래프와 그 함수·레이어 닫힘이 참조하는 텍스처(Hard — UE FMaterialCachedExpressionData::
+    // ReferencedTextures)다. 참조 동기화(MaterialCook SyncMaterialReferences — 12.8절 MS3c)가
+    // 채우고 쿠킹이 번역 결과의 텍스처가 이 안에 있는지 대조한다. 그래프 텍스처가 쿠킹 대상과
+    // cookKey에 드는 길이다.
+    ROCKS_PROPERTY() ObjectRefArray<Texture> referencedTextures;
     // TODO(MPQ-PhysicalMaterial): 물리 재질 에셋이 생기면 Hard 참조로 바꾸지 않고 대상 클래스를
     // 검사한다 (UE PhysMaterial·PhysMaterialMask·RenderTracePhysicalMaterialOutputs).
     ROCKS_PROPERTY() material::MaterialAssetReference physicalMaterial;

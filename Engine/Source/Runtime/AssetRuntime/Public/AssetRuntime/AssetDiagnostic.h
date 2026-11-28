@@ -166,7 +166,11 @@ enum class AssetDiagnosticCode : uint16 {
     // 배열 원소 번호, 1부터), 쿠킹이 커브 표의 모드가 쓰지 않는 맵을 비웠다(CurveTableUnusedRows —
     // 경고, 쿠킹 진단 setting = 버린 행 수).
     CurveImportRowSkipped,
-    CurveTableUnusedRows
+    CurveTableUnusedRows,
+    // 머티리얼 쿠킹(Docs/Design/MaterialSystem 12.8절 MS3c — MAS8): 번역이 오류를 냈다
+    // (MaterialTranslationFailed — 오류, detail = 첫 오류의 MaterialDiagnosticCode 번호, related =
+    // 진단이 가리키는 에셋 — 함수일 수 있다. 노드·문구는 쿠킹 보고서 경고 목록으로 간다).
+    MaterialTranslationFailed
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

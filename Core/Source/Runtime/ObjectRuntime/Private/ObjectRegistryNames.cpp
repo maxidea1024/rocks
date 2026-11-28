@@ -378,6 +378,26 @@ Result<ObjectHandle> ObjectRegistry::GetOuter(const ObjectAccessContext& access,
     return Result<ObjectHandle>::Success(ColdOf(*found.Value()).outer);
 }
 
+Result<ObjectOrigin> ObjectRegistry::GetOrigin(const ObjectAccessContext& access,
+                                               ObjectHandle handle) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectOrigin>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (auto open = OpenState(closed_, processing_); !open) {
+        return Result<ObjectOrigin>::Failure(open.Error());
+    }
+
+    auto found = FindPublishedLocked(handle);
+    if (!found) {
+        return Result<ObjectOrigin>::Failure(found.Error());
+    }
+
+    return Result<ObjectOrigin>::Success(ColdOf(*found.Value()).origin);
+}
+
 Result<ObjectHandle> ObjectRegistry::GetOutermost(const ObjectAccessContext& access,
                                                   ObjectHandle handle) const noexcept {
     auto valid = CheckAccess(access);

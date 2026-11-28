@@ -11,6 +11,7 @@
 #include <Object/FieldNotifications.h>
 #include <Object/ObjectDiagnostics.h>
 #include <Object/ObjectIdentity.h>
+#include <Object/ObjectOrigin.h>
 #include <Object/ObjectRegistryOptions.h>
 #include <Object/ReferenceObserver.h>
 #include <Object/StructRefArray.h>
@@ -160,6 +161,14 @@ public:
 
     // handle의 Outer 사슬 끝(소속 패키지)이다. Outer가 없으면 handle 자신이다.
     Result<ObjectHandle> GetOutermost(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
+    // handle의 생성 출처다(Object/ObjectOrigin.h — Docs/Design/Prefab 10.5절). 생성 때 정해져
+    // 바뀌지 않는다. 오류는 GetOuter와 같다.
+    //
+    // 사용 예:
+    //   auto origin = registry.GetOrigin(access, component);
+    //   if (origin && origin.Value() == ObjectOrigin::ClassSubobject) { /* 선언 subobject */ }
+    Result<ObjectOrigin> GetOrigin(const ObjectAccessContext&, ObjectHandle) const noexcept;
 
     // handle의 이름을 out 뒤에 붙인다(Outer 없는 이름 없는 객체와 대표 자식은 빈 문자열). 잠금
     // 안에서 64 byte 스택 버퍼로 복사한 뒤 잠금 밖에서 out의 allocator로 붙이므로, 그 할당 콜백이
@@ -1169,8 +1178,10 @@ private:
     Result<uint64> BeginConstruction(const ObjectAccessContext&) noexcept;
     // 생성 오류 순서 1–12(Docs/Design/ObjectFoundations.ko.md 1.5절)를 따른다. 0단계(트랜잭션
     // 상태·저널 예약)는 ConstructionContext가 먼저 한다.
+    // origin은 슬롯의 생성 출처다(Object/ObjectOrigin.h — 선언 subobject만 ClassSubobject).
     Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64, const void*,
-                                       ObjectHandle outer, StringView name) noexcept;
+                                       ObjectHandle outer, StringView name,
+                                       ObjectOrigin origin = ObjectOrigin::Default) noexcept;
     Result<void*> GetPending(const ObjectAccessContext&, ObjectHandle, uint64,
                              const void*) noexcept;
     // ConstructionContext::AcquireType의 본문이다: 생존(Alive, cutoff 아님) 또는 transaction의 공개

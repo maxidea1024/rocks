@@ -5930,6 +5930,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::SubobjectFailingOwner",
+      "id": "807393f22ae446b981b60a28f33bf7af",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::SubobjectOwner",
       "id": "e7932f1d4d8d46ecbd51587753b4367e",
       "aliases": [],

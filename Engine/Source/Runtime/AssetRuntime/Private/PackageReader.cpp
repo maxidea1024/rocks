@@ -1213,6 +1213,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "CurveImportRowSkipped";
     case AssetDiagnosticCode::CurveTableUnusedRows:
         return "CurveTableUnusedRows";
+    case AssetDiagnosticCode::MaterialTranslationFailed:
+        return "MaterialTranslationFailed";
     }
 
     return "Unknown";
