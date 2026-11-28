@@ -192,34 +192,44 @@ TEST(DefaultSubobject_RegistrationRejectsMalformedTables) {
 
 TEST(DefaultSubobject_RegistrationChecksBasePrefix) {
     SystemAllocator allocator;
-    const TypeSchema& owner = GeneratedType<SubobjectOwner>::Schema();
     const TypeSchema& child = GeneratedType<SubobjectOwnerChild>::Schema();
-    const auto attempt = [&](const TypeSchema& schema) noexcept {
+    const RuntimeTypeOps childOps = GeneratedType<SubobjectOwnerChild>::Ops();
+    // 표와 연산표를 같은 순서로 골라 파생 별칭을 등록한다(연산표 불일치가 먼저 걸리지 않게).
+    const auto attempt = [&](Span<const usize> picks, Span<const int32> parents) noexcept {
+        SubobjectSchema entries[4];
+        RuntimeSubobjectOps entryOps[4];
+        for (usize index = 0; index < picks.Size(); ++index) {
+            entries[index] = child.subobjects[picks[index]];
+            entries[index].attachParent = parents[index];
+            entryOps[index] = childOps.subobjects[picks[index]];
+        }
+
+        TypeSchema schema = Alias(child, AliasChildType);
+        schema.subobjects = Span<const SubobjectSchema>(entries, picks.Size());
+        RuntimeTypeOps ops = GeneratedType<SubobjectOwnerChild>::Ops();
+        ops.subobjects = Span<const RuntimeSubobjectOps>(entryOps, picks.Size());
         TypeRegistry types(allocator);
         if (!RegisterParts(types) || !GeneratedType<SubobjectOwner>::Register(types)) {
             return SetupFailed;
         }
 
-        return ErrorOf(types.Register(schema, GeneratedType<SubobjectOwnerChild>::Ops()));
+        return ErrorOf(types.Register(schema, Move(ops)));
     };
 
-    CHECK(attempt(Alias(child, AliasChildType)) == ErrorCode::None);
+    // 그대로(body·arm·plain·hand)는 받는다.
+    const usize same[] = {0, 1, 2, 3};
+    const int32 sameParents[] = {-1, 0, -1, 0};
+    CHECK(attempt(same, sameParents) == ErrorCode::None);
 
-    // base 항목 순서를 바꾼 파생 표.
-    SubobjectSchema swapped[4] = {child.subobjects[1], child.subobjects[0], child.subobjects[2],
-                                  child.subobjects[3]};
-    swapped[0].attachParent = -1;
-    swapped[1].attachParent = -1;
-    TypeSchema reordered = Alias(child, AliasChildType);
-    reordered.subobjects = Span<const SubobjectSchema>(swapped, 4);
-    CHECK(attempt(reordered) == ErrorCode::TypeMismatch);
+    // base 항목 순서를 바꾼 파생 표(arm·body·plain·hand).
+    const usize swapped[] = {1, 0, 2, 3};
+    const int32 swappedParents[] = {-1, -1, -1, 1};
+    CHECK(attempt(swapped, swappedParents) == ErrorCode::TypeMismatch);
 
-    // base가 정한 소유 목록 지정자를 바꾼다.
-    TypeSchema respecified = Alias(child, AliasChildType);
-    respecified.subobjectRootField = Guid{};
-    respecified.subobjects = Span<const SubobjectSchema>(child.subobjects.Data() + 1, 3);
-    (void)owner;
-    CHECK(attempt(respecified) != ErrorCode::None);
+    // base 항목 하나를 뺀 파생 표(body·arm·hand).
+    const usize dropped[] = {0, 1, 3};
+    const int32 droppedParents[] = {-1, 0, 0};
+    CHECK(attempt(dropped, droppedParents) == ErrorCode::TypeMismatch);
 }
 
 TEST(DefaultSubobject_StructRejectsSubobjectData) {

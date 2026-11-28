@@ -9,7 +9,7 @@ namespace rocks::detail {
 
 namespace {
 
-constexpr usize AlignUp(usize value, usize alignment) noexcept {
+constexpr usize AlignSubobjectOffset(usize value, usize alignment) noexcept {
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
@@ -51,9 +51,9 @@ bool SameSubobject(const SubobjectSchema& left, const SubobjectSchema& right) no
 } // namespace
 
 usize SubobjectBlockLayout::Place(usize offset) noexcept {
-    schemaOffset = AlignUp(offset, alignof(SubobjectSchema));
-    opsOffset =
-        AlignUp(schemaOffset + count * sizeof(SubobjectSchema), alignof(RuntimeSubobjectOps));
+    schemaOffset = AlignSubobjectOffset(offset, alignof(SubobjectSchema));
+    opsOffset = AlignSubobjectOffset(schemaOffset + count * sizeof(SubobjectSchema),
+                                     alignof(RuntimeSubobjectOps));
     return opsOffset + count * sizeof(RuntimeSubobjectOps);
 }
 

@@ -58,14 +58,15 @@ struct SubobjectSchema {
     int32 attachParent = -1;  // 펼친 subobject 표 index(-1 = 붙이지 않음 — 생략 규칙은 MetaCompiler가 풀어 둔다)
     uint32 flags = 0;         // SubobjectFlags
 };
-// TypeSchema에 더한다(자기 선언·자기 지정만 — 상속은 base 체인으로):
-Span<const SubobjectSchema> subobjects{};
-Guid subobjectListField{};      // 0 = 지정 없음
+// TypeSchema에 더한다:
+Span<const SubobjectSchema> subobjects{};   // 펼친 표
+Guid subobjectListField{};      // 실효 값(상속 포함), 0 = 지정 없음
 Guid subobjectRootField{};
 Guid subobjectAttachField{};
 ```
 
-- 객체 이름은 필드 도구 이름이라 따로 싣지 않는다. 펼친 표(base 먼저 + 자기)는 TypeRegistry가 등록 때 만들어 `TypeLease`로 내준다. 등록 검사: id 유일·0 아님, id가 이 타입의 ObjectRef 필드, type이 등록된 클래스, attachParent가 앞쪽 index이거나 −1(MetaCompiler가 위상 정렬), Root 하나, 클래스 지정자 필드의 종류.
+- 객체 이름은 필드 도구 이름이라 따로 싣지 않는다. **스키마는 펼친 표를 싣는다**(상속 필드처럼 — base 표 뒤에 자기 항목, 2026-11-28 PF1a 구현 결정). 등록은 base 표가 앞부분과 같은지(`InheritsSubobjects` — 아니면 `TypeMismatch`)와 클래스 지정자를 base와 같은 값으로 이어받는지를 본다. 등록 검사: id 유일·0 아님(겹치면 `AlreadyExists`), id가 이 타입의 ReadOnly ObjectRef 필드(Transient·EditorOnly·Required·Notify 아님, 목록·root 필드 아님), type이 0 아님, attachParent가 앞쪽 index이거나 −1, Root 하나(Root면 부착 부모 없음), 연산표 수·ID 일치, 클래스 지정자 필드의 종류, 표가 있으면 목록 지정자 필수(그 밖 `InvalidArgument`). struct 스키마는 이 칸을 모두 비워야 한다.
+- **표 순서**(MetaCompiler): base 표 뒤에 자기 항목을 둔다. 자기 `Root`가 자기 항목의 맨 앞이고 나머지는 선언 순서다. `AttachParent`는 base 항목이나 **위에 선언한** 자기 항목만 가리킨다(위상 정렬 대신 선언 순서 규칙 — 생략한 부착 부모가 Root를 가리키도록 Root를 앞에 둔다).
 - 한도 `MaxClassSubobjects` = 256(펼친 표 크기 — MetaSchema 상수, 넘으면 MetaCompiler 오류와 등록 `CapacityExceeded`).
 
 **타입을 지운 접근**(ObjectRuntime이 소유 타입을 모른 채 쓰도록): 지금 `RuntimeFieldOps`에는 필드 주소 thunk가 없고 배열 필드는 `writeStaged`가 없다(`RuntimeTypeOps.h:362-`). 생성 `Ops()`에 클래스마다 자기 것만 더한다.
@@ -171,7 +172,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 | 단계 | 내용 | 시험 |
 |---|---|---|
-| PF1a | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경·모듈 경계 상속), 등록 검사, `DefaultSubobject_TableGeneratedWithStableGuid` |
+| PF1a(끝 — 2026-11-28) | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경), 등록 검사(`SubobjectSchemaTests`), `DefaultSubobject_TableGeneratedWithStableGuid`. 모듈 경계 상속은 PF1e의 StaticMeshActor(WorldIntegration)가 실제 빌드로 덮는다 |
 | PF1b | ObjectRuntime `ObjectOrigin` 슬롯 표지, 타입을 지운 목록 staged 대입, `CreateDeclaredSubobjects`, `SubobjectDefaultsContext` 두 모드 | `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_TableReferencesResolve`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_NoSharedMutableComponent`, 실패 rollback |
 | PF1c | ObjectSerialization graph 형식 3(종류 1 노드·Include·도달 간선·목록 걸러내기·root/attach 비교·1단계 거부·2b 재짜기), subobject 기본값 레코드·노드별 기준 | `GraphV3_DeclaredSubobjectNodeRoundTrip`, `DefaultSubobject_RecordIsDeterministic`, `DefaultSubobject_TableReferencesEqualBaseline`, `DefaultSubobject_ClearedRootIsSaved`(null 강제 쓰기), `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `DefaultSubobject_NewClassSubobjectAppearsOnLoad`, `DefaultSubobject_MissingSubobjectRejected`, `DefaultSubobject_NameConflictRejected`, `DefaultSubobject_RenameKeepsGuidAndOverride`, golden 재고정 |
 | PF1d | World SpawnActor 한 트랜잭션·Component Outer·이름 규칙·subobject 장부·부착 함수 추출·Subobject 필드 비우기·편입 Outer 검사 | `DefaultSubobject_SpawnActorSingleTransaction`, `DefaultSubobject_ComponentOuterIsActor`, `AddComponent_NamesAreSmallestFreeNumber`, 기존 World 시험 |
