@@ -72,8 +72,11 @@
 | source당 send 수 | 제한 없음(`TArray`) | `MaxVoiceSends` 8(기본 send 포함), 넘으면 뒤쪽을 버리고 Warning·계수(3.45.7절) | AudioRT 고정 표 |
 | submix 수 | 제한 없음 | 믹서 칸 `maxBuses`(기본 64), 모자라면 send를 버리고 기본 버스는 Master로 — Warning·계수(3.45.8절) | 미리 잡은 버퍼 |
 | submix 인스턴스 수명 | 에셋이 로드된 동안 장치에 등록 | 재생 라우팅이 참조하는 동안(AU7g부터 꼬리까지), 실행 배수는 키로 따로 유지(3.45.8절) | 고정 칸을 쓰는 만큼만 차지 |
-| background mute | 처리 뒤 버퍼를 바로 0으로 채움(`AudioMixerSubmix.cpp` `bIsBackgroundMuted`) | output gain을 한 블록 ramp로 0(3.45.3절) | 클릭 방지 |
-| 마스터 gain·limiter 위치 | Main submix 출력 뒤 장치 출력 | Master 버스 출력 뒤 구간별 마스터 gain 곡선 → limiter(3.45.6절) | 블록 중간 `SetMasterGain`의 frame 정확성 유지 |
+| background mute | 마스터 볼륨(비활성 창 배수 포함)이 거의 0이면 처리 뒤 버퍼를 바로 0으로 채움(`AudioMixerDevice.cpp:1571–1587`) | 같은 조건, output gain을 한 블록 ramp로 0(3.45.8절) | 클릭 방지 |
+| 마스터 볼륨 위치 | `PrimaryVolume`을 source volume에 곱함(`AudioMixerSource.cpp:1515`) — 버스 효과 꼬리는 자연 감쇠 | Master 버스 출력 뒤 구간별 마스터 gain 곡선 → limiter(3.45.6절) — 꼬리도 바로 줄어듦 | 블록 중간 `SetMasterGain`의 frame 정확성, 마스터 한 곳에서 처리 |
+| submix 깊이·dB 범위 | 깊이 제한 없음, 범위 밖 dB는 자름(`AudioMixerSubmix.cpp:388–390`) | `MaxMixBusDepth` 16, 범위 밖 dB는 `MakeRef` InvalidArgument(3.45.7절) | 고정 사슬, 잘못된 에셋을 검사에서 막음 |
+| submix 부모 변경 | 다음 처리부터 바로 옮김 | 같다 — 채택 블록에서 바로 옮김, 교차 fade 없음(3.45.8절) | (기록용) |
+| 스냅숏 사이 부모 순환 | 에디터가 막음 | 바뀐 키의 옛 부모 유지 + Warning·계수(3.45.8절) | 실행 중 게시가 막히지 않게 |
 | 감쇠 send의 Pre 단계 | 구조체에 단계가 없음(늘 post) | 같은 `MixBusSend`를 쓰고 Pre면 Warning + post(3.45.7절) | 구조체 하나로 통일 |
 | send 변화 | `SetSubmixSendInfo`의 level을 다음 버퍼에 바로 씀 | `DefaultParamRampFrames` ramp, 새 send는 0에서, 빠진 send는 0으로(3.45.5절) | 클릭 방지 |
 | pause 중 가상 loop의 재생 시간 | device delta로 진행(`AudioVirtualLoop.cpp:302–337`) | 멈춤(3.44.3절) | voice 있는 재생과 같은 시계, 풀린 뒤 이어 듣는다 |
