@@ -66,7 +66,10 @@ public:
 
     // 반경·반높이(반구 포함, 로컬 +Z)의 캡슐이다(Docs/Design/PhysicsModule 2.4절 — scale은
     // Physics가 굽는다).
-    bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+    Result<void> BuildBodyGeometry(BodyGeometry& geometry) const noexcept override;
+
+    // UE UCapsuleComponent::IsZeroExtent(반경·반높이 모두 0).
+    bool IsZeroExtent() const noexcept override;
 
 protected:
     // 지역 (0, (r, r, h), h)다(UE CapsuleComponent.cpp:104).
