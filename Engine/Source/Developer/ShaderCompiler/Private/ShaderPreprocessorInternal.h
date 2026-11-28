@@ -208,6 +208,8 @@ struct Context {
     ShaderPreprocessLimits limits;
     // 생성 include 연결이다(RenderBase 10.6절 2항).
     Span<const ShaderGeneratedInclude> generated;
+    // 트리 파일을 읽는 원문 캐시다(null이면 트리에서 바로 읽는다 — 16.6절 SSD98).
+    ShaderSourceCache* cache = nullptr;
     // 전처리가 끝날 때까지 사는 텍스트(매크로 정의, 가상 경로, __FILE__ 문자열, 정규화한 원문).
     TextArena persistent;
     // 한 줄(여러 줄 매크로 호출이면 그 줄들) 동안 사는 텍스트.

@@ -4,6 +4,7 @@
 #include <Config/ConfigContext.h>
 #include <Config/ConfigSnapshot.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
 #include <Core/Move.h>
@@ -36,6 +37,16 @@ constinit BootCVar<bool> ShaderSymbolsVar =
 // 아무 일도 하지 않는다. 호스트가 이미 다른 공급자를 붙였으면 그것을 존중한다(Info만 남긴다).
 // 엔진 대기 작업 등록소 서비스가 있으면(Engine::Initialize의 엔진 묶음 — 진행 보고 8장 PG5)
 // 공급자의 대기 작업 "Shaders"를 등록하고, Shutdown에서 그 서비스가 여전히 같은 등록소일 때만 뗀다.
+// 공급자 할당자가 작은 블록용으로 예약하는 주소 범위다(도구처럼 작게 — BinnedAllocator 기본 예약은
+// 프로세스 범용 할당자 크기다).
+constexpr usize ProviderAllocatorReserveBytes = usize{256} << 20;
+
+BinnedAllocatorConfig ProviderAllocatorConfig() noexcept {
+    BinnedAllocatorConfig config;
+    config.reserveBytes = ProviderAllocatorReserveBytes;
+    return config;
+}
+
 class DevelopmentShaderProviderModule final : public ModuleImplementation {
 public:
     static Result<void> RegisterSettings(config::ConfigContext& context) noexcept {
@@ -111,8 +122,11 @@ public:
     }
 
 private:
-    // 공급자·워커·너겟 캐시 저장소다(여러 스레드가 동시에 할당한다).
-    SystemAllocator allocator_;
+    // 큰 할당의 상위 할당자다.
+    SystemAllocator backing_;
+    // 공급자·워커·너겟 캐시 저장소다. 여러 스레드가 동시에 작은 할당을 많이 하므로(병렬 전처리 —
+    // ShaderSystem 16.6절 SSD99) 스레드 캐시가 있는 BinnedAllocator다.
+    BinnedAllocator allocator_{backing_, ProviderAllocatorConfig()};
     render::EngineShaderHost* host_ = nullptr;
     // 대기 작업을 등록한 엔진 등록소와 그것을 찾은 서비스 표다(로더 수명).
     HostServices* services_ = nullptr;
