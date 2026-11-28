@@ -235,6 +235,7 @@ bool AudioDeviceContext::IsMixCommand(ControlCommandType type) noexcept {
     case ControlCommandType::RemoveScene:
     case ControlCommandType::RemoveEmitter:
     case ControlCommandType::SetOcclusion:
+    case ControlCommandType::SetBusSend:
         return false;
     }
 
@@ -281,6 +282,7 @@ void AudioDeviceContext::ApplyMixCommand(const ControlCommand& command, uint64 n
     case ControlCommandType::RemoveScene:
     case ControlCommandType::RemoveEmitter:
     case ControlCommandType::SetOcclusion:
+    case ControlCommandType::SetBusSend:
         break;
     }
 }
