@@ -188,8 +188,6 @@ public:
                                        const MaterialParameterMetadata& metadata) noexcept;
     // LinearColor 칸(r·g·b·a)이다.
     Result<bool> ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept;
-    // Vec4d 칸(x·y·z·w)이다.
-    Result<bool> ReadDoubleVector(StringView field, double (&out)[MaxIrComponents]) noexcept;
     // MaterialAssetReference 칸의 AssetId Guid다(null이면 0).
     Result<bool> ReadAssetReference(StringView field, Guid& out) noexcept;
 

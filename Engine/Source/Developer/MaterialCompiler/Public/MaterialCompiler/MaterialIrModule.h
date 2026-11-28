@@ -101,9 +101,20 @@ public:
 
     // identity의 출처다(없으면 null).
     const IrParameterOrigin* FindParameterOrigin(Guid identity) const noexcept {
-        for (const IrParameterOrigin& origin : origins_) {
-            if (origin.identity == identity) {
-                return &origin;
+        // 정체 순이므로 이진 탐색이다(처리기가 파라미터마다 부른다).
+        usize low = 0;
+        usize high = origins_.Size();
+        while (low < high) {
+            const usize middle = low + (high - low) / 2;
+            const Guid at = origins_[middle].identity;
+            if (at == identity) {
+                return &origins_[middle];
+            }
+
+            if (at.high < identity.high || (at.high == identity.high && at.low < identity.low)) {
+                low = middle + 1;
+            } else {
+                high = middle;
             }
         }
 

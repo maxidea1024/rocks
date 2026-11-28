@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 42(초안) | 2026-11-28 | MS3d1 구현과 교차 리뷰 반영(12.8절): 충돌은 UE pedantic 검사를 늘 켬(이름·수/텍스처 표 사이·비트 비교, UE 문구), 처리기도 적중 때 같은 대조, 공유 파라미터는 레이어 안에서도 Global, 키의 파라미터 기본값 필드 = Parameter 표지·비의미·이름 있음(실제 결함은 이름 빈 파라미터 샘플), hook NotFound는 InvalidArgument, ChannelMask·CurveAtlasRow hook UE 맞춤, 값 v2는 별도 part 13(출처)·14(컬렉션). 개정 41 설명의 "UE TryAddParameter·레이어 우선"은 이 개정으로 바뀐다 |
 | 41(초안) | 2026-11-28 | MS3d 설계 교차 리뷰 반영: artifact는 순수 값(텍스처·컬렉션은 Material Hard 필드 번호, 머티리얼 파라미터 표), artifact 합치기는 정규 byte로, 파라미터 충돌 오류(UE TryAddParameter)·출처 규칙(인스턴스 소유·레이어 우선·callPath 전체)·기본값 해석 하나, 번역 키 텍스처 위치에 AssetId(MS3c 결함), cookKey 설정 키, 쿠킹 Tags 대신 `CookContext::cookKey`로 찾는 셰이더 묶음 Record(MAS9 개정)·진단 setting(MAS11), 실행 범위 연결·다시 만들기 hook, 값 v2 컬렉션 part, static 변형 경고, 9.2·9.4·12.2·12.4절 정정 |
 | 40(초안) | 2026-11-28 | 12.8절 MS3d 설계: 다섯 묶음(파라미터 값 hook·번역 파라미터 정체, 값 v2·런타임 artifact 형, 처리기, 묶음 원천, 쿠킹 로드 시험), 16절 MAS9(쿠킹 Tags)·MAS10(진단 코드) |
 | 39(초안) | 2026-11-28 | 12.8절 MS3c 리뷰 반영(traits 품질 정규화·UE 그림자·velocity 규칙 8.3절, layout 서명·길이 앞붙임 8.6절, 키 세부·해석 의미 검사·MS3d로 넘기는 것)과 셰이더 시스템 MSR17·MSR18·MSR19·MRD18 반영(16절): platformClass는 집합, 묶음 id는 ShaderCore, 묶음 원천 등록, 조합 열거 |

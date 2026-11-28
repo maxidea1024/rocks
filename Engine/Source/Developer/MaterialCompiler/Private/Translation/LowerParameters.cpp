@@ -1,4 +1,6 @@
+#include <Core/Text/Name.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Memory.h>
 #include <MaterialCompiler/MaterialParameterDefaults.h>
 #include <MaterialSchema/Nodes/Parameters/ParametersNodeEnums.h>
 
@@ -74,7 +76,84 @@ Result<void> NamedParameterError(LoweringContext& context, StringView prefix,
     return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(), message.View());
 }
 
+// 두 기본값이 비트로 같은가(NaN 기본값도 같은 값끼리는 같다).
+bool SameDefault(double left, double right) noexcept {
+    uint64 leftBits = 0;
+    uint64 rightBits = 0;
+    platform::MemoryCopy(&leftBits, &left, sizeof(double));
+    platform::MemoryCopy(&rightBits, &right, sizeof(double));
+    return leftBits == rightBits;
+}
+
+// 충돌 진단이다(값이 다르면 파라미터 이름을 넣는다 — UE "Parameter %s ... has duplicates with
+// different default values").
+Result<void> ReportConflict(LoweringContext& context, bool typeMismatch) noexcept {
+    if (typeMismatch) {
+        return context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(),
+                             ParameterTypeConflictMessage);
+    }
+
+    auto name = ParameterNameText(context);
+    if (!name) {
+        return Result<void>::Failure(name.Error());
+    }
+
+    SystemAllocator scratch;
+    StringBuilder<> message(scratch);
+    message << "Parameter " << name.Value() << " has duplicates with different default values";
+    if (auto status = message.Status(); !status) {
+        return status;
+    }
+
+    return context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(), message.View());
+}
+
 } // namespace
+
+Result<bool> ParameterConflicts(LoweringContext& context, Guid identity,
+                                const MaterialParameterMetadata& metadata, bool numeric,
+                                IrParameterKind kind, const double (&defaults)[MaxIrComponents],
+                                IrTextureKind textureKind, Guid defaultAsset) noexcept {
+    bool used = false;
+    bool typeMismatch = false;
+    bool different = false;
+    for (const IrParameter& existing : context.Builder().Parameters()) {
+        if (existing.id == identity) {
+            used = true;
+            typeMismatch = typeMismatch || !numeric || existing.kind != kind;
+            for (usize index = 0; numeric && index < MaxIrComponents; ++index) {
+                different = different || !SameDefault(existing.defaults[index], defaults[index]);
+            }
+        }
+    }
+
+    for (const IrTexture& existing : context.Builder().Textures()) {
+        if (existing.source == IrTextureSource::Parameter && existing.id == identity) {
+            used = true;
+            typeMismatch = typeMismatch || numeric || existing.kind != textureKind;
+            different = different || !(existing.defaultAsset == defaultAsset);
+        }
+    }
+
+    // 이름이 다르면(대소문자 무시 — V8과 같은 비교) 다른 파라미터를 같은 정체로 합친 것이다.
+    if (used) {
+        for (const IrParameterOrigin& origin : context.Builder().ParameterOrigins()) {
+            if (origin.identity == identity) {
+                different = different || !NameTextEquals(origin.name.View(), metadata.name);
+            }
+        }
+    }
+
+    if (!typeMismatch && !different) {
+        return Result<bool>::Success(false);
+    }
+
+    if (auto reported = ReportConflict(context, typeMismatch); !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(true);
+}
 
 // 수 파라미터 읽기 값이다(값 hook·기본값 해석·정체·충돌·출처 — 6.10절, 12.8절 MS3d1).
 Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kind,
@@ -104,29 +183,11 @@ Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kin
                       : Result<IrValueId>::Failure(idRead.Error());
     }
 
-    // 같은 정체가 다른 종류(V8 — 표가 첫 항목의 타입을 쓴다)나 다른 기본값으로 이미 쓰였으면
-    // 충돌이다(어느 노드를 골라도 쿠킹 파라미터 표가 같은 값이게 — 12.8절 MS3d1).
-    for (const IrParameter& existing : context.Builder().Parameters()) {
-        if (!(existing.id == id)) {
-            continue;
-        }
-
-        bool same = existing.kind == kind;
-        for (usize index = 0; same && index < MaxIrComponents; ++index) {
-            same = existing.defaults[index] == defaults[index];
-        }
-
-        if (!same) {
-            if (auto reported = context.Error(
-                    MaterialDiagnosticCode::ParameterConflict, StringView(),
-                    existing.kind != kind ? "Parameter is used with another parameter type"
-                                          : "Parameter is defined with different values");
-                !reported) {
-                return Result<IrValueId>::Failure(reported.Error());
-            }
-
-            return Result<IrValueId>::Success(NoIrValue);
-        }
+    auto conflict = ParameterConflicts(context, id, metadata, true, kind, defaults,
+                                       IrTextureKind::None, Guid{});
+    if (!conflict || conflict.Value()) {
+        return conflict ? Result<IrValueId>::Success(NoIrValue)
+                        : Result<IrValueId>::Failure(conflict.Error());
     }
 
     if (auto recorded = context.RecordParameterOrigin(id, metadata); !recorded) {

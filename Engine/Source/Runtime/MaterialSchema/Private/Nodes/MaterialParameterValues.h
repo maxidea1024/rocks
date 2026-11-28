@@ -15,8 +15,8 @@ Result<bool> ScalarParameterValue(NodePropertyReader& properties,
 Result<bool> VectorParameterValue(NodePropertyReader& properties,
                                   MaterialParameterMetadata& out) noexcept;
 
-// ChannelMaskParameter(Vector, defaultValue LinearColor — UE처럼 custom primitive data를 보지
-// 않는다).
+// ChannelMaskParameter(Vector, defaultValue LinearColor — 기록 없으면 (1,0,0,0), custom primitive
+// data 번호는 UE처럼 VectorParameter와 같이 채운다).
 Result<bool> ChannelMaskParameterValue(NodePropertyReader& properties,
                                        MaterialParameterMetadata& out) noexcept;
 
@@ -32,7 +32,8 @@ Result<bool> StaticSwitchParameterValue(NodePropertyReader& properties,
 Result<bool> StaticComponentMaskParameterValue(NodePropertyReader& properties,
                                                MaterialParameterMetadata& out) noexcept;
 
-// CurveAtlasRowParameter(Scalar, curve·atlas — UE bUsedAsAtlasPosition, custom primitive data).
+// CurveAtlasRowParameter(Scalar, curve·atlas — 둘 다 있을 때만 UE bUsedAsAtlasPosition, custom
+// primitive data 번호는 채우지 않는다).
 Result<bool> CurveAtlasRowParameterValue(NodePropertyReader& properties,
                                          MaterialParameterMetadata& out) noexcept;
 

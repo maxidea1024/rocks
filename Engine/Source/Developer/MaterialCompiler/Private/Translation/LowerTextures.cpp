@@ -230,28 +230,21 @@ Result<IrValueId> ParameterTexture(LoweringContext& context, Guid parameter, Gui
         return AssetTexture(context, asset, samplerType);
     }
 
-    // 같은 정체가 다른 종류나 다른 기본 텍스처로 이미 쓰였으면 충돌이다(12.8절 MS3d1 — 수
-    // 파라미터와 같은 규칙).
-    for (const IrTexture& existing : context.Builder().Textures()) {
-        if (existing.source == IrTextureSource::Parameter && existing.id == parameter &&
-            (existing.kind != facts->kind || !(existing.defaultAsset == asset))) {
-            if (auto reported = context.Error(
-                    MaterialDiagnosticCode::ParameterConflict, StringView(),
-                    existing.kind != facts->kind ? "Parameter is used with another parameter type"
-                                                 : "Parameter is defined with different values");
-                !reported) {
-                return Result<IrValueId>::Failure(reported.Error());
-            }
-
-            return Result<IrValueId>::Success(NoIrValue);
-        }
-    }
-
     MaterialParameterMetadata metadata;
     auto read = context.ParameterMetadata(metadata);
     if (!read || !read.Value()) {
         return read ? Result<IrValueId>::Success(NoIrValue)
                     : Result<IrValueId>::Failure(read.Error());
+    }
+
+    // 같은 정체가 다른 종류(수 파라미터 포함)·이름·기본 텍스처로 이미 쓰였으면 충돌이다(12.8절
+    // MS3d1 — 수 파라미터와 같은 규칙).
+    const double noDefaults[MaxIrComponents] = {};
+    auto conflict = ParameterConflicts(context, parameter, metadata, false, IrParameterKind::Scalar,
+                                       noDefaults, facts->kind, asset);
+    if (!conflict || conflict.Value()) {
+        return conflict ? Result<IrValueId>::Success(NoIrValue)
+                        : Result<IrValueId>::Failure(conflict.Error());
     }
 
     if (auto recorded = context.RecordParameterOrigin(parameter, metadata); !recorded) {

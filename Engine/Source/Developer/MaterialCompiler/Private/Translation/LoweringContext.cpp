@@ -788,12 +788,15 @@ Result<bool> LoweringContext::ParameterMetadata(MaterialParameterMetadata& out) 
         return Result<bool>::Success(false);
     }
 
+    // hook의 필드 이름은 정적이므로 NotFound는 정의의 잘못이다(크게 실패 — 그래프 오류로 감추지
+    // 않는다). 그 밖의 Record 오류와 hook이 값을 내지 못한 경우는 그래프 오류로 진단한다.
     auto read = definition_.parameterValue(*properties.Value(), out);
-    if (!read) {
-        if (read.Error() == ErrorCode::OutOfMemory) {
-            return read;
-        }
+    if (!read && (read.Error() == ErrorCode::OutOfMemory || read.Error() == ErrorCode::NotFound)) {
+        return Result<bool>::Failure(
+            read.Error() == ErrorCode::NotFound ? ErrorCode::InvalidArgument : read.Error());
+    }
 
+    if (!read || !read.Value()) {
         if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
                                   "Node property cannot be read");
             !reported) {
@@ -821,8 +824,9 @@ LoweringContext::RecordParameterOrigin(Guid identity,
             return Result<void>::Failure(read.Error());
         }
 
-        // shared가 없는 노드(정체를 바꾸지 않는 노드)는 공유가 아니다(ReadGuid와 같다).
-        shared = read && read.Value();
+        // shared가 없는 노드는 ReadGuid가 정체를 바꾸지 않으므로(원래 parameterId 그대로) 출처도
+        // 호출·레이어 없이 둔다(공유와 같다 — 정체와 출처가 일대일).
+        shared = read ? read.Value() : read.Error() == ErrorCode::NotFound;
     }
 
     return translator_.RecordParameterOrigin(node_.id, identity, metadata.parameterId,
@@ -862,50 +866,6 @@ Result<bool> LoweringContext::ReadColor(StringView field, float (&out)[MaxIrComp
 
         if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
                                   "Node color property cannot be read");
-            !reported) {
-            return Result<bool>::Failure(reported.Error());
-        }
-
-        return Result<bool>::Success(false);
-    }
-
-    return Result<bool>::Success(true);
-}
-
-Result<bool> LoweringContext::ReadDoubleVector(StringView field,
-                                               double (&out)[MaxIrComponents]) noexcept {
-    for (double& component : out) {
-        component = 0.0;
-    }
-
-    auto properties = Properties();
-    if (!properties) {
-        return Result<bool>::Failure(properties.Error());
-    }
-
-    if (properties.Value() == nullptr) {
-        return Result<bool>::Success(false);
-    }
-
-    auto vector = properties.Value()->OpenStruct(field, GeneratedType<Vec4d>::Schema());
-    Result<void> read = vector ? Result<void>::Success() : Result<void>::Failure(vector.Error());
-    static constexpr StringView Axes[MaxIrComponents] = {"x", "y", "z", "w"};
-    for (usize index = 0; read && index < MaxIrComponents; ++index) {
-        auto axis = vector.Value().ReadDouble(Axes[index], 0.0);
-        if (!axis) {
-            read = Result<void>::Failure(axis.Error());
-        } else {
-            out[index] = axis.Value();
-        }
-    }
-
-    if (!read) {
-        if (read.Error() == ErrorCode::OutOfMemory) {
-            return Result<bool>::Failure(read.Error());
-        }
-
-        if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
-                                  "Node vector property cannot be read");
             !reported) {
             return Result<bool>::Failure(reported.Error());
         }

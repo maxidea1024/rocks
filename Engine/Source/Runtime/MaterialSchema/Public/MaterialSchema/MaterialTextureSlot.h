@@ -25,8 +25,8 @@ struct MaterialTextureSlot {
     ROCKS_PROPERTY() uint32 texture = NoMaterialReference;
     // 상수 프로그램이 이 slot의 논리 크기(TextureSize)를 읽는가.
     ROCKS_PROPERTY() bool logicalSize = false;
-    // 전체 상주 전용인가(7.4절 — 상주 mip helper를 쓸 수 없는 샘플). TODO(MS4): helper가 생기면
-    // 번역이 채운다. 지금은 늘 거짓이다.
+    // 전체 상주 전용인가(7.4절 — 상주 mip helper를 쓸 수 없는 샘플). 상주 mip helper(MS4
+    // TextureStreaming 연결)가 생기면 번역이 채우고, 그 전에는 늘 거짓이다.
     ROCKS_PROPERTY() bool wholeResident = false;
 };
 

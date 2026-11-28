@@ -6,15 +6,18 @@
 #include <MaterialSchema/MaterialAssetReference.h>
 #include <MaterialSchema/NodePropertyReader.h>
 
-// 파라미터 노드 값 hook이다(Docs/Design/MaterialSystem 12.8절 MS3d1). 기본값은 번역의 이전 읽기와
-// 같은 규칙이다(기록되지 않은 필드는 schema 기본 — 색·벡터 struct는 성분 0, sortPriority는 속성
-// struct 초기값 32).
+// 파라미터 노드 값 hook이다(Docs/Design/MaterialSystem 12.8절 MS3d1 — UE GetParameterValue).
+// 기록되지 않은 필드는 속성 struct 초기값이다(누락 = 기준 — 색은 노드마다, sortPriority 32).
 namespace rocks::material::detail {
 
 namespace {
 
 // 속성 struct의 sortPriority 초기값이다(UE UMaterialExpressionParameter::SortPriority 기본 32).
 constexpr int64 DefaultSortPriority = 32;
+// 속성 struct의 색 기본값 초기값이다(VectorParameter (0,0,0,0), ChannelMaskParameter (1,0,0,0) — UE
+// MaterialExpressionChannelMaskParameter 생성자).
+constexpr float ZeroColor[MaterialParameterComponents] = {0.0f, 0.0f, 0.0f, 0.0f};
+constexpr float RedMaskColor[MaterialParameterComponents] = {1.0f, 0.0f, 0.0f, 0.0f};
 
 // 공통 필드(이름·ParameterId·그룹·순위)를 읽는다.
 Result<void> ReadCommon(NodePropertyReader& properties, MaterialParameterType type,
@@ -80,8 +83,23 @@ Result<Guid> ReadAsset(NodePropertyReader& properties, StringView field) noexcep
 }
 
 // LinearColor 필드다(r·g·b·a).
+// 필드가 기록되지 않았으면 fallback(속성 struct 초기값 — 누락 = 기준 규칙)이다.
 Result<void> ReadColor(NodePropertyReader& properties, StringView field,
+                       const float (&fallback)[MaterialParameterComponents],
                        MaterialParameterMetadata& out) noexcept {
+    auto found = properties.Find(field);
+    if (!found) {
+        return Result<void>::Failure(found.Error());
+    }
+
+    if (!found.Value()) {
+        for (usize index = 0; index < MaterialParameterComponents; ++index) {
+            out.defaults[index] = fallback[index];
+        }
+
+        return Result<void>::Success();
+    }
+
     auto color = properties.OpenStruct(field, GeneratedType<LinearColor>::Schema());
     if (!color) {
         return Result<void>::Failure(color.Error());
@@ -143,7 +161,7 @@ Result<bool> VectorParameterValue(NodePropertyReader& properties,
         return Result<bool>::Failure(common.Error());
     }
 
-    if (auto color = ReadColor(properties, "defaultValue", out); !color) {
+    if (auto color = ReadColor(properties, "defaultValue", ZeroColor, out); !color) {
         return Result<bool>::Failure(color.Error());
     }
 
@@ -160,8 +178,14 @@ Result<bool> ChannelMaskParameterValue(NodePropertyReader& properties,
         return Result<bool>::Failure(common.Error());
     }
 
-    if (auto color = ReadColor(properties, "defaultValue", out); !color) {
+    if (auto color = ReadColor(properties, "defaultValue", RedMaskColor, out); !color) {
         return Result<bool>::Failure(color.Error());
+    }
+
+    // UE ChannelMaskParameter::GetParameterValue는 VectorParameter의 것을 불러 custom primitive
+    // data 번호를 채운다(번역이 그 값을 쓰지 않는 것과 별개다).
+    if (auto data = ReadPrimitiveData(properties, out); !data) {
+        return Result<bool>::Failure(data.Error());
     }
 
     return Result<bool>::Success(true);
@@ -243,11 +267,12 @@ Result<bool> CurveAtlasRowParameterValue(NodePropertyReader& properties,
         return Result<bool>::Failure(atlas.Error());
     }
 
-    out.atlasCurve = curve.Value();
-    out.atlas = atlas.Value();
-    out.usedAsAtlasPosition = true;
-    if (auto data = ReadPrimitiveData(properties, out); !data) {
-        return Result<bool>::Failure(data.Error());
+    // UE: atlas와 커브가 둘 다 있을 때만 atlas 위치다(값은 행 번호 — ResolveParameterDefaults).
+    // custom primitive data 번호는 채우지 않는다(UE CurveAtlasRowParameter::GetParameterValue).
+    if (!(curve.Value() == Guid{}) && !(atlas.Value() == Guid{})) {
+        out.atlasCurve = curve.Value();
+        out.atlas = atlas.Value();
+        out.usedAsAtlasPosition = true;
     }
 
     return Result<bool>::Success(true);

@@ -29,6 +29,8 @@
 #include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.h>
+#include <MaterialSchema/Nodes/Texture/TextureSampleParameter2DProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureSampleParameter2DProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.h>
 #include <ObjectSerialization/StructRecord.h>
@@ -556,8 +558,8 @@ TEST(MaterialCook_GatherEdgesAndSourceKey) {
     REQUIRE(keyNow(cubeDefault));
     CHECK(!(cubeDefault == twinDefault));
 
-    // 파라미터가 아닌 텍스처 참조는 AssetId가 키에 든다(12.8절 MS3d1 — 모듈 텍스처 표가 AssetId로
-    // slot을 합친다): 사실이 같은 쌍둥이로 바꿔도 키가 다르다.
+    // 파라미터가 아닌 텍스처 참조는 AssetId가 키에 든다(TextureSample은 노드 전체가 semantic hash에
+    // 들어 원래부터 그렇다): 사실이 같은 쌍둥이로 바꿔도 키가 다르다.
     const auto sampleOf = [&](uint64 texture) noexcept {
         return asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
             material::TextureSampleProperties sample(source.ObjectAllocator());
@@ -572,6 +574,43 @@ TEST(MaterialCook_GatherEdgesAndSourceKey) {
     Sha256Digest twinSample;
     REQUIRE(keyNow(twinSample));
     CHECK(!(twinSample == brickSample));
+
+    // 이름이 빈 파라미터 샘플은 보통 샘플이라(UE) 텍스처 필드가 비의미여도 AssetId가 키에 든다
+    // (12.8절 MS3d1 — 모듈 텍스처 표가 AssetId로 slot을 합친다). 이름이 있으면 기본값이라
+    // 사실만이다.
+    const auto parameterSampleOf = [&](uint64 texture, StringView name) noexcept {
+        return asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+            material::TextureSampleParameter2DProperties sample(source.ObjectAllocator());
+            sample.texture.assetId = asset_test::FixedId(texture);
+            sample.parameterId = Guid{0x76, 1};
+            if (!name.IsEmpty()) {
+                sample.parameterName = source.Names()->TryIntern(name).Value();
+            }
+
+            const Guid node{0x40, 5};
+            for (const nodegraph::GraphNode& existing : value.graph.graphs[0].nodes) {
+                if (existing.id == node) {
+                    return SetNode(env, value.graph, node, sample);
+                }
+            }
+
+            return AddNode(env, value.graph, node, "Material.TextureSampleParameter2D", sample);
+        });
+    };
+    REQUIRE(parameterSampleOf(BrickIdValue, ""));
+    Sha256Digest unnamedBrick;
+    REQUIRE(keyNow(unnamedBrick));
+    REQUIRE(parameterSampleOf(BrickTwinIdValue, ""));
+    Sha256Digest unnamedTwin;
+    REQUIRE(keyNow(unnamedTwin));
+    CHECK(!(unnamedTwin == unnamedBrick));
+    REQUIRE(parameterSampleOf(BrickIdValue, "Albedo"));
+    Sha256Digest namedBrick;
+    REQUIRE(keyNow(namedBrick));
+    REQUIRE(parameterSampleOf(BrickTwinIdValue, "Albedo"));
+    Sha256Digest namedTwin;
+    REQUIRE(keyNow(namedTwin));
+    CHECK(namedTwin == namedBrick);
 }
 #endif
 

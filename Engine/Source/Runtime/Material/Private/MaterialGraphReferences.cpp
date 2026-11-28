@@ -16,12 +16,13 @@ namespace {
 using material::MaterialAssetReferenceRole;
 
 Result<void> Add(Array<MaterialGraphReference>& out, MaterialAssetReferenceRole role, Guid id,
-                 Guid node, StringView field, bool defaultValue = false) noexcept {
+                 Guid node, StringView field, bool parameterDefault = false) noexcept {
     if (id == Guid{}) {
         return Result<void>::Success();
     }
 
-    return out.TryPushBack(MaterialGraphReference{role, AssetId{id}, node, field, defaultValue});
+    return out.TryPushBack(
+        MaterialGraphReference{role, AssetId{id}, node, field, parameterDefault});
 }
 
 // 그래프 노드 하나가 참조하는 에셋 id다(field는 MaterialAssetReference 칸 — 읽지 못하면 null,
@@ -41,6 +42,21 @@ Result<AssetId> NodeAssetReference(const nodegraph::GraphNode& node, const TypeS
     }
 
     return Result<AssetId>::Success(AssetId{id.Value()});
+}
+
+// 파라미터 노드가 이름(parameterName)을 가졌는가(이름이 빈 파라미터 샘플은 보통 샘플이다 — UE
+// TextureSampleParameter의 이름 없는 경로). 읽지 못하면 거짓이다(번역이 진단한다). 오류: 할당 실패.
+Result<bool> HasParameterName(const nodegraph::GraphNode& node, const TypeSchema& schema) noexcept {
+    SystemAllocator scratch;
+    auto reader = material::NodePropertyReader::Open(scratch, node.properties.bytes.View(), schema);
+    auto name = reader ? reader.Value().ReadText("parameterName")
+                       : Result<StringView>::Failure(reader.Error());
+    if (!name) {
+        return name.Error() == ErrorCode::OutOfMemory ? Result<bool>::Failure(name.Error())
+                                                      : Result<bool>::Success(false);
+    }
+
+    return Result<bool>::Success(!name.Value().IsEmpty());
 }
 
 // 레이어 노드(AttributeLayers·LayerStack)의 레이어·혼합 함수와 LayerStack 쓸 수 있는 목록의 에셋
@@ -176,13 +192,25 @@ Result<void> CollectMaterialGraphReferences(const NamePool& names,
                         return Result<void>::Failure(asset.Error());
                     }
 
-                    bool defaultValue = false;
-                    for (StringView nonSemantic : definition.nonSemanticFields) {
-                        defaultValue = defaultValue || nonSemantic == field.field;
+                    bool parameterDefault = false;
+                    if (material::HasNodeFlag(definition.flags,
+                                              material::MaterialNodeFlags::Parameter)) {
+                        for (StringView nonSemantic : definition.nonSemanticFields) {
+                            parameterDefault = parameterDefault || nonSemantic == field.field;
+                        }
+                    }
+
+                    if (parameterDefault) {
+                        auto named = HasParameterName(node, definition.propertiesSchema());
+                        if (!named) {
+                            return Result<void>::Failure(named.Error());
+                        }
+
+                        parameterDefault = named.Value();
                     }
 
                     if (auto added = Add(out, field.role, asset.Value().value, node.id, field.field,
-                                         defaultValue);
+                                         parameterDefault);
                         !added) {
                         return added;
                     }
