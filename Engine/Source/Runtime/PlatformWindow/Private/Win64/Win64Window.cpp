@@ -10,6 +10,7 @@
 #include <PlatformWindow/Window.h>
 
 #include "../Common/GamepadMotorMapping.h"
+#include "../Common/ModifierLatch.h"
 #include "../Common/PointerLock.h"
 #include "../Common/PointerTouchMapping.h"
 #include "../Common/TextInputSession.h"
@@ -259,6 +260,33 @@ Key ExtendedKey(uint32 scanCode) noexcept {
     }
 }
 
+// GetAsyncKeyState 결과에서 지금 눌림을 뜻하는 비트다.
+constexpr SHORT AsyncKeyDownMask = static_cast<SHORT>(0x8000);
+
+// modifier 키의 좌우 구분 가상 키다(놓친 뗌 확인 — 23.5a절). modifier가 아니면 0이다.
+int ModifierVirtualKey(Key key) noexcept {
+    switch (key) {
+    case Key::LeftShift:
+        return VK_LSHIFT;
+    case Key::RightShift:
+        return VK_RSHIFT;
+    case Key::LeftControl:
+        return VK_LCONTROL;
+    case Key::RightControl:
+        return VK_RCONTROL;
+    case Key::LeftAlt:
+        return VK_LMENU;
+    case Key::RightAlt:
+        return VK_RMENU;
+    case Key::LeftSuper:
+        return VK_LWIN;
+    case Key::RightSuper:
+        return VK_RWIN;
+    default:
+        return 0;
+    }
+}
+
 // lParam의 스캔코드(16–23비트)와 확장 플래그(24비트)로 물리 키를 정한다.
 Key KeyFromMessage(LPARAM lParam) noexcept {
     const uint32 scanCode = static_cast<uint32>((lParam >> 16) & 0xFF);
@@ -317,6 +345,11 @@ public:
 
             TranslateMessage(&message);
             DispatchMessageW(&message);
+        }
+
+        // 키를 누르지 않고 마우스만 써도 놓친 modifier 뗌이 풀린다(23.5a절).
+        for (Win64Window* window = threadWindows; window; window = window->next_) {
+            window->ReconcileModifiers();
         }
     }
 
@@ -1215,8 +1248,43 @@ private:
         }
     }
 
+    // OS가 다른 창에 준 modifier 뗌을 보정한다(23.5a절 — UE CheckForShiftUpEvents를 모든
+    // modifier로). Win+. 이모지 패널은 Win 뗌을 가져가고 창 초점은 그대로다.
+    void ReconcileModifiers() noexcept {
+        const uint8 held = modifiers_.Held();
+        if (held == 0) {
+            return;
+        }
+
+        // 스레드 큐에 키 메시지가 남았으면 진짜 뗌이 순서대로 오게 둔다.
+        const bool pending = (HIWORD(GetQueueStatus(QS_KEY)) & QS_KEY) != 0;
+        uint8 physical = 0;
+        for (uint32 i = 0; i < ModifierLatch::Capacity; ++i) {
+            const auto bit = static_cast<uint8>(1u << i);
+            if ((held & bit) != 0 &&
+                (GetAsyncKeyState(ModifierVirtualKey(ModifierLatch::KeyOf(bit))) &
+                 AsyncKeyDownMask) != 0) {
+                physical = static_cast<uint8>(physical | bit);
+            }
+        }
+
+        input::Key released[ModifierLatch::Capacity] = {};
+        const uint32 count = modifiers_.Reconcile(pending, physical, released);
+        for (uint32 i = 0; i < count; ++i) {
+            Log::Info(LogWin64Window,
+                      "Releasing {Key}: the system no longer holds it but the window did not "
+                      "receive its key-up",
+                      input::KeyName(released[i]));
+            Push(input::InputEvent::KeyUp(released[i]));
+        }
+    }
+
     void MouseButton(input::MouseButton button, bool down, LPARAM position,
                      uint8 clicks = 1) noexcept {
+        if (down) {
+            ReconcileModifiers();
+        }
+
         float x = static_cast<float>(static_cast<int16>(LOWORD(position)));
         float y = static_cast<float>(static_cast<int16>(HIWORD(position)));
         // 잠금 중 버튼 위치는 잠금 자리다(23.5절 — 커서는 보이지 않고 그 자리에 붙어 있다).
@@ -1620,6 +1688,8 @@ private:
             // 푼다(UI는 FocusLost로 capture를 푼다 — 23.5절).
             ReleaseMouseClip();
             UnlockPointer();
+            // FocusLost가 입력 상태 전체를 되돌린다 — 적힌 modifier도 비운다(23.5a절).
+            modifiers_.Clear();
             capturedButtons_ = 0;
             if (GetCapture() == window_) {
                 ReleaseCapture();
@@ -1655,9 +1725,11 @@ private:
             break;
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN: {
+            ReconcileModifiers();
             const Key key = KeyFromMessage(lParam);
             const bool repeat = ((lParam >> 30) & 1) != 0;
             if (key != Key::None) {
+                modifiers_.NoteDown(key);
                 Push(input::InputEvent::KeyDown(key, repeat));
             }
 
@@ -1674,8 +1746,10 @@ private:
             break;
         case WM_KEYUP:
         case WM_SYSKEYUP: {
+            ReconcileModifiers();
             const Key key = KeyFromMessage(lParam);
-            if (key != Key::None) {
+            // 보정 뒤 늦게 온 뗌·창 밖에서 누른 modifier의 뗌은 버린다(23.5a절).
+            if (key != Key::None && modifiers_.NoteUp(key)) {
                 Push(input::InputEvent::KeyUp(key));
             }
             break;
@@ -1724,6 +1798,7 @@ private:
             }
             break;
         case WM_CHAR:
+            ReconcileModifiers();
             PushText(static_cast<wchar_t>(wParam));
             return 0;
         case WM_MOUSELEAVE: {
@@ -1962,6 +2037,8 @@ private:
     bool clipping_ = false;
     // 끄는 동안 커서를 붙여 두는 잠금이다(23.5절 — LockPointer).
     PointerLock pointerLock_;
+    // 누름을 보고한 modifier다(23.5a절 — 놓친 뗌 보정).
+    ModifierLatch modifiers_;
     // UI가 게시한 영역 지도다(OS 질의가 다른 스레드에서 와도 읽도록 잠금 아래 둔다).
     mutable Mutex regionGate_;
     input::WindowRegionMap regionMap_;

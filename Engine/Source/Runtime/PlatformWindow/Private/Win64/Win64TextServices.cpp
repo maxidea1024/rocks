@@ -300,6 +300,8 @@ public:
             return E_INVALIDARG;
         }
 
+        Log::Debug(LogWin64TextServices, "TSF SetSelection [{Start}, {End})", selection[0].acpStart,
+                   selection[0].acpEnd);
         if (selection[0].acpStart < 0 || selection[0].acpEnd < selection[0].acpStart ||
             !document_.SetSelection(static_cast<uint32>(selection[0].acpStart),
                                     static_cast<uint32>(selection[0].acpEnd),
@@ -362,6 +364,9 @@ public:
             return E_INVALIDARG;
         }
 
+        // 진단(Debug): TSF가 문서에 한 편집이다 — 실제 TIP·이모지 패널 순서를 재는 데 쓴다.
+        Log::Debug(LogWin64TextServices, "TSF SetText [{Start}, {End}) with {Count} units", start,
+                   end, count);
         TextInputChange changed;
         if (start < 0 || end < start ||
             !document_.Replace(static_cast<uint32>(start), static_cast<uint32>(end),
@@ -401,6 +406,9 @@ public:
         }
 
         TextInputChange changed;
+        Log::Debug(LogWin64TextServices,
+                   "TSF InsertTextAtSelection {Count} units at [{Start}, {End}), flags {Flags}",
+                   count, document_.SelectionStart(), document_.SelectionEnd(), flags);
         if (!document_.InsertAtSelection({reinterpret_cast<const char16_t*>(text), count},
                                          changed)) {
             return E_FAIL;
@@ -625,6 +633,7 @@ public:
             (void)RangeExtent(range.Get(), start, end);
         }
 
+        Log::Debug(LogWin64TextServices, "TSF composition starts at [{Start}, {End})", start, end);
         document_.StartComposition(start, end);
         *accepted = TRUE;
         FlushOutsideLock();
@@ -640,6 +649,7 @@ public:
         uint32 start = 0;
         uint32 end = 0;
         if (RangeExtent(range, start, end)) {
+            Log::Debug(LogWin64TextServices, "TSF composition range [{Start}, {End})", start, end);
             document_.UpdateComposition(start, end);
         }
 
@@ -652,6 +662,7 @@ public:
             return E_UNEXPECTED;
         }
 
+        Log::Debug(LogWin64TextServices, "TSF composition ends");
         composition_.Reset();
         document_.EndComposition();
         FlushNow();

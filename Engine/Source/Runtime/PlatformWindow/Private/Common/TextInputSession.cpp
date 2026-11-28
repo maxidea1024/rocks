@@ -1,5 +1,7 @@
 #include "TextInputSession.h"
 
+#include <Core/Diagnostics/Log.h>
+
 namespace rocks::platform {
 
 namespace {
@@ -180,8 +182,20 @@ uint32 TextInputSession::Shift(uint32 position) const noexcept {
     return static_cast<uint32>(shifted < 0 ? 0 : (shifted > length ? length : shifted));
 }
 
+namespace {
+
+inline constexpr LogCategory LogTextInputSession{"Platform.TextInput"};
+
+} // namespace
+
 void TextInputSession::Apply(const Entry& entry) noexcept {
     TextInputClient& client = *active_;
+    // 진단(Debug): 문맥에 적용하는 기록이다(종류 번호는 TextInputRecordKind 순서).
+    Log::Debug(LogTextInputSession,
+               "Apply record kind {Kind} range [{Begin}, +{Length}) text {Units} units, shift "
+               "{Shift}",
+               static_cast<uint32>(entry.kind), entry.rangeBegin, entry.rangeLength, entry.length,
+               offset_);
     const Span<const char16_t> text(text_ + entry.offset, entry.length);
     switch (entry.kind) {
     case TextInputRecordKind::Composition:

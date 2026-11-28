@@ -74,6 +74,21 @@
 - **시험**: 가짜 커서 서비스가 받은 잠금·풀기 자리와 순서, 창 이동량(relative) 그대로 전달, 서비스 없을 때 위치 차이, Up·capture 잃음·FocusLost·`releaseCursorAt` 복원, 잠금 중 hover 멈춤, Win64 창의 잠금 상태 전이(초점 잃음 풀기).
 - **사람 확인**: 실제 창에서 끄는 동안 커서가 보이지 않고 화면 끝에서도 값이 계속 바뀌는지, 놓으면 제자리인지.
 
+### 23.5a 놓친 modifier 뗌 보정(UE `FWindowsApplication::CheckForShiftUpEvents`·`UpdateAllModifierKeyStates`)
+
+- **결함**: "hello" 뒤에 Win+.(이모지 패널)로 이모지를 넣고 Backspace를 두 번 누르면, 두 번째에 "hello"가 한꺼번에 지워졌다. Win 누름(`LeftSuper` KeyDown)은 창에 오지만, 뗌은 이모지 패널이 가져가 창에 오지 않는다. 창 초점은 그대로라 FocusLost도 없다. Application의 modifier 상태(`UpdateChord`)가 Super를 누른 채로 두고, 편집 텍스트는 Super+Backspace를 Ctrl+Backspace처럼 단어 지우기로 처리했다. 첫 Backspace도 이모지를 단어 하나로 지워 정상처럼 보였다.
+- **UE**: Windows에서 Win 키를 modifier로 세지 않는다. Shift는 다른 Shift가 눌려 있으면 뗌 메시지가 오지 않아 키 메시지 때 `GetKeyState`로 확인하고 KeyUp을 만든다(`CheckForShiftUpEvents`). 입력을 버리는 창·활성화 때는 `GetAsyncKeyState`로 전체를 다시 읽는다(`UpdateAllModifierKeyStates`). 다른 modifier의 놓친 뗌은 보정하지 않는다.
+- **Rocks(UE보다 넓게)**: 창이 누름을 보고한 modifier(Shift·Control·Alt·Super 좌우 여덟)를 적어 둔다(`ModifierLatch` — `PlatformWindow/Private/Common/ModifierLatch.h`, 플랫폼 헤더 없는 판정, EngineTests로 시험).
+  - 확인 시점: 키·글자 메시지(`WM_KEYDOWN`·`WM_KEYUP`·`WM_SYSKEY*`·`WM_CHAR`)와 마우스 버튼 누름을 처리하기 전, 그리고 스레드 메시지를 다 처리한 뒤(펌프 끝 — 키를 누르지 않고 마우스만 써도 풀린다).
+  - 판정: 적힌 modifier 가운데 OS 물리 상태(`GetAsyncKeyState`)가 뗌이면 KeyUp을 만들어 넣고 적힘을 지운다. 단, 스레드 큐에 키 메시지가 남아 있으면(`GetQueueStatus(QS_KEY)`) 보정하지 않는다 — 빨리 뗀 키의 진짜 뗌이 아직 큐에 있으면 순서대로 오게 둔다(그 앞 키의 chord가 바뀌지 않는다).
+  - 보정한 뒤 늦게 온 진짜 뗌(적히지 않은 modifier의 KeyUp)은 버린다(뗌이 두 번 가지 않는다). 창 밖에서 누르고 창 안에서 뗀 modifier도 누름을 보고하지 않았으므로 같다.
+  - 초점을 잃으면 적힘을 비운다(FocusLost가 입력 상태 전체를 되돌린다).
+  - 보정은 정보 로그 한 줄을 남긴다(어느 키를 왜 — 조용히 넘기지 않는다).
+- **Win 키**: Super를 편집 명령 modifier로 쓰는 정책(`command = control || super`)은 그대로다(macOS Command와 같은 경로). 놓친 뗌을 바로잡으므로 Win+.·Win+V 뒤에도 남지 않는다.
+- **macOS**: Command 중 keyUp은 앱 local monitor가 이미 넘긴다(MacPlatform 문서). 같은 판정을 Mac backend에도 둘지는 Mac 빌드 확인 때 정한다.
+- **시험**: 판정 — 누름 적기·반복 누름, 물리 뗌이면 KeyUp 목록(여럿·좌우 따로), 큐에 키 메시지가 있으면 보류, 보정 뒤 늦은 뗌 버림, 적히지 않은 modifier 뗌 버림, modifier 아닌 키는 늘 통과, 비우기.
+- **사람 확인**: UiDemo Editable Text Box에서 "hello" → Win+. 이모지 → Backspace를 하나씩 누르면 한 글자씩 지워지는지.
+
 ### 23.6 스크롤 막대 표시 정책(UW4v — 9.1절)
 
 - **정책 `ScrollBarVisibility`**(`UiFramework/Scrolling/ScrollBarVisibility.h`)
@@ -100,7 +115,7 @@
 - 콤보: 원하는 크기(내용·여백·화살표), 펼침 바탕·행 여백·올린 행 색.
 - 체크 상자: 형식별 그리기(바탕·상태 이미지·전경 tint·여백), 해제 이미지, 토글 바탕 tint.
 - 키 선택: 원하는 크기.
-- 커서 잠금·스크롤 막대 정책: 23.5·23.6절.
+- 커서 잠금·놓친 modifier 뗌·스크롤 막대 정책: 23.5·23.5a·23.6절.
 
 ### 23.9 단계
 
@@ -109,5 +124,6 @@
 - **UW4b2c**: 키 선택 스타일·고정 크기 지우기(23.4절).
 - **UW4b2d**: 끄는 동안 커서 숨김·되돌림(23.5절) — 창 `LockPointer`·`UnlockPointer`·`SetCursorPosition`(창이 이동량을 재고 되돌림), 입력 `relative`·`deltaX`·`deltaY`, UI 잠금 계약(`CursorService`), 편집 텍스트 오른쪽 끌기(소프트웨어 커서 `icons::CursorGrab`).
 - **UW4b2e**: 스크롤 막대 표시 정책(23.6절) — `ScrollBarVisibility`·`ScrollBarPlacement`, `ScrollThumbOpacity`, ScrollView Reserve 칸·흐려짐 타이머, `ScrollBoxWidget` 속성, 갤러리 행.
+- **UW4b2f**: 놓친 modifier 뗌 보정(23.5a절) — `ModifierLatch`, Win64 창 키·글자·버튼 메시지와 펌프 끝 확인, 늦은 뗌 버림.
 - **UW4n**: 숫자 입력(24장 — 단계는 24.9절 UW4n1–UW4n6).
 - 리뷰어는 9.1절대로 UW4b 2차 끝(UW4n 포함)에 한 번 둔다.
