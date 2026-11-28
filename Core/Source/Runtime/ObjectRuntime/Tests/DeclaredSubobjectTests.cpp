@@ -4,6 +4,7 @@
 #include <Core/Text/String.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/SubobjectDefaultsContext.h>
 #include <Object/TypeRegistry.h>
 #include <TestSupport/Test.h>
 
@@ -13,6 +14,7 @@
 // base부터 부르는지, 생성자는 subobject를 만들지 않는지, 인스턴스마다 따로 만드는지, 실패가 전부
 // 되돌려지는지다.
 using namespace rocks;
+using reflection_fixture::SubobjectFailingOwner;
 using reflection_fixture::SubobjectOwner;
 using reflection_fixture::SubobjectOwnerChild;
 using reflection_fixture::SubobjectPart;
@@ -32,7 +34,8 @@ struct Fixture {
         return GeneratedType<SubobjectPart>::Register(types) &&
                GeneratedType<SubobjectScenePart>::Register(types) &&
                GeneratedType<SubobjectOwner>::Register(types) &&
-               GeneratedType<SubobjectOwnerChild>::Register(types);
+               GeneratedType<SubobjectOwnerChild>::Register(types) &&
+               GeneratedType<SubobjectFailingOwner>::Register(types);
     }
 
     // T 소유 객체와 그 선언 subobject를 한 트랜잭션에서 만들어 공개한다.
@@ -218,7 +221,56 @@ TEST(DefaultSubobject_FailureRollsBackEverything) {
         CHECK(!transaction.Commit());
     }
 
+    // 같은 소유 객체에 두 번 부르면(목록이 이미 차 있다) InvalidArgument다.
+    {
+        ConstructionContext transaction(fixture.registry, fixture.access);
+        auto owner = transaction.Create<SubobjectOwner>(TypeIdOf<SubobjectOwner>());
+        REQUIRE(owner);
+        ObjectHandle parts[MaxClassSubobjects];
+        REQUIRE(transaction.CreateDeclaredSubobjects(owner.Value(), parts));
+        auto again = transaction.CreateDeclaredSubobjects(owner.Value(), parts);
+        CHECK(!again && again.Error() == ErrorCode::InvalidArgument);
+        CHECK(!transaction.Commit());
+    }
+
+    // 기본값 덮기 hook의 실패는 그 오류로 트랜잭션을 고정한다(base hook은 이미 돌았어도 전부
+    // 되돌린다).
+    {
+        ConstructionContext transaction(fixture.registry, fixture.access);
+        auto owner = transaction.Create<SubobjectFailingOwner>(TypeIdOf<SubobjectFailingOwner>());
+        REQUIRE(owner);
+        ObjectHandle parts[MaxClassSubobjects];
+        auto created = transaction.CreateDeclaredSubobjects(owner.Value(), parts);
+        CHECK(!created && created.Error() == ErrorCode::Unsupported);
+        CHECK(!transaction.Commit());
+    }
+
     CHECK(existing() == before);
+}
+
+TEST(DefaultSubobject_DefaultsContextRecordMode) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    // 기록 모드(Registry 밖 임시 인스턴스 — subobject 기본값 레코드, PF1c): 같은 hook이 임시
+    // subobject에 값을 준다. 소유 필드는 비어 있어도 주소 대조로 항목을 고른다.
+    auto lease = fixture.types.Acquire(TypeIdOf<SubobjectOwner>());
+    REQUIRE(lease);
+    SubobjectOwner owner(allocator);
+    SubobjectScenePart body;
+    SubobjectScenePart arm;
+    SubobjectPart plain;
+    Object* const parts[] = {&body, &arm, &plain};
+    SubobjectDefaultsContext context(owner, lease.Value(), parts);
+    CHECK(SubobjectOwner::InitSubobjectDefaults(context));
+    CHECK(body.count == 1 && arm.count == 2 && plain.count == 0);
+    // subobject가 아닌 ObjectRef 필드는 InvalidArgument이고 fn을 부르지 않는다.
+    bool called = false;
+    auto rejected = context.With(&SubobjectOwner::root, [&](SubobjectScenePart&) noexcept {
+        called = true;
+        return Result<void>::Success();
+    });
+    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument && !called);
 }
 
 } // namespace declared_subobject_tests_file

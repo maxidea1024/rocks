@@ -398,18 +398,6 @@ Result<ObjectOrigin> ObjectRegistry::GetOrigin(const ObjectAccessContext& access
     return Result<ObjectOrigin>::Success(ColdOf(*found.Value()).origin);
 }
 
-Result<void> ObjectRegistry::SetPendingOrigin(ObjectHandle handle, uint64 transaction,
-                                              ObjectOrigin origin) noexcept {
-    platform::LockGuard lock(gate_);
-    auto found = FindVisibleLocked(handle, transaction);
-    if (!found || ColdOf(*found.Value()).transaction != transaction || transaction == 0) {
-        return Result<void>::Failure(ErrorCode::StaleHandle);
-    }
-
-    ColdOf(*found.Value()).origin = origin;
-    return Result<void>::Success();
-}
-
 Result<ObjectHandle> ObjectRegistry::GetOutermost(const ObjectAccessContext& access,
                                                   ObjectHandle handle) const noexcept {
     auto valid = CheckAccess(access);

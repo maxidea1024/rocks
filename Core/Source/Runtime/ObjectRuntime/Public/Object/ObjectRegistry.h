@@ -1178,8 +1178,10 @@ private:
     Result<uint64> BeginConstruction(const ObjectAccessContext&) noexcept;
     // 생성 오류 순서 1–12(Docs/Design/ObjectFoundations.ko.md 1.5절)를 따른다. 0단계(트랜잭션
     // 상태·저널 예약)는 ConstructionContext가 먼저 한다.
+    // origin은 슬롯의 생성 출처다(Object/ObjectOrigin.h — 선언 subobject만 ClassSubobject).
     Result<ObjectHandle> CreatePending(const ObjectAccessContext&, TypeId, uint64, const void*,
-                                       ObjectHandle outer, StringView name) noexcept;
+                                       ObjectHandle outer, StringView name,
+                                       ObjectOrigin origin = ObjectOrigin::Default) noexcept;
     Result<void*> GetPending(const ObjectAccessContext&, ObjectHandle, uint64,
                              const void*) noexcept;
     // ConstructionContext::AcquireType의 본문이다: 생존(Alive, cutoff 아님) 또는 transaction의 공개
@@ -1246,10 +1248,6 @@ private:
     void ResetReclaimedLocked(ReclaimWork&) noexcept;
     // 잠금 보유: 떼어 냈지만 소멸하지 않은 work를 Retired(풀린 목록)로 되돌린다(시간 한도).
     void ReturnUnreclaimedLocked(ReclaimWork&) noexcept;
-
-    // transaction의 공개 전 객체 handle에 생성 출처를 표시한다(ConstructionContext 전용 — 생성
-    // 직후 한 번). 그 트랜잭션의 공개 전 객체가 아니면 StaleHandle이다.
-    Result<void> SetPendingOrigin(ObjectHandle, uint64 transaction, ObjectOrigin) noexcept;
 
     // ---- Outer·이름(잠금 보유 상태에서 부른다) ----
     ObjectHandle HandleOf(const Slot&) const noexcept;

@@ -35,4 +35,8 @@ SubobjectOwnerChild::InitSubobjectDefaults(SubobjectDefaultsContext& context) no
     return context.With(&SubobjectOwnerChild::hand_, SetCount(3));
 }
 
+Result<void> SubobjectFailingOwner::InitSubobjectDefaults(SubobjectDefaultsContext&) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
 } // namespace rocks::reflection_fixture

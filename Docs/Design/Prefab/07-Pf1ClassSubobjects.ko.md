@@ -23,7 +23,7 @@
 | `ROCKS_CLASS(SubobjectRoot = "rootComponent")` | `Actor` | `Root` subobject를 넣는 필드(`ObjectRef<T>`) |
 | `ROCKS_CLASS(SubobjectAttach = "attachParent")` | `SceneComponent` | subobject 타입의 부착 부모 필드(`WeakObjectRef<T>`) |
 
-- 값은 필드의 실효 도구 이름(`Name=` 또는 C++ 이름)이고, MetaCompiler가 FieldId로 풀어 스키마에 Guid로 싣는다. base에서 상속되고 파생이 다시 지정할 수 없다. 이름이 그 클래스 필드가 아니거나 종류가 다르면 오류다.
+- 값은 **그 클래스가 선언한** 필드의 실효 도구 이름(`Name=` 또는 C++ 이름 — base 필드는 private일 수 있어 받지 않는다)이고, MetaCompiler가 FieldId로 풀어 스키마에 Guid로 싣는다. base에서 상속되고 파생이 다시 지정할 수 없다. 이름이 그 클래스 필드가 아니거나 종류가 다르면 오류다.
 
 **필드 지정자**:
 
@@ -39,7 +39,7 @@ protected:
 - 접근 지정은 protected 이상이다(private이면 오류 — 파생 클래스가 `InitSubobjectDefaults`에서 `&Base::field_`로 상속 subobject를 덮을 수 있어야 한다).
 - **객체 이름 = 필드의 실효 도구 이름**(`Name=` 또는 C++ 이름). MetaCompiler가 `ValidateNameComponent` 규칙(첫 글자·64 byte·예약어)으로 검사한다.
 - `Root`: `SubobjectRoot`가 있어야 하고 `T`는 그 필드 타입의 파생이다. 클래스 계층 전체에서 하나뿐이다. `Root`와 `AttachParent`를 함께 쓰면 오류다.
-- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
+- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 부착 부모 타입은 subobject 타입 부착 필드(`WeakObjectRef<T>`)의 `T` 또는 그 파생이어야 한다(MetaCompiler RMC3002, 런타임도 `TypeMismatch`로 다시 본다). 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`이거나 Root 타입이 부착 필드 타입의 파생이 아니면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
 - `Transient`·`EditorOnly`·`Required`·`Notify`·Sparks 지정자와 함께 쓰면 오류다.
 - 진단 번호는 MetaCompiler 다음 빈 RMC 번호를 쓴다(구현 때 정한다).
 
@@ -112,7 +112,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 1. owner 타입의 펼친 표를 얻는다(비면 성공·무동작).
 2. 표 순서로 subobject를 staged로 만든다 — `Create(type, outer = owner, name = 필드 도구 이름)`.
-3. 슬롯 생성 출처를 `ClassSubobject`로 표시한다(10.5절).
+3. 슬롯 생성 출처를 `ClassSubobject`로 표시한다(10.5절 — 생성 인자로 넘겨 별도 잠금이 없다).
 4. 배선(staged 쓰기): 소유 필드 ← subobject, `SubobjectList` 목록 ← 표 순서로 앞에(타입을 지운 대입), `Root`면 `SubobjectRoot` 필드 ← subobject, `SubobjectAttach` 필드 ← 표의 부착 부모.
 5. `InitSubobjectDefaults` 체인을 instancing 모드로 부른다.
 

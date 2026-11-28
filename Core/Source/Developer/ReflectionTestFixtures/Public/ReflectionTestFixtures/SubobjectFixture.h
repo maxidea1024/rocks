@@ -84,4 +84,17 @@ protected:
     ROCKS_PROPERTY(Subobject, Name = "hand") ObjectRef<SubobjectScenePart> hand_;
 };
 
+// 기본값 덮기 hook이 실패하는 파생이다(생성 실패가 트랜잭션 전체를 되돌리는지 본다).
+ROCKS_CLASS()
+class SubobjectFailingOwner : public SubobjectOwner {
+    ROCKS_GENERATED_BODY()
+
+public:
+    using SubobjectOwner::SubobjectOwner;
+
+    // 늘 Unsupported를 돌려준다(값은 SubobjectFixture.cpp).
+    ROCKS_REFLECTIONTESTFIXTURES_API static Result<void>
+    InitSubobjectDefaults(SubobjectDefaultsContext& context) noexcept;
+};
+
 } // namespace rocks::reflection_fixture

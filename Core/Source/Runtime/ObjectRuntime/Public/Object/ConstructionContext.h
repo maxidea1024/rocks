@@ -483,7 +483,8 @@ private:
     }
 
     Result<ObjectHandle> CreateImpl(TypeId type, const void* nativeType, ObjectHandle outer,
-                                    StringView name) noexcept;
+                                    StringView name,
+                                    ObjectOrigin origin = ObjectOrigin::Default) noexcept;
 
     ObjectRegistry& registry_;
     ObjectAccessContext access_;

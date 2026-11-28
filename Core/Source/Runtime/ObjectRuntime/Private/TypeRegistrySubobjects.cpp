@@ -124,8 +124,11 @@ Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,
 
         roots += rootEntry ? 1 : 0;
         const FieldSchema* field = FindField(schema.fields, entry.id);
+        // 표 타입은 소유 필드의 T 그 자체다(SubobjectDefaultsContext::With의 static_cast와 생성
+        // 쓰기의 타입 생략이 이 전제에 기댄다).
         if (field == nullptr || !IsSingleObjectReference(*field) || field == list ||
-            field == root || !HasFlag(field->flags, FieldFlags::ReadOnly) ||
+            field->value.type != entry.type || field == root ||
+            !HasFlag(field->flags, FieldFlags::ReadOnly) ||
             (field->flags & ForbiddenSubobjectFieldFlags) != 0) {
             return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
         }

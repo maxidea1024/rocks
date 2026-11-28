@@ -55,7 +55,8 @@ Result<uint64> ObjectRegistry::BeginConstruction(const ObjectAccessContext& acce
 
 Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& access, TypeId type,
                                                    uint64 transaction, const void* nativeType,
-                                                   ObjectHandle outer, StringView name) noexcept {
+                                                   ObjectHandle outer, StringView name,
+                                                   ObjectOrigin origin) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<ObjectHandle>::Failure(valid.Error());
@@ -352,7 +353,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         ColdOf(*freeSlot).storage = memory.Value();
         ColdOf(*freeSlot).transaction = transaction;
         ColdOf(*freeSlot).stableType = type;
-        ColdOf(*freeSlot).origin = ObjectOrigin::Default;
+        ColdOf(*freeSlot).origin = origin;
         freeSlot->type = Move(typeLease.Value());
         ColdOf(*freeSlot).outer = outerKey;
         // hot 레코드와 잎 비트(GC-S3·M2). object는 생성자 실행 뒤 채운다.

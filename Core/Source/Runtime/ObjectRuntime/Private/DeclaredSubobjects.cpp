@@ -8,7 +8,8 @@
 // CreateDefaultSubobject 대응). ObjectRuntime은 소유 타입을 모르므로 생성 연산표의 필드
 // 접근자(RuntimeSubobjectOps·subobject*Access)로 필드 주소를 얻는다. ObjectRef·WeakObjectRef·
 // ObjectRefArray는 standard-layout이고 첫 멤버(handle·배열 저장소)와 주소가 같으므로 그 주소를
-// 첫 멤버 주소로 바꿔 쓴다(포인터 상호 변환).
+// 첫 멤버 주소로 바꿔 쓴다(포인터 상호 변환 — 세 래퍼는 T와 무관한 단일 멤버라 <Object>로 검사한
+// 배치가 모든 T에 성립한다).
 namespace rocks {
 
 static_assert(IsStandardLayoutV<ObjectRef<Object>> &&
@@ -23,32 +24,47 @@ static_assert(IsStandardLayoutV<ObjectRefArray<Object>> &&
 
 namespace {
 
-// 소유 타입 base 사슬의 최대 깊이다(InitSubobjectDefaults를 가장 먼 base부터 부를 때 사슬을
-// 모으는 고정 배열 크기 — 리플렉션 클래스 사슬은 이보다 훨씬 얕다).
+// 소유 타입 base 사슬의 최대 깊이다(접근자 탐색·InitSubobjectDefaults 사슬을 모으는 고정 배열 크기
+// — 리플렉션 클래스 사슬은 이보다 훨씬 얕다). 넘으면 CapacityExceeded다.
 constexpr usize MaxSubobjectOwnerDepth = 64;
 
 using FieldAccess = void* (*)(Object&) noexcept;
 
-// lease 타입부터 base 사슬을 걸어 access(ops)가 처음으로 null이 아닌 접근자를 찾는다. 없으면
-// null이다(지정자를 선언한 클래스만 접근자를 싣는다).
-FieldAccess FindAccess(TypeRegistry& types, const TypeLease& lease,
-                       FieldAccess (*access)(const RuntimeTypeOps&) noexcept) noexcept {
+// lease 타입부터 base 사슬을 걸어 access(ops)가 처음으로 null이 아닌 접근자를 찾는다(지정자를
+// 선언한 클래스만 접근자를 싣는다). 없으면 null 성공이고, 사슬이 상한보다 깊으면
+// CapacityExceeded다.
+Result<FieldAccess> FindAccess(TypeRegistry& types, const TypeLease& lease,
+                               FieldAccess (*access)(const RuntimeTypeOps&) noexcept) noexcept {
     if (FieldAccess found = access(lease.Ops())) {
-        return found;
+        return Result<FieldAccess>::Success(found);
     }
 
     TypeId base = lease.Schema().baseType;
-    for (usize depth = 0; base != TypeId{} && depth < MaxSubobjectOwnerDepth; ++depth) {
+    for (usize depth = 0; base != TypeId{}; ++depth) {
+        if (depth == MaxSubobjectOwnerDepth) {
+            return Result<FieldAccess>::Failure(ErrorCode::CapacityExceeded);
+        }
+
         auto next = types.Acquire(base);
         if (!next) {
-            return nullptr;
+            return Result<FieldAccess>::Failure(next.Error());
         }
 
         if (FieldAccess found = access(next.Value().Ops())) {
-            return found;
+            return Result<FieldAccess>::Success(found);
         }
 
         base = next.Value().Schema().baseType;
+    }
+
+    return Result<FieldAccess>::Success(nullptr);
+}
+
+const FieldSchema* FindField(const TypeSchema& schema, Guid id) noexcept {
+    for (const FieldSchema& field : schema.fields) {
+        if (field.id == id) {
+            return &field;
+        }
     }
 
     return nullptr;
@@ -56,11 +72,9 @@ FieldAccess FindAccess(TypeRegistry& types, const TypeLease& lease,
 
 // 필드 schema의 실효 도구 이름(Name= 또는 C++ 이름)이다 — 선언 subobject의 객체 이름이다.
 StringView SubobjectName(const TypeSchema& schema, Guid id) noexcept {
-    for (const FieldSchema& field : schema.fields) {
-        if (field.id == id) {
-            const Span<const char> name = field.toolName.Size() != 0 ? field.toolName : field.name;
-            return StringView(name.Data(), name.Size());
-        }
+    if (const FieldSchema* field = FindField(schema, id)) {
+        const Span<const char> name = field->toolName.Size() != 0 ? field->toolName : field->name;
+        return StringView(name.Data(), name.Size());
     }
 
     return {};
@@ -90,9 +104,22 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
         return Result<usize>::Failure(state.Error());
     }
 
+    // 모든 실패는 트랜잭션을 그 오류로 고정한다(Commit이 실패하고 Rollback이 전부 되돌린다).
+    const auto failWith = [this](ErrorCode error) noexcept {
+        (void)Fail(error);
+        return Result<usize>::Failure(error);
+    };
+
+    // owner는 이 트랜잭션의 공개 전 객체여야 한다(Alive·다른 트랜잭션 객체 거부 — 표가 없어도 먼저
+    // 본다).
+    auto ownerObject = Get<Object>(owner);
+    if (!ownerObject) {
+        return failWith(ownerObject.Error());
+    }
+
     auto ownerType = AcquireType(owner);
     if (!ownerType) {
-        return Result<usize>::Failure(ownerType.Error());
+        return failWith(ownerType.Error());
     }
 
     const TypeLease& lease = ownerType.Value();
@@ -103,67 +130,56 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
         return Result<usize>::Success(0);
     }
 
-    // 표가 있는데 결과 칸이 모자라거나 소유 목록 접근자가 없으면 호출·등록 계약 위반이다.
     TypeRegistry& types = registry_.Types();
-    const FieldAccess listAccess = FindAccess(
+    auto listAccess = FindAccess(
         types, lease, [](const RuntimeTypeOps& ops) noexcept { return ops.subobjectListAccess; });
-    const FieldAccess rootAccess = FindAccess(
+    auto rootAccess = FindAccess(
         types, lease, [](const RuntimeTypeOps& ops) noexcept { return ops.subobjectRootAccess; });
+    if (!listAccess || !rootAccess) {
+        return failWith(!listAccess ? listAccess.Error() : rootAccess.Error());
+    }
+
     bool hasRoot = false;
     for (const SubobjectSchema& entry : table) {
         hasRoot = hasRoot || (entry.flags & static_cast<uint32>(SubobjectFlags::Root)) != 0;
     }
 
-    if (out.Size() < count || listAccess == nullptr || (hasRoot && rootAccess == nullptr)) {
-        (void)Fail(ErrorCode::InvalidArgument);
-        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+    // 결과 칸이 모자라거나 등록된 지정자 접근자가 없으면 호출·등록 계약 위반이다.
+    if (out.Size() < count || listAccess.Value() == nullptr ||
+        (hasRoot && rootAccess.Value() == nullptr)) {
+        return failWith(ErrorCode::InvalidArgument);
     }
 
-    auto ownerObject = Get<Object>(owner);
-    if (!ownerObject) {
-        (void)Fail(ownerObject.Error());
-        return Result<usize>::Failure(ownerObject.Error());
-    }
-
-    // 소유 목록은 소유 객체를 막 만든 직후라 비어 있어야 한다(선언 subobject가 목록 앞에 온다).
-    auto& list = *static_cast<detail::ObjectRefArrayStorage*>(listAccess(*ownerObject.Value()));
+    // 소유 목록은 소유 객체를 막 만든 직후라 비어 있어야 한다(선언 subobject가 목록 앞에 온다 — 두
+    // 번 부르면 여기서 거부된다).
+    auto& list =
+        *static_cast<detail::ObjectRefArrayStorage*>(listAccess.Value()(*ownerObject.Value()));
     if (list.size != 0) {
-        (void)Fail(ErrorCode::InvalidArgument);
-        return Result<usize>::Failure(ErrorCode::InvalidArgument);
+        return failWith(ErrorCode::InvalidArgument);
     }
 
-    // 1. 표 순서로 만든다(Outer = 소유 객체, 이름 = 소유 필드 도구 이름). 생성 실패는 트랜잭션을
-    //    오류로 고정한다(Create 규칙).
+    // 1. 표 순서로 만든다(Outer = 소유 객체, 이름 = 소유 필드 도구 이름, 생성 출처 ClassSubobject).
+    //    생성 실패는 CreateImpl이 트랜잭션을 오류로 고정한다.
     Object* objects[MaxClassSubobjects];
     for (usize index = 0; index < count; ++index) {
         auto created =
-            CreateImpl(table[index].type, nullptr, owner, SubobjectName(schema, table[index].id));
+            CreateImpl(table[index].type, nullptr, owner, SubobjectName(schema, table[index].id),
+                       ObjectOrigin::ClassSubobject);
         if (!created) {
             return Result<usize>::Failure(created.Error());
         }
 
         out[index] = created.Value();
-        if (auto marked =
-                registry_.SetPendingOrigin(out[index], transaction_, ObjectOrigin::ClassSubobject);
-            !marked) {
-            (void)Fail(marked.Error());
-            return Result<usize>::Failure(marked.Error());
-        }
-
         auto object = Get<Object>(out[index]);
         if (!object) {
-            (void)Fail(object.Error());
-            return Result<usize>::Failure(object.Error());
+            return failWith(object.Error());
         }
 
         objects[index] = object.Value();
     }
 
-    // 2. 배선: 소유 필드, 소유 목록(표 순서), Root 필드, 부착 부모.
-    const auto failWith = [this](ErrorCode error) noexcept {
-        (void)Fail(error);
-        return Result<usize>::Failure(error);
-    };
+    // 2. 배선: 소유 필드, 소유 목록(표 순서), Root 필드, 부착 부모. 대상은 이 트랜잭션의 객체이고
+    //    표 타입이 필드 타입이라(등록 검사) 타입 대조를 생략한다(nativeType null).
     if (auto writable = CheckStagedWrite(); !writable) {
         return failWith(writable.Error());
     }
@@ -184,10 +200,14 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
         return failWith(assigned.Error());
     }
 
+    // 부착 부모: 같은 subobject 타입은 접근자·부착 필드 기대 타입을 한 번만 찾는다.
+    TypeId cachedType{};
+    FieldAccess cachedAccess = nullptr;
+    TypeId cachedExpected{};
     for (usize index = 0; index < count; ++index) {
         const SubobjectSchema& entry = table[index];
         if ((entry.flags & static_cast<uint32>(SubobjectFlags::Root)) != 0) {
-            auto* root = static_cast<ObjectHandle*>(rootAccess(*ownerObject.Value()));
+            auto* root = static_cast<ObjectHandle*>(rootAccess.Value()(*ownerObject.Value()));
             if (auto set =
                     registry_.SetEdge(access_, owner, *root, out[index], transaction_, nullptr);
                 !set) {
@@ -195,24 +215,45 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
             }
         }
 
-        if (entry.attachParent >= 0) {
-            auto subobjectType = AcquireType(out[index]);
+        if (entry.attachParent < 0) {
+            continue;
+        }
+
+        if (entry.type != cachedType) {
+            auto subobjectType = types.Acquire(entry.type);
             if (!subobjectType) {
                 return failWith(subobjectType.Error());
             }
 
-            const FieldAccess attachAccess =
+            auto attach =
                 FindAccess(types, subobjectType.Value(), [](const RuntimeTypeOps& ops) noexcept {
                     return ops.subobjectAttachAccess;
                 });
-            if (attachAccess == nullptr) {
-                return failWith(ErrorCode::InvalidArgument);
+            const FieldSchema* attachField =
+                FindField(subobjectType.Value().Schema(),
+                          subobjectType.Value().Schema().subobjectAttachField);
+            if (!attach || attach.Value() == nullptr || attachField == nullptr) {
+                return failWith(!attach ? attach.Error() : ErrorCode::InvalidArgument);
             }
 
-            // weak 참조는 GC 간선이 아니므로 staged 객체에 바로 쓴다(같은 트랜잭션의 대상).
-            *static_cast<ObjectHandle*>(attachAccess(*objects[index])) =
-                out[static_cast<usize>(entry.attachParent)];
+            cachedType = entry.type;
+            cachedAccess = attach.Value();
+            cachedExpected = attachField->value.type;
         }
+
+        // 부착 부모 타입은 부착 필드(WeakObjectRef<T>)의 T 또는 그 파생이어야 한다(MetaCompiler도
+        // 검사한다 — 손 등록·생성 불일치 방어).
+        const usize parent = static_cast<usize>(entry.attachParent);
+        if (cachedExpected != TypeId{}) {
+            auto parentType = types.Acquire(table[parent].type);
+            if (!parentType || !parentType.Value().IsA(cachedExpected)) {
+                return failWith(!parentType ? parentType.Error() : ErrorCode::TypeMismatch);
+            }
+        }
+
+        // weak 참조는 GC 간선이 아니므로 staged 객체에 바로 쓴다(일반 weak 필드의 staged 쓰기와
+        // 같다 — 장부 없음).
+        *static_cast<ObjectHandle*>(cachedAccess(*objects[index])) = out[parent];
     }
 
     // 3. 기본값 덮기: base 사슬의 hook을 가장 먼 base부터 부른다.
