@@ -233,6 +233,7 @@ Debug 워커 하나가 시작에 쓰는 약 1.5 s 가운데 약 1.2 s가 이 해
 - 자가 시험이 실패하면(커널 결함이나 잘못된 CPU 보고) `Scalar`를 쓰고, `platform::WriteDiagnostic`으로 stderr에 영어 한 줄을 남긴다. Core는 Log에 의존하지 않으므로 이렇게 한다. 조용한 대체는 하지 않는다.
 - 하드웨어가 없는 CPU에서 `Scalar`를 쓰는 것은 기능 판별 결과이므로 진단을 남기지 않는다.
 - 공개 API(`Sha256`·`Sha256Digest`)와 출력 byte는 바뀌지 않는다.
+- 내부 콘텐츠 해시는 뒤이어 BLAKE3로 바뀐다([ContentHash](ContentHash.ko.md)). SHA-256은 외부 무결성(제3자 manifest의 upstream 대조)·Crypto·빌드 지문에 남으므로 이 하드웨어 경로도 남는다. 셰이더 도구 적재 검사는 manifest `blake3` 칸으로 옮긴다(ContentHash CH11).
 
 **시험(`Core/Tests/Sha256Tests.cpp`).**
 - 이 CPU가 실행할 수 있는 커널마다 NIST 벡터를 확인하고, 스칼라와 차등 비교한다(길이 0–4,160 byte, 블록 수 1–65를 한 번에 넘기는 경우 포함).
