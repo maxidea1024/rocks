@@ -11,8 +11,9 @@ StyleSet::StyleSet(Allocator& allocator) noexcept
       comboButtons_(allocator), comboBoxes_(allocator), dockTabs_(allocator),
       editableTexts_(allocator), editableTextBoxes_(allocator), menuBars_(allocator),
       menus_(allocator), progressBars_(allocator), scrollBars_(allocator), sliders_(allocator),
-      tableRows_(allocator), texts_(allocator), toolTips_(allocator), windows_(allocator),
-      brushes_(allocator), colors_(allocator), floats_(allocator), margins_(allocator) {
+      spinBoxes_(allocator), tableRows_(allocator), texts_(allocator), toolTips_(allocator),
+      windows_(allocator), brushes_(allocator), colors_(allocator), floats_(allocator),
+      margins_(allocator) {
 }
 
 template <typename T>
@@ -125,6 +126,14 @@ Result<void> StyleSet::SetValue(StringView name, const ComboBoxStyle& value) noe
 
 const ComboBoxStyle* StyleSet::FindValue(StringView name, const ComboBoxStyle*) const noexcept {
     return Lookup(comboBoxes_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const SpinBoxStyle& value) noexcept {
+    return Store(spinBoxes_, name, value);
+}
+
+const SpinBoxStyle* StyleSet::FindValue(StringView name, const SpinBoxStyle*) const noexcept {
+    return Lookup(spinBoxes_, name);
 }
 
 Result<void> StyleSet::SetValue(StringView name, const TableRowStyle& value) noexcept {
@@ -324,6 +333,21 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
 
     if (added) {
         added = styles.Set<ComboBoxStyle>("SimpleComboBox", DefaultSimpleComboBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<SpinBoxStyle>("SpinBox", DefaultSpinBoxStyle());
+    }
+
+    // UE는 숫자 입력 칸도 같은 값이다(StarshipCoreStyle 630행 — "NumericEntrySpinBox" =
+    // DefaultSpinBox).
+    if (added) {
+        added = styles.Set<SpinBoxStyle>("NumericEntrySpinBox", DefaultSpinBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<SpinBoxStyle>("NumericEntrySpinBox_Dark",
+                                         DefaultDarkNumericEntrySpinBoxStyle());
     }
 
     if (added) {

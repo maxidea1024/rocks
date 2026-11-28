@@ -541,17 +541,23 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
         }
     }
 
-    // 숫자 입력(UE 1313–1328행).
+    // 숫자 입력(UE 1313–1328행 — SSpinBox, 범위 0–100이라 채움 막대가 보인다).
     {
-        auto spin = SharedPtr<SpinBox>::TryMake(allocator, allocator);
-        auto label = SharedPtr<TextLabel>::TryMake(allocator, allocator);
-        if (status.Take(spin) && status.Take(label)) {
-            auto built = spin.Value()->Construct({.value = SpinValue,
-                                                  .minimum = 0,
-                                                  .maximum = SpinMaximum,
-                                                  .step = 1,
-                                                  .content = label.Value(),
-                                                  .caption = Caption(context, label.Value())});
+        auto shaper = SharedPtr<DemoTextShaper>::TryMake(allocator, allocator, context.text);
+        auto spin = shaper ? SharedPtr<SpinBox>::TryMake(allocator, allocator, shaper.Value(),
+                                                         DesktopPlatform())
+                           : Result<SharedPtr<SpinBox>>::Failure(shaper.Error());
+        if (status.Take(spin, "Spin Box")) {
+            SpinBox& box = *spin.Value();
+            auto built = box.Initialize(NormalFontSize);
+            if (built) {
+                built = box.SetValueRange(0.0, SpinMaximum);
+            }
+
+            if (built) {
+                built = box.SetValue(SpinValue);
+            }
+
             if (status.Take(built)) {
                 one("Spin Box", "SpinBox", Sized(context, spin.Value(), SpinSize));
             }

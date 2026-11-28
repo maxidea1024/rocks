@@ -41,7 +41,7 @@
 
 ### 24.5 스핀 상자(`SpinBox` 다시 만들기 — UE `SSpinBox`)
 
-- **구조**: 바탕(스타일 brush)과 채움 막대를 직접 그리고, 자식은 `EditableText` 하나다(UE는 `STextBlock`과 `SEditableText`를 바꿔 보인다 — Rocks는 편집기 하나로 표시·편집을 함께 한다: 표시 모드는 읽기 전용·hit 투명·표시 글자, 글자 모드는 편집 가능·초점·전체 선택). 생성자는 편집 텍스트처럼 `TextShaper`와 `Platform`을 받는다. caption delegate는 없앤다(하위 호환 없음).
+- **구조**: Element 파생이다. 바탕(스타일 brush)과 채움 막대를 직접 그리고, 자식은 `EditableText` 하나다(UE는 `STextBlock`과 `SEditableText`를 바꿔 보인다 — Rocks는 편집기 하나로 표시·편집을 함께 한다: 표시 모드는 읽기 전용·`HitTestInvisible`(누름은 스핀 상자가 받고 Tab 탐색에서도 빠진다)·표시 글자, 글자 모드는 `Visible`·편집 가능·초점·전체 선택). 생성자는 편집 텍스트처럼 `TextShaper`와 `Platform`을 받고 `Initialize(글자 크기)`로 편집기를 만든다. 값은 double이고 `NumericKind`가 형식이다. caption delegate는 없앤다(하위 호환 없음).
 - **스타일 `SpinBoxStyle`**(UiCore, 핵심 키 "SpinBox"·"NumericEntrySpinBox"·"NumericEntrySpinBox_Dark" — StarshipCoreStyle 614–640행):
   - 바탕 RB(Input, 4, InputOutline, 1)·올림 RB(Input, 4, Hover, 1)·활성 RB(Input, 4, Primary, 1).
   - 채움: 활성 RB(Primary, 4, 투명, 1)·올림 RB(Hover, 4)·비활성 RB(Dropdown, 4).
@@ -60,9 +60,10 @@
 - **키**(UE `OnKeyDown`): 위·오른쪽 = +Delta(없으면 기본 단계 × 배수), 아래·왼쪽 = −, 확정(`ArrowKey` — 슬라이더 범위로 자르고 Delta에 맞춤) 뒤 표시 모드. Enter는 글자 모드. 초점이 Navigation·직접 지정으로 오면 글자 모드(UE `OnFocusReceived`).
 - **휠**(UE `OnMouseWheel`): 켜져 있고 끄는 중이 아니며 글자 모드 초점일 때만. 단계는 `WheelStep` 또는 기본 단계(실수이고 범위 ≤ 10이면 0.1) × 배수.
 - **글자 모드**: 편집기 글자는 값 문자열(표시 delegate와 따로 — UE `OnEditEditableText`). 잘못된 글자는 앞까지만. Enter 확정은 글자 모드를 유지하고(전체 선택), 초점 잃음 확정은 표시 모드로 돌아간다. 확정 값은 `FromString`(수식·단위)이고 값 범위로 자른다. Esc는 되돌림(편집 텍스트 22장).
-- **확정 규칙**(UE `CommitValue`): Spin·ArrowKey는 슬라이더 범위로, 모두 값 범위로 자른다. Spin·ArrowKey(또는 `AlwaysUsesDeltaSnap`)는 Delta에 맞춘다. TypeIn·ArrowKey는 `OnValueCommitted`, 모두 `OnValueChanged`. 바인딩된 값이 끄는 사이 바깥에서 바뀌면 그 값을 따른다.
+- **확정 규칙**(UE `CommitValue`): Spin·ArrowKey는 슬라이더 범위로, 모두 값 범위로 자른다. Spin·ArrowKey(또는 `AlwaysUsesDeltaSnap`)는 그 뒤 Delta에 맞춘다(그래서 슬라이더 범위는 넘을 수 있다 — UE와 같다). 맞춘 값은 값 범위로 다시 자른다(UE는 맞춘 값이 값 최대를 넘는다 — 결함). TypeIn·ArrowKey는 `OnValueCommitted`, 모두 `OnValueChanged`. 바인딩된 값이 끄는 사이 바깥에서 바뀌면 그 값을 따른다.
 - **표시**: `OnGetDisplayValue`가 있으면 그 글자(단위 표시 포함), 없으면 `ToString`. 최소 원하는 폭(`MinDesiredWidth`)·정렬.
-- **값 계약 이름**: `SpinCommitReason`은 `Enter`·`FocusLost`·`Spin`·`ArrowKey`·`TypeIn`(UE `ECommitMethod` + `ETextCommit`)으로 넓힌다. Widget 층 `WidgetSpinCommitReason` 미러도 같이 바꾼다.
+- **값 계약 이름**: `SpinCommitReason`은 `Enter`·`FocusLost`(글자 입력 확정 — UE `ETextCommit::OnEnter`·`OnUserMovedFocus`)·`Spin`(끌기 놓음)·`ArrowKey`(위아래 키)로 넓힌다. Widget 층 `WidgetSpinCommitReason` 미러도 같이 바꾼다.
+- **뒤로 미룬 것**: 정렬(UE `Justification`)은 편집 텍스트(22장)가 정렬을 얻을 때 함께 한다(지금 편집 텍스트는 왼쪽 정렬뿐). 동적 슬라이더 범위(UE `SupportDynamicSliderMaxValue`·`MinValue` — Alt 끌기·확정으로 범위를 늘림)는 UW4n7이다.
 
 ### 24.6 숫자 입력 칸(`NumericEntryBox` — UE `SNumericEntryBox`)
 
@@ -101,4 +102,5 @@
 - **UW4n4**: 숫자 입력 칸(24.6절).
 - **UW4n5**: 벡터 입력(24.7절).
 - **UW4n6**: 갤러리·Widget 층(24.8절).
-- 리뷰어는 UW4b 2차 끝(UW4n6 뒤)에 한 번 둔다(9.1절).
+- **UW4n7**: 동적 슬라이더 범위(UE `SupportDynamicSliderMaxValue`·`SupportDynamicSliderMinValue`·`OnDynamicSliderMaxValueChanged`).
+- 리뷰어는 UW4b 2차 끝(UW4n7 뒤)에 한 번 둔다(9.1절).

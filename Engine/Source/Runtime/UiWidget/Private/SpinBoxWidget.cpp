@@ -1,8 +1,9 @@
 #include <UiWidget/SpinBoxWidget.h>
-#include "ControlCaption.h"
 #include "BindLiveWidgetEvent.h"
 #include <UiFramework/Controls/SpinBox.h>
 #include <UiWidget/SpinBoxWidget.generated.h>
+#include <UiWidget/WidgetFontSize.h>
+#include <UiWidget/WidgetTree.generated.h>
 
 namespace rocks::ui {
 
@@ -17,7 +18,12 @@ Result<void> SpinBoxWidget::SetLimits(float minimum, float maximum, float step) 
     }
 
     if (auto live = CachedElement()) {
-        auto result = StaticElementCast<SpinBox>(*live).SetLimits(minimum, maximum, step);
+        auto& box = StaticElementCast<SpinBox>(*live);
+        auto result = box.SetValueRange(minimum, maximum);
+        if (result) {
+            result = box.SetDelta(step);
+        }
+
         if (!result) {
             return result;
         }
@@ -53,7 +59,7 @@ Result<void> SpinBoxWidget::SetValue(float value) noexcept {
 }
 
 Result<void> SpinBoxWidget::SetFractionalDigits(int32 minimum, int32 maximum) noexcept {
-    if (minimum < 0 || maximum < minimum || maximum > MaxSpinBoxFractionalDigits) {
+    if (minimum < 0 || maximum < minimum || maximum > MaxNumericFractionalDigits) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -79,7 +85,7 @@ void SpinBoxWidget::SetSliderEnabled(bool enabled) noexcept {
 void SpinBoxWidget::SetSnapToStep(bool enabled) noexcept {
     snapToStep_ = enabled;
     if (auto live = CachedElement()) {
-        StaticElementCast<SpinBox>(*live).SetSnapToStep(enabled);
+        StaticElementCast<SpinBox>(*live).SetAlwaysUsesDeltaSnap(enabled);
     }
 }
 
@@ -104,61 +110,82 @@ Event<float>& SpinBoxWidget::OnChanged() noexcept {
 }
 
 Result<SharedPtr<Element>> SpinBoxWidget::BuildElement(ObjectRegistry& objects) noexcept {
+    const auto access = objects.OwnerAccess();
+    auto outer = objects.GetOuter(access, Handle());
+    if (!outer) {
+        return Result<SharedPtr<Element>>::Failure(outer.Error());
+    }
+
+    auto tree = objects.Resolve<WidgetTree>(access, outer.Value());
+    if (!tree) {
+        return Result<SharedPtr<Element>>::Failure(tree.Error());
+    }
+
+    // 숫자 글자는 편집기 자식이 셰이핑한다(24.5절 — 트리의 셰이퍼).
     auto& allocator = objects.ObjectAllocator();
-    auto made = SharedPtr<SpinBox>::TryMake(allocator, allocator);
+    auto made = SharedPtr<SpinBox>::TryMake(allocator, allocator,
+                                            tree.Value().Get().Value()->GetTextShaper(),
+                                            tree.Value().Get().Value()->GetPlatform());
     if (!made) {
         return Result<SharedPtr<Element>>::Failure(made.Error());
     }
 
     auto& box = *made.Value();
-    auto initialized = box.SetLimits(minimum_, maximum_, step_);
+    auto initialized = box.Initialize(DefaultWidgetFontSize);
+    // 옛 계약(범위·단계)은 값 범위·Delta다(슬라이더 범위는 값 범위를 따른다 — UE USpinBox).
+    if (initialized) {
+        initialized = box.SetValueRange(minimum_, maximum_);
+    }
+
+    if (initialized) {
+        initialized = box.SetDelta(step_);
+    }
+
     if (initialized) {
         initialized = box.SetValue(value_);
     }
 
-    if (!initialized) {
-        return Result<SharedPtr<Element>>::Failure(initialized.Error());
+    if (initialized && (maxFractionDigits_ != -1 || minFractionDigits_ != 0)) {
+        initialized = box.SetFractionalDigits(
+            minFractionDigits_,
+            maxFractionDigits_ < 0 ? DefaultMaxNumericFractionalDigits : maxFractionDigits_);
     }
 
-    if (maxFractionDigits_ != -1 || minFractionDigits_ != 0) {
-        initialized = box.SetFractionalDigits(minFractionDigits_, maxFractionDigits_);
-        if (!initialized) {
-            return Result<SharedPtr<Element>>::Failure(initialized.Error());
-        }
+    if (!initialized) {
+        return Result<SharedPtr<Element>>::Failure(initialized.Error());
     }
 
     box.SetSliderEnabled(sliderEnabled_);
-    box.SetSnapToStep(snapToStep_);
+    box.SetAlwaysUsesDeltaSnap(snapToStep_);
     box.SetOnDragBegin(BindLiveWidgetEvent(objects, Handle(), &box, &SpinBoxWidget::beginDrag_));
-    box.SetOnDragEnd(BindLiveWidgetEvent(objects, Handle(), &box, &SpinBoxWidget::endDrag_));
-    box.SetOnCommitted(Delegate<void(float, SpinCommitReason)>::CreateLambda(
-        [&objects, owner = Handle(), native = &box](float value, SpinCommitReason reason) noexcept {
+    box.SetOnDragEnd(Delegate<void(double)>::CreateLambda(
+        [&objects, owner = Handle(), native = &box](double value) noexcept {
+            auto widget = objects.ResolveForWrite<SpinBoxWidget>(objects.OwnerAccess(), owner);
+            if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
+                widget.Value().Get().Value()->endDrag_.Broadcast(
+                    {objects, objects.OwnerAccess(), owner}, static_cast<float>(value));
+            }
+        }));
+    box.SetOnCommitted(Delegate<void(double, SpinCommitReason)>::CreateLambda(
+        [&objects, owner = Handle(), native = &box](double value,
+                                                    SpinCommitReason reason) noexcept {
             auto widget = objects.ResolveForWrite<SpinBoxWidget>(objects.OwnerAccess(), owner);
             if (widget && widget.Value().Get().Value()->CachedElement().Get() == native) {
                 widget.Value().Get().Value()->committed_.Broadcast(
-                    {objects, objects.OwnerAccess(), owner}, value,
+                    {objects, objects.OwnerAccess(), owner}, static_cast<float>(value),
                     ToWidgetSpinCommitReason(reason));
             }
         }));
-    auto caption = AttachControlCaption(objects, Handle(), box);
-    if (!caption) {
-        return Result<SharedPtr<Element>>::Failure(caption.Error());
-    }
-
-    initialized = box.SetCaption(Move(caption.Value()));
-    if (!initialized) {
-        return Result<SharedPtr<Element>>::Failure(initialized.Error());
-    }
-
-    box.SetOnChanged(Delegate<void(float)>::CreateLambda(
-        [&objects, owner = Handle(), native = &box](float value) noexcept {
+    box.SetOnChanged(Delegate<void(double)>::CreateLambda(
+        [&objects, owner = Handle(), native = &box](double value) noexcept {
             auto widget = objects.ResolveForWrite<SpinBoxWidget>(objects.OwnerAccess(), owner);
             if (widget) {
                 auto* current = widget.Value().Get().Value();
                 if (current->CachedElement().Get() == native) {
-                    current->value_ = value;
+                    current->value_ = static_cast<float>(value);
                     current->NotifyPropertyChanged("value");
-                    current->changed_.Broadcast({objects, objects.OwnerAccess(), owner}, value);
+                    current->changed_.Broadcast({objects, objects.OwnerAccess(), owner},
+                                                static_cast<float>(value));
                 }
             }
         }));

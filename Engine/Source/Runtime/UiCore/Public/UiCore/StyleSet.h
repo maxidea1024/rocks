@@ -12,6 +12,7 @@
 #include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
+#include <UiCore/Styles/SpinBoxStyle.h>
 #include <UiCore/Styles/TableRowStyle.h>
 #include <UiCore/Styles/TextStyle.h>
 #include <UiCore/Styles/ToolTipStyle.h>
@@ -87,6 +88,8 @@ public:
     const ScrollBarStyle* FindValue(StringView name, const ScrollBarStyle*) const noexcept;
     Result<void> SetValue(StringView name, const SliderStyle& value) noexcept;
     const SliderStyle* FindValue(StringView name, const SliderStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const SpinBoxStyle& value) noexcept;
+    const SpinBoxStyle* FindValue(StringView name, const SpinBoxStyle*) const noexcept;
     Result<void> SetValue(StringView name, const TableRowStyle& value) noexcept;
     const TableRowStyle* FindValue(StringView name, const TableRowStyle*) const noexcept;
     Result<void> SetValue(StringView name, const TextStyle& value) noexcept;
@@ -131,6 +134,7 @@ private:
     Array<Entry<ProgressBarStyle>> progressBars_;
     Array<Entry<ScrollBarStyle>> scrollBars_;
     Array<Entry<SliderStyle>> sliders_;
+    Array<Entry<SpinBoxStyle>> spinBoxes_;
     Array<Entry<TableRowStyle>> tableRows_;
     Array<Entry<TextStyle>> texts_;
     Array<Entry<ToolTipStyle>> toolTips_;

@@ -3,6 +3,7 @@
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
 #include <UiCore/Styles/ComboBoxStyle.h>
+#include <UiCore/Styles/SpinBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
 #include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/MenuBarStyle.h>
@@ -130,6 +131,19 @@ ROCKS_UICORE_API const ComboBoxStyle& DefaultSimpleComboBoxStyle() noexcept;
 // 콤보 펼침 목록 행 스타일이다(UE "ComboBox.Row" — 1620–1640행: 바탕 없음·올림 Color(Primary),
 // 선택 행 바탕 없음·올림 Primary, 초점 선택 RB(Transparent, 4, Select, 1), 글자 White).
 ROCKS_UICORE_API const TableRowStyle& DefaultComboBoxRowStyle() noexcept;
+
+// 숫자 입력 글자 칸 여백과 채움 막대 안쪽 여백이다(UE "SpinBox" TextPadding (7, 2.5)·InsetPadding
+// 1).
+inline constexpr Vec4 SpinBoxTextPadding{7.0f, 2.5f, 7.0f, 2.5f};
+inline constexpr Vec4 SpinBoxInsetPadding{1.0f, 1.0f, 1.0f, 1.0f};
+// 기본 숫자 입력 스타일이다(UE "SpinBox" — StarshipCoreStyle 614–625행: 바탕 RB(Input, 4,
+// InputOutline, 1)·올림 RB(Input, 4, Hover, 1)·활성 RB(Input, 4, Primary, 1), 채움 활성 RB(Primary,
+// 4)· 올림 RB(Hover, 4)·보통 RB(Dropdown, 4), 화살표 없음, 전경 ForegroundHover, 글자 여백
+// (7, 2.5), 안쪽 여백 1). "NumericEntrySpinBox"도 같은 값이다.
+ROCKS_UICORE_API const SpinBoxStyle& DefaultSpinBoxStyle() noexcept;
+// 어두운 숫자 입력 칸이다(UE "NumericEntrySpinBox_Dark" — 632–640행: 활성 바탕 없음(올림을 쓴다),
+// 채움 활성 RB(Hover, 4)·보통 RB(Secondary, 4), 글자 여백 0).
+ROCKS_UICORE_API const SpinBoxStyle& DefaultDarkNumericEntrySpinBoxStyle() noexcept;
 
 // 편집 글자 상자의 반경·여백이다(UE "NormalEditableTextBox" — StarshipCoreStyle.cpp 1364–1378행:
 // RB(…, InputFocusRadius 4, …), Padding (8, 3, 8, 4)).

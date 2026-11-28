@@ -322,6 +322,42 @@ const ComboBoxStyle& DefaultSimpleComboBoxStyle() noexcept {
     return style;
 }
 
+const SpinBoxStyle& DefaultSpinBoxStyle() noexcept {
+    static const SpinBoxStyle style = [] {
+        SpinBoxStyle spin;
+        spin.background = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius,
+                                                 ThemeSlot::InputOutline, ComboOutlineThickness);
+        spin.hoveredBackground = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius,
+                                                        ThemeSlot::Hover, ComboOutlineThickness);
+        spin.activeBackground = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius,
+                                                       ThemeSlot::Primary, ComboOutlineThickness);
+        // 채움은 투명 외곽선이다(UE FLinearColor::Transparent, 1 — 외곽선 없이 그린다).
+        spin.activeFill = StyleBrush::RoundedBox(ThemeSlot::Primary, ComboCornerRadius);
+        spin.hoveredFill = StyleBrush::RoundedBox(ThemeSlot::Hover, ComboCornerRadius);
+        spin.inactiveFill = StyleBrush::RoundedBox(ThemeSlot::Dropdown, ComboCornerRadius);
+        spin.arrowsImage = StyleBrush::None();
+        spin.foreground = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        spin.textPadding = SpinBoxTextPadding;
+        spin.insetPadding = SpinBoxInsetPadding;
+        return spin;
+    }();
+    return style;
+}
+
+const SpinBoxStyle& DefaultDarkNumericEntrySpinBoxStyle() noexcept {
+    static const SpinBoxStyle style = [] {
+        SpinBoxStyle spin = DefaultSpinBoxStyle();
+        spin.activeBackground = StyleBrush::None();
+        spin.activeFill = StyleBrush::RoundedBox(ThemeSlot::Hover, ComboCornerRadius);
+        spin.hoveredFill = StyleBrush::None();
+        spin.inactiveFill = StyleBrush::RoundedBox(ThemeSlot::Secondary, ComboCornerRadius);
+        spin.textPadding = {};
+        spin.insetPadding = {};
+        return spin;
+    }();
+    return style;
+}
+
 const TableRowStyle& DefaultComboBoxRowStyle() noexcept {
     static const TableRowStyle style = [] {
         TableRowStyle row;

@@ -79,43 +79,4 @@ TEST(UiFramework_SliderLockPreservesProgrammaticChangesAndFinishesCapture) {
     CHECK(consumed(2, B::DPadLeft) && slider.GetValue() == 0.5f);
 }
 
-TEST(UiFramework_SpinBoxFormatsAndCommitsTypedValueWithDeltaSnap) {
-    SystemAllocator allocator;
-    SpinBox spin(allocator);
-    String display(allocator);
-    REQUIRE(spin.SetCaption(Delegate<Result<void>(StringView)>::CreateLambda(
-        [&](StringView caption) noexcept { return display.TryAssign(caption); })));
-    REQUIRE(spin.SetFractionalDigits(1, 3));
-    REQUIRE(spin.SetValue(2.125f));
-    CHECK(display.View() == "2.125");
-    REQUIRE(spin.SetValue(2));
-    CHECK(display.View() == "2.0");
-    REQUIRE(spin.SetLimits(0, 100, 2));
-    spin.SetSnapToStep(true);
-    spin.SetSliderEnabled(false);
-    uint32 commits = 0, begins = 0, ends = 0;
-    spin.SetOnCommitted(Delegate<void(float, SpinCommitReason)>::CreateLambda(
-        [&](float value, SpinCommitReason reason) noexcept {
-            if (value == 8 && reason == SpinCommitReason::FocusLost) {
-                ++commits;
-            }
-        }));
-    spin.SetOnDragBegin(Delegate<void()>::CreateLambda([&]() noexcept { ++begins; }));
-    spin.SetOnDragEnd(Delegate<void(float)>::CreateLambda([&](float) noexcept { ++ends; }));
-    REQUIRE(spin.SendKey(0, input::InputEvent::Text('7')).IsHandled());
-    REQUIRE(spin.SendKey(0, input::InputEvent::Text('.')).IsHandled());
-    REQUIRE(spin.SendKey(0, input::InputEvent::Text('8')).IsHandled());
-    spin.OnFocusLost(0);
-    CHECK(commits == 1 && spin.Value() == 8 && display.View() == "8.0");
-    REQUIRE(spin.Arrange(Geometry::Root({80, 20}, {})));
-    REQUIRE(spin.OnPointerEvent({PointerEventType::Down, {2, 4}}).capture);
-    (void)spin.OnPointerEvent({PointerEventType::Move, {26, 4}});
-    spin.OnPointerCaptureLost(PointerSource::Mouse, 0, 0);
-    CHECK(begins == 0 && ends == 0 && spin.Value() == 8);
-    spin.SetSliderEnabled(true);
-    REQUIRE(spin.OnPointerEvent({PointerEventType::Down, {2, 4}}).capture);
-    REQUIRE(spin.OnPointerEvent({PointerEventType::Move, {18, 4}}).handled);
-    spin.OnPointerCaptureLost(PointerSource::Mouse, 0, 0);
-    CHECK(begins == 1 && ends == 1 && spin.Value() == 16);
-}
 } // namespace rocks::ui

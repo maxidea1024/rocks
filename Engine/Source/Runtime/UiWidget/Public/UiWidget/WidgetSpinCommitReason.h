@@ -12,6 +12,8 @@ ROCKS_ENUM()
 enum class WidgetSpinCommitReason : uint8 {
     Enter = 0,
     FocusLost = 1,
+    Spin = 2,
+    ArrowKey = 3,
 };
 
 static_assert(static_cast<uint8>(WidgetSpinCommitReason::Enter) ==
@@ -21,7 +23,14 @@ static_assert(static_cast<uint8>(WidgetSpinCommitReason::FocusLost) ==
                   static_cast<uint8>(SpinCommitReason::FocusLost),
               "WidgetSpinCommitReason::FocusLost must match SpinCommitReason::FocusLost");
 
-static_assert(static_cast<uint8>(SpinCommitReason::Count) == 2,
+static_assert(static_cast<uint8>(WidgetSpinCommitReason::Spin) ==
+                  static_cast<uint8>(SpinCommitReason::Spin),
+              "WidgetSpinCommitReason::Spin must match SpinCommitReason::Spin");
+static_assert(static_cast<uint8>(WidgetSpinCommitReason::ArrowKey) ==
+                  static_cast<uint8>(SpinCommitReason::ArrowKey),
+              "WidgetSpinCommitReason::ArrowKey must match SpinCommitReason::ArrowKey");
+
+static_assert(static_cast<uint8>(SpinCommitReason::Count) == 4,
               "SpinCommitReason gained or lost a value; update WidgetSpinCommitReason");
 
 // Element 층 값과 바꾼다.

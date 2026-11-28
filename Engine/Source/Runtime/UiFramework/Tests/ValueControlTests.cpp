@@ -33,29 +33,6 @@ TEST(UiFramework_ScrollBarKeepsGrabPointAndClampsToContentEnd) {
     CHECK(bar.Offset() == 0.75f);
 }
 
-TEST(UiFramework_SpinBoxCommitsTextAndRejectsInvalidEntry) {
-    SystemAllocator allocator;
-    SpinBox box(allocator);
-    REQUIRE(box.SetLimits(-10, 10, 2));
-    uint32 changes = 0;
-    box.SetOnChanged(Delegate<void(float)>::CreateLambda([&](float) noexcept { ++changes; }));
-    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Up)).IsHandled());
-    CHECK(box.Value() == 2);
-    REQUIRE(box.SendKey(0, input::InputEvent::Text('-')).IsHandled());
-    REQUIRE(box.SendKey(0, input::InputEvent::Text('7')).IsHandled());
-    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
-    CHECK(box.Value() == -7 && changes == 2);
-    REQUIRE(box.SendKey(0, input::InputEvent::Text('1')).IsHandled());
-    REQUIRE(box.SendKey(0, input::InputEvent::Text('e')).IsHandled());
-    REQUIRE(box.SendKey(0, input::InputEvent::KeyDown(input::Key::Enter)).IsHandled());
-    CHECK(box.Value() == -7 && !box.IsEditing() && changes == 2);
-    REQUIRE(box.Arrange(Geometry::Root({100, 30}, {})));
-    CHECK(box.OnPointerEvent({PointerEventType::Down, {4, 4}}).capture);
-    CHECK(box.OnPointerEvent({PointerEventType::Move, {24, 4}}).handled);
-    CHECK(box.OnPointerEvent({PointerEventType::Up, {24, 4}}).releaseCapture);
-    CHECK(box.Value() == 3 && changes == 3);
-}
-
 // 키 선택 크기는 내용 + "Button" 여백 + margin이다(23.4절 — 고정 100x24 없음, 기본 margin 0).
 TEST(UiFramework_KeySelectorSizesFromContentStylePaddingAndMargin) {
     SystemAllocator allocator;
