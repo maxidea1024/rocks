@@ -1448,8 +1448,9 @@ internal static partial class SchemaValidator
             // 등록이 subobject 타입 레코드를 의존으로 잡는다, struct 필드 타입과 같다).
             foreach (FieldModel field in model.OwnFields.Where(field => field.Spec.Subobject))
             {
+                // 방문 중인 타입(자기 자신·조상 사슬)은 건너뛴다 — 잘못된 subobject 타입은 ResolveSubobjects가 RMC3002로 거부한다.
                 if (field.Reference is string target && classes.TryGetValue(target, out ClassModel? subobjectType) && !subobjectType.IsStruct &&
-                    !subobjectType.IsEnum)
+                    !subobjectType.IsEnum && !visiting.Contains(target))
                 {
                     Order(subobjectType);
                 }
