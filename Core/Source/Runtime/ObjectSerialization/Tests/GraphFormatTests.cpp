@@ -100,9 +100,10 @@ bool Rejects(Allocator& allocator, ObjectRegistry& registry, TypeRegistry& types
 
 } // namespace
 
-// header: formatVersion이 2가 아니면 Unsupported(v1은 읽지 않는다), 정의되지 않은 flags·NodeTable
-// 없는 BaseOuter·NodeTable 없음(편의 복원)·nodeCount 0은 InvalidArgument, nodeCount·externalCount
-// 상한 초과는 CapacityExceeded, externalCount가 imports 수(여기서는 0)와 다르면 InvalidArgument다.
+// header: formatVersion이 3이 아니면 Unsupported(이전 형식은 읽지 않는다 — 하위호환 없음), 정의되지
+// 않은 flags·NodeTable 없는 BaseOuter·NodeTable 없음(편의 복원)·nodeCount 0은 InvalidArgument,
+// nodeCount·externalCount 상한 초과는 CapacityExceeded, externalCount가 imports 수(여기서는 0)와
+// 다르면 InvalidArgument다.
 TEST(GraphFormat_HeaderVersionFlagsAndCounts) {
     SystemAllocator allocator;
     {
@@ -129,7 +130,8 @@ TEST(GraphFormat_HeaderVersionFlagsAndCounts) {
 
             const Case cases[] = {
                 {test::graph::VersionOffset, 1, ErrorCode::Unsupported},
-                {test::graph::VersionOffset, 3, ErrorCode::Unsupported},
+                {test::graph::VersionOffset, 2, ErrorCode::Unsupported},
+                {test::graph::VersionOffset, 4, ErrorCode::Unsupported},
                 {test::graph::FlagsOffset, 4, ErrorCode::CorruptData},
                 {test::graph::FlagsOffset, 1 | 8, ErrorCode::CorruptData},
                 {test::graph::FlagsOffset, test::graph::BaseOuterFlag, ErrorCode::CorruptData},
@@ -217,8 +219,8 @@ TEST(GraphFormat_NodeTableAndRecordBoundaries) {
 
             auto valid = test::graph::Single(allocator, CellType, record.Value().View());
             REQUIRE(valid);
-            // Record 길이 prefix는 NodeTable 항목(Guid 16 + outer 4 + 빈 이름 8) 뒤다.
-            const usize lengthAt = test::graph::HeaderBytes + 28;
+            // Record 길이 prefix는 NodeTable 항목(종류 1 + Guid 16 + outer 4 + 빈 이름 8) 뒤다.
+            const usize lengthAt = test::graph::HeaderBytes + 29;
             Array<uint8> longer(allocator);
             REQUIRE(longer.TryAppend(valid.Value().View()));
             test::graph::PatchU32(longer, lengthAt, static_cast<uint32>(record.Value().Size() + 1));
@@ -232,12 +234,12 @@ TEST(GraphFormat_NodeTableAndRecordBoundaries) {
             REQUIRE(trailing.TryAppend(valid.Value().View()));
             REQUIRE(trailing.TryPushBack(uint8{0}));
             CHECK(Rejects(allocator, target, types, trailing.View(), ErrorCode::CorruptData));
-            // 이름이 잘못된 UTF-8이면 InvalidArgument다(이름 byte는 header + Guid 16 + outer 4 +
-            // 길이 8 뒤다 — writer는 잘못된 UTF-8을 쓰지 않으므로 쓴 뒤 바꾼다).
+            // 이름이 잘못된 UTF-8이면 InvalidArgument다(이름 byte는 header + 종류 1 + Guid 16 +
+            // outer 4 + 길이 8 뒤다 — writer는 잘못된 UTF-8을 쓰지 않으므로 쓴 뒤 바꾼다).
             const test::graph::Node named{CellType, 0, "x", record.Value().View()};
             auto badUtf8 = test::graph::Build(allocator, Span<const test::graph::Node>(&named, 1));
             REQUIRE(badUtf8);
-            badUtf8.Value()[test::graph::HeaderBytes + 28] = 0xff;
+            badUtf8.Value()[test::graph::HeaderBytes + 29] = 0xff;
             CHECK(
                 Rejects(allocator, target, types, badUtf8.Value().View(), ErrorCode::CorruptData));
         }
@@ -307,7 +309,7 @@ TEST(GraphFormat_ReferenceValueBoundaries) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 저장이 쓰는 byte가 명세와 같다: header 24 byte(formatVersion 2, flags, nodeCount, externalCount
+// 저장이 쓰는 byte가 명세와 같다: header 24 byte(formatVersion 3, flags, nodeCount, externalCount
 // 0), NodeTable 항목, Bytes(Record)이고 참조는 U32 local ID다.
 TEST(GraphFormat_SavedBytesFollowTheSpecification) {
     SystemAllocator allocator;
@@ -353,7 +355,7 @@ TEST(GraphFormat_SavedBytesFollowTheSpecification) {
             auto expected = test::graph::Build(allocator, nodes);
             REQUIRE(expected);
             CHECK(test::graph::SameBytes(saved.Value().View(), expected.Value().View()));
-            CHECK(test::graph::ReadU32(saved.Value().View(), test::graph::VersionOffset) == 2);
+            CHECK(test::graph::ReadU32(saved.Value().View(), test::graph::VersionOffset) == 3);
             CHECK(test::graph::ReadU32(saved.Value().View(), test::graph::ExternalCountOffset) ==
                   0);
         }

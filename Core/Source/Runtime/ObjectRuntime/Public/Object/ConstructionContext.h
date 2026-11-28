@@ -89,6 +89,19 @@ public:
     //   }
     Result<usize> CreateDeclaredSubobjects(ObjectHandle owner, Span<ObjectHandle> out) noexcept;
 
+    // owner(이 트랜잭션의 공개 전 객체)의 펼친 subobject 표 index 항목의 subobject handle이다(소유
+    // 필드 값 — CreateDeclaredSubobjects 뒤). graph 복원이 선언 subobject 노드를 묶을 때 쓴다
+    // (Docs/Design/Prefab 10.4절). 오류: owner가 이 트랜잭션의 객체가 아님(GetPending 규칙),
+    // index가 표 밖(InvalidArgument). 트랜잭션 상태를 바꾸지 않는다.
+    Result<ObjectHandle> DeclaredSubobject(ObjectHandle owner, usize index) noexcept;
+
+    // owner 소유 목록(SubobjectList)을 "선언 subobject(표 순서) + 나머지 원소(지금 순서)"로 다시
+    // 짠다 — graph 복원 2b가 Record의 목록을 적용한 뒤 부른다(저장 뒤 클래스에 새로 생긴
+    // subobject가 목록에 들고, 저장된 선언 subobject 원소는 한 번만 남는다 —
+    // Docs/Design/Prefab 10.4절). 표가 없는 타입은 무동작이다. 오류(트랜잭션을 고정한다): owner
+    // 규칙, 할당(OutOfMemory), 참조 쓰기.
+    Result<void> RestoreDeclaredSubobjectList(ObjectHandle owner) noexcept;
+
     // outer를 Outer로 쓸 때의 요약이다(ObjectRegistry::DescribeOuter와 같고 이 트랜잭션의 공개 전
     // 객체도 받는다). 트랜잭션 상태(클래스 주석의 규칙) → outer가 null이면 InvalidArgument →
     // 생존·이 트랜잭션의 공개 전 객체가 아니면 StaleHandle이다.

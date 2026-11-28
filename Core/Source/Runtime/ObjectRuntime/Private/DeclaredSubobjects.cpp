@@ -287,4 +287,94 @@ Result<usize> ConstructionContext::CreateDeclaredSubobjects(ObjectHandle owner,
     return Result<usize>::Success(count);
 }
 
+Result<ObjectHandle> ConstructionContext::DeclaredSubobject(ObjectHandle owner,
+                                                            usize index) noexcept {
+    auto ownerObject = Get<Object>(owner);
+    if (!ownerObject) {
+        return Result<ObjectHandle>::Failure(ownerObject.Error());
+    }
+
+    auto ownerType = AcquireType(owner);
+    if (!ownerType) {
+        return Result<ObjectHandle>::Failure(ownerType.Error());
+    }
+
+    const Span<const RuntimeSubobjectOps> ops = ownerType.Value().Ops().subobjects;
+    if (index >= ops.Size()) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<ObjectHandle>::Success(
+        *static_cast<const ObjectHandle*>(ops[index].field(*ownerObject.Value())));
+}
+
+Result<void> ConstructionContext::RestoreDeclaredSubobjectList(ObjectHandle owner) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return state;
+    }
+
+    const auto failWith = [this](ErrorCode error) noexcept {
+        (void)Fail(error);
+        return Result<void>::Failure(error);
+    };
+    auto ownerObject = Get<Object>(owner);
+    if (!ownerObject) {
+        return failWith(ownerObject.Error());
+    }
+
+    auto ownerType = AcquireType(owner);
+    if (!ownerType) {
+        return failWith(ownerType.Error());
+    }
+
+    const TypeLease& lease = ownerType.Value();
+    const Span<const RuntimeSubobjectOps> ops = lease.Ops().subobjects;
+    if (ops.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    auto listAccess =
+        FindAccess(registry_.Types(), lease, [](const RuntimeTypeOps& typeOps) noexcept {
+            return typeOps.subobjectListAccess;
+        });
+    if (!listAccess || listAccess.Value() == nullptr) {
+        return failWith(!listAccess ? listAccess.Error() : ErrorCode::InvalidArgument);
+    }
+
+    auto& list =
+        *static_cast<detail::ObjectRefArrayStorage*>(listAccess.Value()(*ownerObject.Value()));
+    Array<ObjectHandle> rebuilt(ObjectAllocator());
+    if (auto reserved = rebuilt.TryReserve(ops.Size() + list.size); !reserved) {
+        return failWith(reserved.Error());
+    }
+
+    for (const RuntimeSubobjectOps& entry : ops) {
+        (void)rebuilt.TryPushBack(
+            *static_cast<const ObjectHandle*>(entry.field(*ownerObject.Value())));
+    }
+
+    for (uint32 index = 0; index < list.size; ++index) {
+        bool declared = false;
+        for (usize scan = 0; scan < ops.Size(); ++scan) {
+            declared = declared || rebuilt[scan] == list.data[index];
+        }
+
+        if (!declared) {
+            (void)rebuilt.TryPushBack(list.data[index]);
+        }
+    }
+
+    if (auto writable = CheckStagedWrite(); !writable) {
+        return failWith(writable.Error());
+    }
+
+    if (auto assigned =
+            registry_.AssignArrayEdges(access_, owner, list, rebuilt.View(), transaction_, nullptr);
+        !assigned) {
+        return failWith(assigned.Error());
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace rocks

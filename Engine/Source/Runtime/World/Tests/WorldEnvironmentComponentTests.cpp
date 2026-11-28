@@ -1102,7 +1102,7 @@ TEST(Environment_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 5 — 태그 ER 31.4절 포함). 더하는 수는
+    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 8 — 태그 ER 31.4절 포함). 더하는 수는
     // 대기·안개 1, decal 9, 후처리 6, 반사 캡처 기반 8, Sphere·Box·Plane 1, 환경 Actor 0이다.
     const Expected expected[] = {
         {ObjectTypeIdOf<SkyAtmosphereComponent>(), ObjectTypeIdOf<SceneComponent>(), 13, false},
@@ -1116,13 +1116,13 @@ TEST(Environment_ReflectionAndSaveRoundTrip) {
          ObjectTypeIdOf<ReflectionCaptureComponent>(), 21, false},
         {ObjectTypeIdOf<PlaneReflectionCaptureComponent>(),
          ObjectTypeIdOf<ReflectionCaptureComponent>(), 21, false},
-        {ObjectTypeIdOf<SkyAtmosphere>(), ObjectTypeIdOf<Actor>(), 5, false},
-        {ObjectTypeIdOf<HeightFog>(), ObjectTypeIdOf<Actor>(), 5, false},
-        {ObjectTypeIdOf<DecalActor>(), ObjectTypeIdOf<Actor>(), 5, false},
-        {ObjectTypeIdOf<ReflectionCapture>(), ObjectTypeIdOf<Actor>(), 5, true},
-        {ObjectTypeIdOf<SphereReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
-        {ObjectTypeIdOf<BoxReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
-        {ObjectTypeIdOf<PlaneReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 5, false},
+        {ObjectTypeIdOf<SkyAtmosphere>(), ObjectTypeIdOf<Actor>(), 8, false},
+        {ObjectTypeIdOf<HeightFog>(), ObjectTypeIdOf<Actor>(), 8, false},
+        {ObjectTypeIdOf<DecalActor>(), ObjectTypeIdOf<Actor>(), 8, false},
+        {ObjectTypeIdOf<ReflectionCapture>(), ObjectTypeIdOf<Actor>(), 8, true},
+        {ObjectTypeIdOf<SphereReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 8, false},
+        {ObjectTypeIdOf<BoxReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 8, false},
+        {ObjectTypeIdOf<PlaneReflectionCapture>(), ObjectTypeIdOf<ReflectionCapture>(), 8, false},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);

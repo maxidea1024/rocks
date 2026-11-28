@@ -309,6 +309,8 @@ Result<void> GraphEncodeContext::BeginBaseline(const TypeSchema& schema, Span<co
 void GraphEncodeContext::EndBaseline() noexcept {
     baselines_.Clear();
     overrides_ = nullptr;
+    forcedFirst_ = Guid{};
+    forcedSecond_ = Guid{};
 }
 
 Result<bool> GraphEncodeContext::BeginStructBaseline() noexcept {
@@ -385,6 +387,10 @@ Result<bool> GraphEncodeContext::OmitCurrent(uint32 wire, Span<const uint8> payl
         }
 
         return Result<bool>::Success(header.Value().fieldCount == 0);
+    }
+
+    if (field.id != Guid{} && (field.id == forcedFirst_ || field.id == forcedSecond_)) {
+        return Result<bool>::Success(false);
     }
 
     if (overrides_ != nullptr) {
@@ -652,6 +658,22 @@ Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
                    why.reason != ClassDefaultsReason::ManualFields) {
             return Result<void>::Failure(defaults.Error());
         }
+
+        // 선언 subobject의 소유 구조 필드는 기준과 같아도 쓴다: 소유 객체의 Root 필드, 선언
+        // subobject의 부착 부모(Docs/Design/Prefab 10.4절).
+        const Guid root = schema.subobjects.Size() != 0 ? schema.subobjectRootField : Guid{};
+        Guid attach{};
+        if (schema.subobjectAttachField != Guid{}) {
+            auto origin = registry.GetOrigin(access, handle);
+            if (!origin) {
+                return Result<void>::Failure(origin.Error());
+            }
+
+            attach = origin.Value() == ObjectOrigin::ClassSubobject ? schema.subobjectAttachField
+                                                                    : Guid{};
+        }
+
+        context.SetForcedFields(root, attach);
     }
 
     RecordBuilder record(allocator, schema.id, schema.version, recordLimits);
@@ -791,6 +813,12 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator& allocator, ObjectReg
     // (노드 encode 순서와 무관한 결과 — 리플렉션 B9 5.1절).
     if (auto resolved = context.ResolveWeakDeferrals(); !resolved) {
         return Output::Failure(resolved.Error());
+    }
+
+    if (auto classified = ClassifyDeclaredSubobjects(nodes, context, registry, access,
+                                                     options.writeNodeTable, budget.Value());
+        !classified) {
+        return Output::Failure(classified.Error());
     }
 
     Array<uint32> outers(allocator);

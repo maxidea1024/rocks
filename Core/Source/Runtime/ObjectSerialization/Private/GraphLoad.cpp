@@ -599,6 +599,52 @@ Result<RecordReader> CurrentRecord(Allocator& allocator, LoadNode& node, Budget&
     return OpenRecord(allocator, node.migrated.View(), node.type, target, budget);
 }
 
+// 1단계: 선언 subobject 노드(graph 형식 3 — Docs/Design/Prefab 10.4절)의 타입·이름을 소유 노드
+// 타입의 펼친 subobject 표에서 채운다. 소유 노드는 앞의 객체 노드여야 하고(아니면 CorruptData),
+// 표에 SubobjectGuid가 없으면(클래스에서 사라졌다 — 하위호환 없음, 다시 저장한다) InvalidArgument,
+// 같은 (소유 노드, SubobjectGuid)가 두 번이면 CorruptData다. 이름은 소유 필드 도구 이름이다(소유
+// 노드의 lease가 Stage 수명 동안 그 byte를 붙잡는다). 객체 노드는 무동작이다.
+Result<void> ResolveDeclaredSubobjectNode(Array<LoadNode>& nodes, usize index) noexcept {
+    LoadNode& node = nodes[index];
+    if (node.kind != NodeKindDeclaredSubobject) {
+        return Result<void>::Success();
+    }
+
+    if (node.outer == 0 || node.outer > index || nodes[node.outer - 1].kind != NodeKindObject ||
+        !nodes[node.outer - 1].lease.IsValid()) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
+    for (usize previous = 0; previous < index; ++previous) {
+        if (nodes[previous].kind == NodeKindDeclaredSubobject &&
+            nodes[previous].outer == node.outer &&
+            nodes[previous].subobjectId == node.subobjectId) {
+            return Result<void>::Failure(ErrorCode::CorruptData);
+        }
+    }
+
+    const TypeSchema& owner = nodes[node.outer - 1].lease.Schema();
+    for (usize entry = 0; entry < owner.subobjects.Size(); ++entry) {
+        if (owner.subobjects[entry].id != node.subobjectId) {
+            continue;
+        }
+
+        node.type = owner.subobjects[entry].type;
+        node.subobjectIndex = static_cast<uint32>(entry);
+        for (const FieldSchema& field : owner.fields) {
+            if (field.id == node.subobjectId) {
+                const Span<const char> name =
+                    field.toolName.Size() != 0 ? field.toolName : field.name;
+                node.name = StringView(name.Data(), name.Size());
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    return Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
 // 1단계: 노드 하나를 검증하고 필드 색인·참조 token을 보관한다. 생성자를 실행하지 않는다. 노드 표의
 // 정체성 규칙(CheckNewObjectIdentity·형제 유일성 — identity)은 Record보다 먼저 본다(5.4절 노드 검사
 // 순서). Record에 없는 영속 필드는 오류가 아니며 생성자 값(기준)을 유지한다(누락 = 기준 —
@@ -975,6 +1021,10 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
     usize references = 0;
     usize nameBytes = 0;
     for (usize index = 0; index < nodes.Size(); ++index) {
+        if (auto resolved = ResolveDeclaredSubobjectNode(nodes, index); !resolved) {
+            return Output::Failure(resolved.Error());
+        }
+
         auto decoded = DecodeNode(allocator, types, nodes[index], static_cast<uint32>(index),
                                   data.budget, options, context, identity);
         if (!decoded) {

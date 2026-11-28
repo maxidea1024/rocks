@@ -446,7 +446,7 @@ protected:
 
 ### 5.1 형식
 
-예정 개정(2026-11-28, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절 — PF1): NodeTable 항목에 노드 종류 칸을 더한다. 종류 "선언 subobject"는 새 객체를 만들지 않고 "노드 k(소유 객체)의 SubobjectGuid g"를 가리키며, 복원 2a가 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶는다. A1 Exports도 같은 칸을 쓴다. 형식 버전은 3이 되고(하위호환 없음) 클래스 기본값 지문이 함께 바뀐다. 차이 기준 `GraphBaseline`에는 노드별 기준 제공자(subobject 노드 = subobject 기본값 레코드)를 더한다. 도달 검사의 암묵 간선(owner → 선언 subobject), 소유 목록 걸러내기·복원 재짜기, 2a의 새 실패(`InitSubobjectDefaults`)와 5.4절 실패 목록 개정은 [Prefab](Prefab/07-Pf1ClassSubobjects.ko.md) 10.4절이 정본이다. 아래는 지금(형식 2) 형식이다.
+개정(2026-11-28, [Prefab](Prefab/03-ArchetypeSpawnOverride.ko.md) 3.2절 — PF1c1에서 구현, 형식 3): NodeTable 항목에 노드 종류 칸을 더한다. 종류 "선언 subobject"는 새 객체를 만들지 않고 "노드 k(소유 객체)의 SubobjectGuid g"를 가리키며, 복원 2a가 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶는다. A1 Exports도 같은 칸을 쓴다. 형식 버전은 3이 되고(하위호환 없음) 클래스 기본값 지문이 함께 바뀐다. 차이 기준 `GraphBaseline`에는 노드별 기준 제공자(subobject 노드 = subobject 기본값 레코드)를 더한다. 선언 subobject 가리기(종류 1)·Root/부착 부모 강제 쓰기, 1단계 해석, 2a 묶기와 새 실패(`InitSubobjectDefaults`·표 이름 충돌), 2b 뒤 소유 목록 다시 짜기는 [Prefab](Prefab/07-Pf1ClassSubobjects.ko.md) 10.4절이 정본이다. 아래는 지금(형식 2) 형식이다.
 
 모든 정수 little-endian, Guid·문자열·Bytes는 Archive 규칙이다(정수는 고정 폭 — `Archive.h`).
 

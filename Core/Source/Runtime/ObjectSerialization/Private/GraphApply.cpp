@@ -301,10 +301,27 @@ Result<void> CreateNodes(ConstructionContext& transaction, Array<LoadNode>& node
 
     // 노드 표의 정체성 규칙은 1단계와 사전 확인이 끝냈으므로 Create는 할당·슬롯
     // 상한·종료·재진입으로만 실패한다. Outer는 언제나 앞 노드이거나 기준 Outer다.
+    // 객체 노드는 만든 직후 클래스 선언 subobject를 만든다(Docs/Design/Prefab 10.4절 — 그래프에
+    // 항목이 없는 새 subobject도 생긴다). 선언 subobject 노드는 새로 만들지 않고 소유 노드가 만든
+    // subobject에 묶인다(소유 노드는 앞 노드다). 선언 subobject 생성은 기본값 덮기 hook 실패로도
+    // 실패할 수 있다(트랜잭션을 그 오류로 고정한다).
+    ObjectHandle declared[MaxClassSubobjects];
     for (usize index = 0; index < nodes.Size(); ++index) {
         const uint32 outerIndex = nodes[index].outer;
         const ObjectHandle outer = outerIndex == 0 ? baseOuter : nodes[outerIndex - 1].handle;
-        auto created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
+        Result<ObjectHandle> created = Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+        if (nodes[index].kind == NodeKindDeclaredSubobject) {
+            created = transaction.DeclaredSubobject(outer, nodes[index].subobjectIndex);
+        } else {
+            created = transaction.Create<Object>(nodes[index].type, outer, nodes[index].name);
+            if (created) {
+                if (auto made = transaction.CreateDeclaredSubobjects(created.Value(), declared);
+                    !made) {
+                    return Result<void>::Failure(made.Error());
+                }
+            }
+        }
+
         if (!created) {
             return Result<void>::Failure(created.Error());
         }

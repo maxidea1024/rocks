@@ -629,9 +629,9 @@ TEST(Spline_ReflectionAndSaveRoundTrip) {
         CHECK(HasFlag(schema.flags, TypeFlags::WorldOnly));
         CHECK(!HasFlag(schema.flags, TypeFlags::Abstract));
         CHECK(schema.baseType == ObjectTypeIdOf<PrimitiveComponent>());
-        // PrimitiveComponent 54(bodySettings 포함 — CD2, Component tickSettings — A5c, 태그 — ER
-        // 31.4절) + 스플라인 10.
-        CHECK(schema.fields.Size() == 64);
+        // PrimitiveComponent 62(bodySettings 포함 — CD2, Component tickSettings — A5c, 태그 — ER
+        // 31.4절, 물리 이벤트 — PH4e·PH5d) + 스플라인 10.
+        CHECK(schema.fields.Size() == 72);
     }
 
     World& world = *fixture.world;

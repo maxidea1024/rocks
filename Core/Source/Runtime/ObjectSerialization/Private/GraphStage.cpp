@@ -173,6 +173,15 @@ Result<void> ObjectGraphStage::ApplyFields(ConstructionContext& transaction,
                                   data_->pendingEvents);
     }
 
+    // 선언 subobject를 가진 객체 노드의 소유 목록을 "선언 subobject + 저장된 나머지"로 다시
+    // 짠다(Docs/Design/Prefab 10.4절 — Record가 목록을 통째로 바꾼 뒤).
+    for (usize index = 0; applied && index < data_->envelope.nodes.Size(); ++index) {
+        const LoadNode& node = data_->envelope.nodes[index];
+        if (node.kind == NodeKindObject && node.lease.Schema().subobjects.Size() != 0) {
+            applied = transaction.RestoreDeclaredSubobjectList(node.handle);
+        }
+    }
+
     if (!applied) {
         (void)transaction.Fail(applied.Error());
         phase_ = Phase::Failed;

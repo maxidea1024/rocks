@@ -274,6 +274,64 @@ Result<bool> ResolveNodeTable(const Array<SaveNode>& nodes, const GraphEncodeCon
     return Result<bool>::Success(base != ObjectHandle{});
 }
 
+// 선언 subobject 노드를 가린다(Docs/Design/Prefab 10.4절): 생성 출처가 ClassSubobject이고 Outer가
+// 집합 안 노드(소유 객체)인 노드는 소유 노드 타입 표에서 이름(= 소유 필드 도구 이름)이 같은 항목의
+// SubobjectGuid를 subobjectId에 둔다 — 복원이 새로 만들지 않고 소유 노드가 만든 subobject에 묶는다.
+// 소유 객체 없이 저장한 선언 subobject는 객체 노드로 쓴다. NodeTable을 쓰지 않으면(writeNodeTable
+// 거짓) 선언 subobject를 표현할 수 없으므로 소유 객체와 함께 든 선언 subobject는 InvalidArgument다.
+Result<void> ClassifyDeclaredSubobjects(Array<SaveNode>& nodes, const GraphEncodeContext& context,
+                                        ObjectRegistry& registry, const ObjectAccessContext& access,
+                                        bool nodeTable, Budget& budget) noexcept {
+    if (auto spent = budget.Spend(nodes.Size()); !spent) {
+        return spent;
+    }
+
+    const StringView names = context.Names();
+    for (usize index = 0; index < nodes.Size(); ++index) {
+        const uint32 owner =
+            nodes[index].outer != ObjectHandle{} ? context.LocalOf(nodes[index].outer) : 0;
+        if (owner == 0 || nodes[owner - 1].lease.Schema().subobjects.Size() == 0) {
+            continue;
+        }
+
+        auto origin = registry.GetOrigin(access, nodes[index].handle);
+        if (!origin) {
+            return Result<void>::Failure(origin.Error());
+        }
+
+        if (origin.Value() != ObjectOrigin::ClassSubobject) {
+            continue;
+        }
+
+        if (!nodeTable) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StringView name(names.Data() + nodes[index].nameOffset, nodes[index].nameBytes);
+        const TypeSchema& schema = nodes[owner - 1].lease.Schema();
+        for (const SubobjectSchema& entry : schema.subobjects) {
+            for (const FieldSchema& field : schema.fields) {
+                if (field.id != entry.id) {
+                    continue;
+                }
+
+                const Span<const char> fieldName =
+                    field.toolName.Size() != 0 ? field.toolName : field.name;
+                if (StringView(fieldName.Data(), fieldName.Size()) == name) {
+                    nodes[index].subobjectId = entry.id;
+                }
+            }
+        }
+
+        // 표에 없는 이름의 ClassSubobject는 정합성 위반이다(생성 규칙이 표 이름으로 만든다).
+        if (nodes[index].subobjectId == Guid{}) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 // header·NodeTable·Record를 출력 하나로 쓴다. outers가 비어 있으면 NodeTable 없이 쓴다. Record를
 // 쓰기 직전 출력 위치 + 길이 prefix가 그 Record의 출력 시작이고, 그 노드의 외부 참조 위치(Record
 // offset)에 더해 출력 offset으로 바꾼다.
@@ -293,15 +351,24 @@ Result<Array<uint8>> WriteGraph(Allocator& allocator, const Array<SaveNode>& nod
         }
     }
 
+    // 노드 항목: 종류 byte 뒤 객체는 {타입, outer, 이름}, 선언 subobject는 {SubobjectGuid, 소유
+    // 노드, 빈 이름}이다(graph 형식 3 — Docs/Design/Prefab 10.4절).
     for (usize index = 0; written && nodeTable && index < nodes.Size(); ++index) {
-        written = output.WriteGuid(nodes[index].type);
+        const bool declared = nodes[index].subobjectId != Guid{};
+        written = output.WriteU8(declared ? NodeKindDeclaredSubobject : NodeKindObject);
+        if (written) {
+            written = output.WriteGuid(declared ? nodes[index].subobjectId : nodes[index].type);
+        }
+
         if (written) {
             written = output.WriteU32(outers[index]);
         }
 
         if (written) {
-            written = output.WriteString(
-                StringView(names.Data() + nodes[index].nameOffset, nodes[index].nameBytes));
+            written =
+                output.WriteString(declared ? StringView{}
+                                            : StringView(names.Data() + nodes[index].nameOffset,
+                                                         nodes[index].nameBytes));
         }
     }
 

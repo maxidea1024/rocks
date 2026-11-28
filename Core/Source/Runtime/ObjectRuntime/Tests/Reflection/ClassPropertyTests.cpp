@@ -36,9 +36,11 @@ Result<Array<uint8>> SingleRecordGraph(Allocator& allocator, TypeId type,
     // 테스트는 wire 명세(graph v2 — Docs/Design/ObjectFoundations.ko.md 5.1절)로 직접 구성한다.
     // Save 구현의 판단을 재사용하지 않는다: header(formatVersion 2, flags 1 = NodeTable, 노드 1개,
     // 외부 참조 0), NodeTable 항목(타입, outer 0, 빈 이름), Bytes(Record).
-    if (!writer.WriteRaw({magic, 8}) || !writer.WriteU32(2) || !writer.WriteU32(1) ||
-        !writer.WriteU32(1) || !writer.WriteU32(0) || !writer.WriteGuid(type) ||
-        !writer.WriteU32(0) || !writer.WriteString({}) || !writer.WriteBytes(record)) {
+    // graph 형식 3: NodeTable 항목 앞에 노드 종류 byte(0 객체)가 온다.
+    if (!writer.WriteRaw({magic, 8}) || !writer.WriteU32(ObjectGraphFormatVersion) ||
+        !writer.WriteU32(1) || !writer.WriteU32(1) || !writer.WriteU32(0) || !writer.WriteU8(0) ||
+        !writer.WriteGuid(type) || !writer.WriteU32(0) || !writer.WriteString({}) ||
+        !writer.WriteBytes(record)) {
         return Result<Array<uint8>>::Failure(ErrorCode::OutOfMemory);
     }
     return Result<Array<uint8>>::Success(writer.TakeBytes());

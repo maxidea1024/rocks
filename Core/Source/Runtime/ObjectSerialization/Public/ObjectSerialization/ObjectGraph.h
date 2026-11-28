@@ -14,7 +14,9 @@ namespace rocks {
 // graph 형식 버전이다(Docs/Design/ObjectFoundations.ko.md 5.1절 graph v2). 클래스 기본값 지문의
 // "codec wire 버전"이 이것이다(Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드' — 바꾸면 모든
 // 지문이 바뀐다).
-inline constexpr uint32 ObjectGraphFormatVersion = 2;
+// 3(2026-11-28 — Docs/Design/Prefab 10.4절): NodeTable 항목 앞에 노드 종류 byte(0 객체, 1 선언
+// subobject)를 둔다.
+inline constexpr uint32 ObjectGraphFormatVersion = 3;
 
 // byte 한도는 파일/필드와 migration 결과 누계다. peak RAM은 소유 index·필드 색인·참조 token·output
 // 복사도 포함한다. work는 codec의 반복/복사 비용이며 신뢰된 ctor/accessor/migration/hook의 임의

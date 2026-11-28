@@ -110,12 +110,18 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
     }
 
     for (usize index = 0; nodeTable && index < result.nodes.Size(); ++index) {
+        auto kind = body.Value().ReadU8();
+        if (!kind) {
+            return Result<Envelope>::Failure(kind.Error());
+        }
+
         auto type = body.Value().ReadGuid();
         if (!type) {
             return Result<Envelope>::Failure(type.Error());
         }
 
-        if (type.Value() == Guid{}) {
+        if (type.Value() == Guid{} ||
+            (kind.Value() != NodeKindObject && kind.Value() != NodeKindDeclaredSubobject)) {
             return Result<Envelope>::Failure(ErrorCode::CorruptData);
         }
 
@@ -129,9 +135,21 @@ Result<Envelope> ReadEnvelope(Allocator& allocator, Span<const uint8> source,
             return Result<Envelope>::Failure(name.Error());
         }
 
-        result.nodes[index].type = type.Value();
-        result.nodes[index].outer = outer.Value();
-        result.nodes[index].name = name.Value();
+        LoadNode& node = result.nodes[index];
+        node.kind = kind.Value();
+        node.outer = outer.Value();
+        // 선언 subobject 항목은 타입 칸에 SubobjectGuid를 싣고 이름이 비어 있으며 소유 노드가 있다
+        // (1단계가 소유 노드 타입 표로 타입·이름을 채운다).
+        if (node.kind == NodeKindDeclaredSubobject) {
+            if (name.Value().ByteCount() != 0 || node.outer == 0) {
+                return Result<Envelope>::Failure(ErrorCode::CorruptData);
+            }
+
+            node.subobjectId = type.Value();
+        } else {
+            node.type = type.Value();
+            node.name = name.Value();
+        }
     }
 
     for (usize index = 0; index < result.nodes.Size(); ++index) {

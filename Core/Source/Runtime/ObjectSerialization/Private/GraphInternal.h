@@ -18,8 +18,14 @@ inline constexpr usize HeaderBytes = 24;
 inline constexpr uint32 NodeTableFlag = 1;
 inline constexpr uint32 BaseOuterFlag = 2;
 inline constexpr uint32 KnownFlags = NodeTableFlag | BaseOuterFlag;
-// NodeTable 항목 하나의 고정 byte(Guid 16 + outer 4 + 이름 길이 8 — 이름 byte는 따로)다.
-inline constexpr usize NodeEntryBytes = 28;
+// NodeTable 항목 하나의 고정 byte(종류 1 + Guid 16 + outer 4 + 이름 길이 8 — 이름 byte는 따로)다.
+inline constexpr usize NodeEntryBytes = 29;
+
+// NodeTable 노드 종류다(graph 형식 3 — Docs/Design/Prefab 10.4절). 객체 항목은 {타입, outer, 이름},
+// 선언 subobject 항목은 {SubobjectGuid, 소유 노드, 빈 이름}이고 새 객체를 만들지 않고 소유 노드가
+// 만든 subobject에 묶인다.
+inline constexpr uint8 NodeKindObject = 0;
+inline constexpr uint8 NodeKindDeclaredSubobject = 1;
 // Record 하나를 감싼 Bytes의 길이 prefix(8)와 Record header(44)다(노드마다 최소 byte).
 inline constexpr usize RecordPrefixBytes = 8;
 inline constexpr usize RecordHeaderBytes = 44;
@@ -274,9 +280,15 @@ struct LoadNode {
     }
 
     TypeId type{};
-    // 0 = 그래프 밖(BaseOuter면 기준 Outer, 아니면 Outer 없음), 1..자기 번호 − 1 = 노드.
+    // 0 = 그래프 밖(BaseOuter면 기준 Outer, 아니면 Outer 없음), 1..자기 번호 − 1 = 노드. 선언
+    // subobject 노드는 소유 노드다.
     uint32 outer = 0;
     StringView name{};
+    // 노드 종류(NodeKind*)다. 선언 subobject 노드는 subobjectId로 소유 노드 타입 표의 항목
+    // subobjectIndex를 가리키고, 1단계가 type·name을 그 항목에서 채운다.
+    uint8 kind = NodeKindObject;
+    Guid subobjectId{};
+    uint32 subobjectIndex = 0;
     uint32 version = 0;
     Span<const uint8> source;
     TypeLease lease;
