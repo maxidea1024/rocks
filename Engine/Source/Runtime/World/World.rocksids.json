@@ -584,6 +584,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::HitResult::elementIndex",
+      "id": "41bd7f21801043d689640bf501129078",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::HitResult::faceIndex",
       "id": "4f94062774cc4c2b8608da9a618b9cc9",
       "aliases": [],

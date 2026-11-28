@@ -88,7 +88,7 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 | `CylinderComponent`(CM3에서 더함) | 실린더 | CY2 — convex radius 정책(Cylinder 4.2절) |
 | `StaticMeshComponent`(D2b 뒤) | 메시 단순 충돌(compound) 또는 complex-as-simple 메시 | 어댑터 경계 4절, 쿠킹 형상은 6.5절 |
 
-- 형상은 `PrimitiveComponent`의 가상 `BuildCollisionGeometry(CollisionGeometryBuilder&)`로 얻는다(World 모듈, 값만 — Jolt 없음). Physics가 Jolt 형상으로 바꾼다.
+- 형상은 `PrimitiveComponent`의 가상 `BuildBodyGeometry(BodyGeometry&)`로 얻는다(World 모듈, 값만 — Jolt 없음). `BodyGeometry`는 원소(UE `FKShapeElem`) 목록이고 Physics가 원소마다 Jolt 형상을 만들어 묶는다(7.1.21절).
 - 같은 정의의 형상은 장면 안에서 공유한다(Jolt `RefConst<Shape>` — 키는 형상 종류·크기·convex radius 값). 메시 형상은 에셋 lease와 같이 산다(계획 16.4절 수명 순서).
 
 ## 2.5 운동 종류

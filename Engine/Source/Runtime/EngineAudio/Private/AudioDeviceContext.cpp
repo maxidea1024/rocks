@@ -915,10 +915,14 @@ audio::AudioVoiceParams AudioDeviceContext::ParamsFor(const Record& record,
     // 곱은 믹서 범위로 자른다(UE처럼 — PreparePlay·PublishParams가 범위 밖을 거부한다).
     const float stereo =
         playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
-    params.gain = ClampGain(
-        record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
-        record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(at) *
-        record.resume.At(at) * record.concurrencyScale * record.stealFader.At(frame));
+    params.gain =
+        ClampGain(record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
+                  record.focus.volume * record.resume.At(at) * record.concurrencyScale *
+                  record.stealFader.At(frame));
+    // 거리 감쇠 × 차폐 볼륨은 필터 뒤에 건다(UE GetDistanceAndOcclusionAttenuation — 3.45.5절).
+    params.attenuationGain =
+        math::Clamp(record.spatial.attenuationGain * record.occlusionVolume.At(at), 0.0f,
+                    audio::MaxAttenuationGain);
     // LPF는 공기 흡수·차폐·분류·재생 값의 최솟값, HPF는 최댓값이다(UE
     // FSoundSource::SetFilterFrequency — Audio.cpp:555–623).
     params.lowPassCutoffHz =

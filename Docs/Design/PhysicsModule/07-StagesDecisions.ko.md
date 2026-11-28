@@ -14,10 +14,10 @@
 | PH3 | (하위 단계 PH3a–PH3c — 7.1.6절) 질의(4장)와 필터 사상(6.1–6.3절 — CD3), `HitResult`·`OverlapResult` | PH2 | 4.4–4.5절 규칙 표 시험(채널·ObjectTypes·profile, 무시 목록, mobility, 시작 겹침, 정렬·자르기), PC02 |
 | PH4 | (하위 단계 PH4a–PH4e — 7.1.10절) `MoveComponent` sweep·침투 해소(5.1–5.2절), overlap(5.3절), hit(5.4절, sweep·시뮬레이션), probe(6.4절) | PH3, CR7(구독형 이벤트 — 없으면 가상 hook만) | UE 순서 시험(발행 순서·대칭 장부·재진입), pullback 수치 |
 | PH5 | 힘·속도·질량·잠듦 API(2.6–2.7절), DOF·CCD·body 값 사상(6.5절), 기본 물리 재질·결합 방식(6.6절) | PH2 | PA04·PA05와 API 왕복, 잠듦 이벤트 |
-| PH6 | weld(2.8절), 메시 단순 충돌·complex-as-simple(StaticMesh — D2b 뒤), 쿠킹 형상 너겟(계획 16.4절 cook — PC05) | PH2, StaticMesh 에셋(MA2b), 에셋 쿠킹 | weld 질량·질의 결과 컴포넌트, PC05 |
+| PH6 | (하위 단계 PH6a–PH6e — 7.1.20절) weld(2.8절), 메시 단순 충돌·complex-as-simple(StaticMesh — D2b 뒤), 쿠킹 형상 너겟(계획 16.4절 cook — PC05) | PH2, StaticMesh 에셋(MA2b), 에셋 쿠킹 | weld 질량·질의 결과 컴포넌트, PC05 |
 | (후속) | 캐릭터 이동(CM13), constraint 등(CM14), 지형 heightfield(CM18), ragdoll(CM7), 큰 월드 PhysicsRegion(계획 16.5절 — PC07), 플랫폼 결정성(PC04·PC08) | | |
 
-PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1–PH3)](07a-StageDetailsPH1-PH3.ko.md), PH4(7.1.10절 이후)는 [PH4](07b-StageDetailsPH4.ko.md)에 있다.
+PH1–PH3의 구현 세부(7.1.1–7.1.9절)는 [7.1 단계별 구현 세부(PH1–PH3)](07a-StageDetailsPH1-PH3.ko.md), PH4(7.1.10절 이후)는 [PH4](07b-StageDetailsPH4.ko.md), PH5(7.1.15절 이후)는 [PH5](07c-StageDetailsPH5.ko.md), PH6(7.1.20절 이후)는 [PH6](07d-StageDetailsPH6.ko.md)에 있다.
 
 ## 7.2 시험 원칙
 

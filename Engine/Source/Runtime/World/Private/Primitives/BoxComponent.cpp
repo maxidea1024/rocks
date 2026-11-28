@@ -53,10 +53,12 @@ Result<VolumeShape> BoxComponent::TryWorldVolumeShape() const noexcept {
         Vec3d(math::Abs(extent.x), math::Abs(extent.y), math::Abs(extent.z)));
 }
 
-bool BoxComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
-    geometry.kind = BodyGeometryKind::Box;
-    geometry.halfExtent = boxExtent_;
-    return true;
+Result<void> BoxComponent::BuildBodyGeometry(BodyGeometry& geometry) const noexcept {
+    return geometry.Add(BodyShapeElement::Box(boxExtent_));
+}
+
+bool BoxComponent::IsZeroExtent() const noexcept {
+    return boxExtent_ == Vec3d::Zero();
 }
 
 } // namespace rocks

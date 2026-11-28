@@ -72,8 +72,8 @@ struct SleepScene {
         BodyCreateDesc desc;
         desc.component = ObjectHandle{FakeRegistry, ++tags, FakeGeneration};
         desc.actor = desc.component;
-        desc.geometry.kind = BodyGeometryKind::Sphere;
-        desc.geometry.radius = SphereRadius;
+        const BodyShapeElement sphere = BodyShapeElement::Sphere(SphereRadius);
+        desc.geometry = Span<const BodyShapeElement>(&sphere, 1);
         desc.worldTransform.translation = Vec3d(static_cast<double>(tags) * BodySpacing, 0.0, 0.0);
         desc.motion = motion;
         desc.collision.collisionEnabled = CollisionEnabled::QueryAndPhysics;
@@ -229,10 +229,10 @@ TEST(Physics_SleepIgnoresSilentPaths) {
     CHECK(scene.Read(switched).awake);
     const PhysicsBodyHandle reshaped = scene.Sphere(asleep);
     scene.scene->ApplyBodyForce(reshaped, ZeroForce());
-    BodyGeometry larger;
+    BodyShapeElement larger;
     larger.kind = BodyGeometryKind::Sphere;
     larger.radius = LargerRadius;
-    CHECK(scene.scene->SetBodyGeometry(reshaped, larger));
+    CHECK(scene.scene->SetBodyGeometry(reshaped, Span<const BodyShapeElement>(&larger, 1)));
     CHECK(scene.scene->TakeWakeEvents().Size() == 0u);
 
     const PhysicsBodyHandle mover = scene.Sphere(awake, BodyMotion::Kinematic);

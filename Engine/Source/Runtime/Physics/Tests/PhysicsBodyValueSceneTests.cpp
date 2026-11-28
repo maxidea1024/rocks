@@ -139,12 +139,12 @@ struct ValueScene {
         }
     }
 
-    PhysicsBodyHandle Add(BodyGeometry geometry, const Transform& at, BodyMotion motion,
+    PhysicsBodyHandle Add(BodyShapeElement geometry, const Transform& at, BodyMotion motion,
                           const BodySettings& settings) noexcept {
         BodyCreateDesc desc;
         desc.component = ObjectHandle{FakeRegistry, ++tags, FakeGeneration};
         desc.actor = desc.component;
-        desc.geometry = geometry;
+        desc.geometry = Span<const BodyShapeElement>(&geometry, 1);
         desc.worldTransform = at;
         desc.motion = motion;
         desc.collision.collisionEnabled = CollisionEnabled::QueryAndPhysics;
@@ -156,7 +156,7 @@ struct ValueScene {
 
     PhysicsBodyHandle Sphere(const Vec3d& at, const BodySettings& settings,
                              BodyMotion motion = BodyMotion::Dynamic) noexcept {
-        BodyGeometry sphere;
+        BodyShapeElement sphere;
         sphere.kind = BodyGeometryKind::Sphere;
         sphere.radius = SphereRadius;
         Transform pose;
@@ -166,7 +166,7 @@ struct ValueScene {
 
     PhysicsBodyHandle Box(double half, const Vec3d& at, const BodySettings& settings,
                           BodyMotion motion = BodyMotion::Static) noexcept {
-        BodyGeometry box;
+        BodyShapeElement box;
         box.kind = BodyGeometryKind::Box;
         box.halfExtent = Vec3d(half, half, half);
         Transform pose;
@@ -175,7 +175,7 @@ struct ValueScene {
     }
 
     PhysicsBodyHandle Floor(const BodySettings& settings) noexcept {
-        BodyGeometry box;
+        BodyShapeElement box;
         box.kind = BodyGeometryKind::Box;
         box.halfExtent = Vec3d(FloorHalfExtent, FloorHalfExtent, FloorHalfThickness);
         Transform pose;
@@ -320,7 +320,7 @@ TEST(Physics_BodyInertiaScaleAndCenterOfMass) {
 
     // 질량 중심 이동(Rocks +Z 10 cm × scale 2): body 질량 중심이 그만큼 옮겨지고 Rocks Izz(Jolt
     // Y)에 m·dz²가 더해진다.
-    BodyGeometry sphere;
+    BodyShapeElement sphere;
     sphere.kind = BodyGeometryKind::Sphere;
     sphere.radius = SphereRadius;
     Transform pose;
@@ -476,7 +476,7 @@ TEST(Physics_BodyInertiaScaleOnUnevenBox) {
     REQUIRE(scene.scene);
     BodySettings scaled(scene.allocator);
     scaled.inertiaTensorScale = InertiaScale;
-    BodyGeometry box;
+    BodyShapeElement box;
     box.kind = BodyGeometryKind::Box;
     box.halfExtent = UnevenHalfExtent;
     const PhysicsBodyHandle body = scene.Add(box, Transform(), BodyMotion::Dynamic, scaled);
@@ -546,7 +546,7 @@ TEST(Physics_ShiftedBoxKeepsOpposingFaceNormal) {
     shifted.centerOfMassOffset = ComOffset;
     for (const BodySettings* settings : {&plain, &shifted}) {
         const double offsetY = settings == &plain ? 0.0 : EdgeBoxSpacing;
-        BodyGeometry box;
+        BodyShapeElement box;
         box.kind = BodyGeometryKind::Box;
         box.halfExtent = Vec3d(EdgeBoxHalf, EdgeBoxHalf, EdgeBoxHalf);
         Transform pose;
