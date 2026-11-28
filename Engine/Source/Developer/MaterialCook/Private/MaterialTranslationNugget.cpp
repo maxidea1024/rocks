@@ -21,6 +21,7 @@ constexpr uint8 LastParameterKind = static_cast<uint8>(material::IrParameterKind
 constexpr uint8 LastTextureSource = static_cast<uint8>(material::IrTextureSource::Parameter);
 constexpr uint8 LastTextureSampler = static_cast<uint8>(material::IrTextureSampler::SharedClamp);
 constexpr uint8 LastSeverity = static_cast<uint8>(nodegraph::GraphDiagnosticSeverity::Error);
+constexpr uint8 LastScope = static_cast<uint8>(material::ParameterScopeKind::LayerBlend);
 
 void WriteGuid(ByteWriter& writer, Guid value) noexcept {
     writer.WriteLittleEndian<uint64>(value.high);
@@ -232,6 +233,42 @@ Result<void> WriteParts(const MaterialTranslationValue& value, uint32 index,
         break;
     case 12:
         writer.WriteLittleEndian<uint32>(value.consultedTarget);
+        break;
+    case 13:
+        if (auto counted = WriteCount(writer, value.origins.Size()); !counted) {
+            return counted;
+        }
+
+        for (const material::IrParameterOrigin& origin : value.origins) {
+            WriteGuid(writer, origin.identity);
+            WriteGuid(writer, origin.owner);
+            WriteGuid(writer, origin.parameterId);
+            writer.WriteU8(static_cast<uint8>(origin.scope));
+            WriteGuid(writer, origin.layer);
+            if (auto counted = WriteCount(writer, origin.callPath.Size()); !counted) {
+                return counted;
+            }
+
+            for (Guid call : origin.callPath) {
+                WriteGuid(writer, call);
+            }
+
+            if (auto text = WriteText(writer, origin.name.View()); !text) {
+                return text;
+            }
+        }
+
+        break;
+    case 14:
+        if (auto counted = WriteCount(writer, value.collections.Size()); !counted) {
+            return counted;
+        }
+
+        for (const material::IrCollection& collection : value.collections) {
+            WriteGuid(writer, collection.asset);
+            writer.WriteLittleEndian<uint32>(collection.vectors);
+        }
+
         break;
     default:
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -466,6 +503,75 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
     case 12:
         out.consultedTarget = reader.ReadLittleEndian<uint32>();
         break;
+    case 13: {
+        uint32 count = 0;
+        // 정체·소유·ParameterId·scope·layer·경로 수·이름 길이.
+        constexpr usize OriginBytes = 16 * 4 + 1 + 4 + 4;
+        if (!ReadCount(reader, OriginBytes, count)) {
+            return false;
+        }
+
+        for (uint32 at = 0; at < count; ++at) {
+            material::IrParameterOrigin origin(out.origins.GetAllocator());
+            origin.identity = ReadGuid(reader);
+            origin.owner = ReadGuid(reader);
+            origin.parameterId = ReadGuid(reader);
+            const uint8 scope = reader.ReadU8();
+            origin.layer = ReadGuid(reader);
+            uint32 calls = 0;
+            constexpr usize CallBytes = 16;
+            if (reader.Failed() || scope > LastScope || !ReadCount(reader, CallBytes, calls)) {
+                return false;
+            }
+
+            origin.scope = static_cast<material::ParameterScopeKind>(scope);
+            for (uint32 call = 0; call < calls; ++call) {
+                const Guid id = ReadGuid(reader);
+                if (reader.Failed()) {
+                    return false;
+                }
+
+                if (!origin.callPath.TryPushBack(id)) {
+                    outOfMemory = true;
+                    return false;
+                }
+            }
+
+            if (!ReadText(reader, origin.name, outOfMemory)) {
+                return false;
+            }
+
+            if (!out.origins.TryPushBack(Move(origin))) {
+                outOfMemory = true;
+                return false;
+            }
+        }
+
+        break;
+    }
+    case 14: {
+        uint32 count = 0;
+        constexpr usize CollectionBytes = 16 + 4;
+        if (!ReadCount(reader, CollectionBytes, count)) {
+            return false;
+        }
+
+        for (uint32 at = 0; at < count; ++at) {
+            material::IrCollection collection;
+            collection.asset = ReadGuid(reader);
+            collection.vectors = reader.ReadLittleEndian<uint32>();
+            if (reader.Failed()) {
+                return false;
+            }
+
+            if (!out.collections.TryPushBack(collection)) {
+                outOfMemory = true;
+                return false;
+            }
+        }
+
+        break;
+    }
     default:
         return false;
     }
@@ -494,6 +600,37 @@ bool Consistent(const MaterialTranslationValue& value) noexcept {
     for (const material::MaterialConstantMember& member : value.members) {
         if (member.step >= value.steps.Size() || member.vector >= value.floatVectors ||
             member.firstComponent + member.components > material::MaxIrComponents) {
+            return false;
+        }
+    }
+
+    // 출처는 정체 순이고(중복 없음) 수 파라미터·파라미터 텍스처마다 하나 있다(12.8절 MS3d2).
+    for (usize index = 1; index < value.origins.Size(); ++index) {
+        const Guid left = value.origins[index - 1].identity;
+        const Guid right = value.origins[index].identity;
+        if (!(left.high < right.high || (left.high == right.high && left.low < right.low))) {
+            return false;
+        }
+    }
+
+    const auto hasOrigin = [&](Guid identity) noexcept {
+        for (const material::IrParameterOrigin& origin : value.origins) {
+            if (origin.identity == identity) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    for (const material::IrParameter& parameter : value.parameters) {
+        if (!hasOrigin(parameter.id)) {
+            return false;
+        }
+    }
+
+    for (const material::IrTexture& texture : value.textures) {
+        if (texture.source == material::IrTextureSource::Parameter && !hasOrigin(texture.id)) {
             return false;
         }
     }
@@ -545,6 +682,8 @@ Result<void> MakeMaterialTranslationValue(NamePool& names,
     out.locations.Clear();
     out.diagnostics.Clear();
     out.userSceneTextures.Clear();
+    out.origins.Clear();
+    out.collections.Clear();
     if (auto copied = out.members.TryAppend(constants.members.View()); !copied) {
         return copied;
     }
@@ -630,6 +769,21 @@ Result<void> MakeMaterialTranslationValue(NamePool& names,
     }
 
     out.consultedTarget = translation.consultedTarget;
+    for (const material::IrParameterOrigin& origin : module.ParameterOrigins()) {
+        material::IrParameterOrigin copy(out.origins.GetAllocator());
+        if (auto copied = material::CopyIrParameterOrigin(origin, copy); !copied) {
+            return copied;
+        }
+
+        if (auto pushed = out.origins.TryPushBack(Move(copy)); !pushed) {
+            return pushed;
+        }
+    }
+
+    if (auto copied = out.collections.TryAppend(module.Collections()); !copied) {
+        return copied;
+    }
+
     return Result<void>::Success();
 }
 
@@ -677,6 +831,8 @@ Result<void> ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
     out.locations.Clear();
     out.diagnostics.Clear();
     out.userSceneTextures.Clear();
+    out.origins.Clear();
+    out.collections.Clear();
     for (uint32 index = 1; index < MaterialTranslationValueParts; ++index) {
         bool outOfMemory = false;
         if (parts[index].id != index ||
@@ -690,10 +846,19 @@ Result<void> ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
                            : Result<void>::Failure(ErrorCode::CorruptData);
 }
 
-Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) noexcept {
+Result<Sha256Digest> MaterialLayoutSignature(const MaterialTranslationValue& value) noexcept {
     Array<uint8> layout(value.members.GetAllocator());
     if (auto written = WriteLayoutSignature(value, layout); !written) {
         return Result<Sha256Digest>::Failure(written.Error());
+    }
+
+    return Result<Sha256Digest>::Success(Sha256::Hash(layout.View()));
+}
+
+Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) noexcept {
+    auto signature = MaterialLayoutSignature(value);
+    if (!signature) {
+        return signature;
     }
 
     Array<uint8> head(value.members.GetAllocator());
@@ -712,7 +877,7 @@ Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) 
         return Result<Sha256Digest>::Failure(written.Error());
     }
 
-    const Sha256Digest layoutSignature = Sha256::Hash(layout.View());
+    const Sha256Digest layoutSignature = signature.Value();
     Sha256 hasher;
     hasher.Update(head.View());
     hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>(value.source.Data()),

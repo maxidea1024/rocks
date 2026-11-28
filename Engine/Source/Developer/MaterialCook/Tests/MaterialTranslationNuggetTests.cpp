@@ -4,6 +4,7 @@
 #include <MaterialCompiler/MaterialConstants.h>
 #include <MaterialCompiler/MaterialShaderTraitsBuilder.h>
 #include <MaterialCompiler/MaterialSourceWriter.h>
+#include <MaterialCook/MaterialArtifactBuild.h>
 #include <MaterialCook/MaterialCookCatalog.h>
 #include <MaterialCook/MaterialCookSources.h>
 #include <MaterialCook/MaterialTranslationKey.h>
@@ -336,6 +337,95 @@ TEST(MaterialCook_TranslationValueRoundTrip) {
     CHECK(ReadMaterialTranslationNugget(parts.View(), read).Error() == ErrorCode::CorruptData);
     CHECK(ReadMaterialTranslationNugget(Span<const NuggetValue>(parts.Data(), 3), read).Error() ==
           ErrorCode::CorruptData);
+}
+
+// 값 v2(12.8절 MS3d2): 파라미터 출처·컬렉션 part 왕복, 출처 누락·scope 범위 밖은 손상, artifact
+// 변환(명령 연산·파라미터 번호·칸·셰이더 집합 id·layout 서명), links 길이 불일치는 InvalidArgument.
+TEST(MaterialCook_TranslationValueOriginsAndArtifact) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    GraphFixture fixture(env);
+    BuildParameterGraph(fixture, FirstDefault);
+    const MaterialTraitsDesc traits = Traits();
+    MaterialTranslation translation(env.allocator);
+    REQUIRE(Translate(fixture, traits, translation));
+    REQUIRE(translation.succeeded);
+    MaterialGeneratedSource source(env.allocator);
+    REQUIRE(WriteMaterialSource(env.allocator, translation.module, traits, TestAssetId, MainGraphId,
+                                source));
+    MaterialConstants constants(env.allocator);
+    REQUIRE(BuildMaterialConstants(translation.module, constants));
+    MaterialShaderTraits shaderTraits(env.allocator);
+    REQUIRE(
+        MakeMaterialShaderTraits(translation, traits, MaterialQualityLevel::None, shaderTraits));
+    MaterialTranslationValue value(env.allocator);
+    REQUIRE(MakeMaterialTranslationValue(env.names, translation, source, constants,
+                                         Move(shaderTraits), TestAssetId, value));
+    REQUIRE(value.parameters.Size() == 1);
+    REQUIRE(value.origins.Size() == 1);
+    CHECK(value.origins[0].identity == value.parameters[0].id);
+    CHECK(value.origins[0].name.View() == StringView("Gloss"));
+    CHECK(value.origins[0].scope == ParameterScopeKind::Global);
+
+    Array<NuggetValue> parts(env.allocator);
+    REQUIRE(WriteMaterialTranslationNugget(value, parts));
+    REQUIRE(parts.Size() == MaterialTranslationValueParts);
+    MaterialTranslationValue read(env.allocator);
+    REQUIRE(ReadMaterialTranslationNugget(parts.View(), read));
+    REQUIRE(read.origins.Size() == 1);
+    CHECK(read.origins[0].parameterId == value.origins[0].parameterId);
+    CHECK(read.origins[0].name.View() == StringView("Gloss"));
+
+    // 출처 없는 파라미터와 범위 밖 scope는 손상이다.
+    CHECK(ReadEdited(env, parts.View(), [](MaterialTranslationValue& probe) noexcept {
+              probe.origins.Clear();
+          }) == ErrorCode::CorruptData);
+    Array<NuggetValue> badScope(env.allocator);
+    {
+        MaterialTranslationValue probe(env.allocator);
+        REQUIRE(ReadMaterialTranslationNugget(parts.View(), probe));
+        probe.origins[0].scope = static_cast<ParameterScopeKind>(0xff);
+        REQUIRE(WriteMaterialTranslationNugget(probe, badScope));
+    }
+
+    MaterialTranslationValue sink(env.allocator);
+    CHECK(ReadMaterialTranslationNugget(badScope.View(), sink).Error() == ErrorCode::CorruptData);
+
+    // artifact: 파라미터 하나를 Material::parameters 3번에 잇는다.
+    constexpr uint32 ParameterSlot = 3;
+    const uint32 parameterLinks[] = {ParameterSlot};
+    MaterialArtifactLinks links;
+    links.parameters = parameterLinks;
+    MaterialArtifact artifact(env.allocator);
+    REQUIRE(MakeMaterialArtifact(read, env.names, links, artifact));
+    REQUIRE(artifact.program.Size() == read.steps.Size());
+    REQUIRE(artifact.constants.Size() == read.members.Size());
+    CHECK(artifact.floatVectors == read.floatVectors);
+    bool parameterSeen = false;
+    for (const MaterialConstantInstruction& instruction : artifact.program) {
+        if (instruction.op == MaterialConstantOp::Parameter) {
+            parameterSeen = true;
+            CHECK(instruction.immediates[3] == ParameterSlot);
+            CHECK(instruction.scalar == MaterialConstantScalar::Float);
+        }
+    }
+
+    CHECK(parameterSeen);
+    REQUIRE(artifact.parameters.Size() == 1);
+    CHECK(artifact.parameters[0] == ParameterSlot);
+    auto setId = MaterialShaderSetId(read);
+    auto layout = MaterialLayoutSignature(read);
+    REQUIRE(setId);
+    REQUIRE(layout);
+    CHECK(artifact.shaderSetId == setId.Value());
+    CHECK(artifact.layoutSignature == layout.Value());
+    CHECK(!artifact.traits.IsEmpty());
+
+    // links 길이가 값과 다르면 InvalidArgument다.
+    MaterialArtifactLinks empty;
+    MaterialArtifact rejected(env.allocator);
+    CHECK(MakeMaterialArtifact(read, env.names, empty, rejected).Error() ==
+          ErrorCode::InvalidArgument);
 }
 
 } // namespace material_translation_nugget_tests_file

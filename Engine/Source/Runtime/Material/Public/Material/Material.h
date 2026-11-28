@@ -6,7 +6,10 @@
 #include <Material/MaterialBase.h>
 #include <Material/MaterialPreviewSettings.h>
 #include <Material/ParameterCollection.h>
+#include <MaterialSchema/MaterialArtifact.h>
 #include <MaterialSchema/MaterialAssetReference.h>
+#include <MaterialSchema/MaterialFormatArtifact.h>
+#include <MaterialSchema/MaterialParameterInfo.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <MaterialSchema/VertexInputUsage.h>
 #include <NodeGraph/GraphDocument.h>
@@ -35,7 +38,8 @@ public:
           graph(allocator), layout(allocator),
 #endif
           usage(allocator), parameterCollections(allocator), referencedTextures(allocator),
-          renderTracePhysicalMaterials(allocator) {
+          renderTracePhysicalMaterials(allocator), parameters(allocator), artifacts(allocator),
+          formatArtifacts(allocator) {
     }
 
     // ---- 에디터 데이터 ----
@@ -70,6 +74,16 @@ public:
     // TODO(MPQ-VirtualizedGeometry): 가상화 geometry 경로용 대체 머티리얼(UE
     // NaniteOverrideMaterial).
     ROCKS_PROPERTY() material::MaterialAssetReference virtualizedGeometryOverride;
+
+    // ---- 쿠킹 데이터(12.4절, 12.8절 MS3d2) — 에디터 패키지에서는 빈다, 쿠킹 처리기가 쓰기 동안만
+    // 채운다 ----
+    // 머티리얼 파라미터 표다(ParameterKey 순 — 모든 artifact의 파라미터 합집합, UE cached
+    // expression data의 파라미터 목록).
+    ROCKS_PROPERTY() Array<material::MaterialParameterInfo> parameters;
+    // 번역 결과마다 하나(정규 byte가 같은 결과는 하나)다.
+    ROCKS_PROPERTY() Array<material::MaterialArtifact> artifacts;
+    // (셰이더 형식, 품질) → artifact 번호다(대상 순).
+    ROCKS_PROPERTY() Array<material::MaterialFormatArtifact> formatArtifacts;
 };
 
 } // namespace rocks

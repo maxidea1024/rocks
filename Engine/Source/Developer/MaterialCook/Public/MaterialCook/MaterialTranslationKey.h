@@ -24,7 +24,7 @@ namespace rocks {
 // 번역 너겟 정체성이다(IR·생성 규칙·값 배치가 바뀌면 버전 Guid를 바꾼다 — 모든 키가 바뀐다).
 inline constexpr NuggetProcessorId MaterialTranslationNuggetId{
     Guid{0x524f434b4d415452ull, 0x0000000000000001ull},
-    Guid{0x524f434b4d41544eull, 0x0000000000000001ull}};
+    Guid{0x524f434b4d41544eull, 0x0000000000000002ull}};
 
 // 번역 너겟 bucket이다(소문자 규칙 — UE "MaterialTranslation" 버킷 대응, 12.1절).
 inline constexpr char MaterialTranslationBucket[] = "material_translation";

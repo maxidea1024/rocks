@@ -5,7 +5,9 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/String.h>
 #include <MaterialCompiler/MaterialConstantMember.h>
+#include <MaterialCompiler/MaterialIrCollection.h>
 #include <MaterialCompiler/MaterialIrParameter.h>
+#include <MaterialCompiler/MaterialIrParameterOrigin.h>
 #include <MaterialCompiler/MaterialIrTexture.h>
 #include <MaterialCompiler/MaterialIrValue.h>
 #include <MaterialCompiler/MaterialSourceLocation.h>
@@ -23,7 +25,7 @@ struct MaterialTranslationValue {
     explicit MaterialTranslationValue(Allocator& allocator) noexcept
         : source(allocator), members(allocator), steps(allocator), parameters(allocator),
           textures(allocator), traits(allocator), locations(allocator), diagnostics(allocator),
-          userSceneTextures(allocator) {
+          userSceneTextures(allocator), origins(allocator), collections(allocator) {
     }
 
     // part 1 — 생성 원문(/Engine/Generated/Material.rsh 텍스트).
@@ -51,6 +53,11 @@ struct MaterialTranslationValue {
     Array<String> userSceneTextures;
     // part 12 — 번역이 읽은 번역 대상 항목.
     material::MaterialTargetFieldMask consultedTarget = material::NoMaterialTargetFields;
+    // part 13 — 수 파라미터·파라미터 텍스처의 출처(정체 순 — 12.8절 MS3d2, 처리기가 ParameterKey·
+    // 노드 hook 기본값을 찾는다).
+    Array<material::IrParameterOrigin> origins;
+    // part 14 — 컬렉션(모듈 순 — MaterialCollection<k>).
+    Array<material::IrCollection> collections;
 };
 
 } // namespace rocks
