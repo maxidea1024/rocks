@@ -126,5 +126,5 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 - `autoWeld`이고 Movable이며 질의 전용이 아니고 게임 World이며 부모 primitive에 body가 있으면, 자기 body를 만들지 않고 부모 body의 compound에 자기 형상을 상대 transform으로 더한다(UE `BodyInstance.cpp:1525–1541`·`1940–2027`).
 - 부착(`AttachTo`)·떼기(`Detach`)·시스템 상태 파괴 때 weld·unweld 한다(UE `SceneComponent.cpp:2625–2631`·`2683–2685`).
 - 루트가 Kinematic이면 자식의 `simulatePhysics`를 끄고 weld하지 않는다(UE `PrimitiveComponentPhysics.cpp:1040–1119`). 루트가 시뮬레이션으로 바뀌면 자식을 붙인다(`ApplyWeldOnChildren`).
-- Jolt 구현: 부모 body 형상을 `MutableCompoundShape`로 두고 자식 형상을 추가·제거한다(질량 다시 계산). 질의 결과의 `Component`는 하위 형상 ID로 원래 자식 컴포넌트를 찾는다(UE `ShapeToBodiesMap`).
+- Jolt 구현: 루트 body 칸의 부분 표에 자식을 더하고 `StaticCompoundShape`를 다시 만든다(질량은 부분마다 계산해 합침 — 7.1.22절). 질의·접촉 결과의 `Component`는 잎 형상 user data의 부분 번호로 원래 자식 컴포넌트를 찾는다(UE `ShapeToBodiesMap`).
 - weld는 PH6 단계다(7.1절). 그 전에는 `autoWeld`를 무시하고 경고 없이 자기 body를 만든다(설정 값만 보존).
