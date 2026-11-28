@@ -602,6 +602,22 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 선언 subobject 표의 타입은 먼저 등록된 클래스여야 한다(Prefab 10.6절 — 의존 계수로 잡아
+        // subobject 기본값 레코드가 낡지 않게 한다, struct 필드 타입과 같은 규칙).
+        for (const SubobjectSchema& entry : schema.subobjects) {
+            const Record* target = FindLocked(entry.type);
+            if (target == nullptr) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
+            }
+
+            if (target->kind != TypeKind::Class ||
+                target->dependents == NumericLimits<uint32>::Max()) {
+                return Result<TypeRegistrationToken>::Failure(target->kind != TypeKind::Class
+                                                                  ? ErrorCode::TypeMismatch
+                                                                  : ErrorCode::Overflow);
+            }
+        }
+
         // 변경 통지 대상 수다(Docs/Design/ChangeNotification.ko.md CN-D2): 기반의 대상(번호 그대로)
         // 뒤에 자기 Notify 필드(파생 schema가 다시 싣는 상속 필드는 기반 몫)와 자기 Notify 함수가
         // 온다. 대상 ID는 겹칠 수 없다(번호 조회가 모호해진다).
@@ -782,6 +798,21 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->ops.functions = functionOps;
     record->ops.events = eventOps;
     record->ops.subobjects = subobjectOps;
+    if (subobjectBlock.count != 0) {
+        // mutating_이 등록·해제를 막으므로 위에서 확인한 subobject 타입 레코드가 그대로 있다.
+        platform::LockGuard lock(gate_);
+        auto** types = reinterpret_cast<Record**>(static_cast<uint8*>(memory.Value()) +
+                                                  subobjectBlock.typesOffset);
+        for (usize index = 0; index < subobjectBlock.count; ++index) {
+            types[index] = FindLocked(schema.subobjects[index].type);
+            if (types[index] == nullptr) {
+                platform::Fatal(
+                    "TypeRegistry subobject type dependency vanished during registration");
+            }
+        }
+
+        record->subobjectTypes = types;
+    }
     record->base = base;
     if (notifyCount != 0) {
         record->notifyIds =
@@ -831,6 +862,11 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     PublishLocked(record, growth);
     if (base) {
         ++base->dependents;
+    }
+
+    for (usize index = 0; record->subobjectTypes != nullptr && index < subobjectBlock.count;
+         ++index) {
+        ++record->subobjectTypes[index]->dependents;
     }
 
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {

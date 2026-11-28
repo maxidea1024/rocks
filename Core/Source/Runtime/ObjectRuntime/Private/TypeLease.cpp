@@ -525,11 +525,16 @@ TypeLease::ResolveSubobjectDefaults(SubobjectDefaultsBuilder builder, void* user
         return settled(*state);
     }
 
-    ClassDefaultsDraft drafts[MaxClassSubobjects];
+    // 초안은 표 크기만큼 TypeRegistry allocator에서 받는다(스택에 표 상한만큼 두지 않는다).
+    Array<ClassDefaultsDraft> drafts(owner.allocator_);
+    if (auto resized = drafts.TryResize(count); !resized) {
+        return Out::Failure(resized.Error());
+    }
+
     ClassDefaultsDiagnostic local;
     local.type = record->schema.id;
     platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, self);
-    auto built = builder(user, *this, owner, Span<ClassDefaultsDraft>(drafts, count), local);
+    auto built = builder(user, *this, owner, Span<ClassDefaultsDraft>(drafts.Data(), count), local);
     platform::AtomicStore<platform::MemoryOrder::Relaxed>(&owner.defaultsBuilder_, uint64{0});
     if (!built) {
         local.error = built.Error();
@@ -569,7 +574,12 @@ TypeLease::ResolveSubobjectDefaults(SubobjectDefaultsBuilder builder, void* user
         }
     }
 
-    auto memory = owner.allocator_.Allocate(total, alignof(SubobjectDefaultsState));
+    static_assert(IsTriviallyDestructibleV<ClassDefaults>,
+                  "Subobject defaults entries are released without running destructors");
+    constexpr usize BlockAlignment = alignof(SubobjectDefaultsState) > alignof(ClassDefaults)
+                                         ? alignof(SubobjectDefaultsState)
+                                         : alignof(ClassDefaults);
+    auto memory = owner.allocator_.Allocate(total, BlockAlignment);
     if (!memory) {
         if (diagnostic != nullptr) {
             *diagnostic = local;

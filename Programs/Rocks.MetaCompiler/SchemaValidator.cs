@@ -1430,6 +1430,17 @@ internal static partial class SchemaValidator
                     "Mark the class ROCKS_CLASS(WorldOnly) or move the member to a World-side type.").At(worldOnlyNative.Site);
             }
 
+            // 선언 subobject 타입(이 모듈 클래스)은 소유 클래스보다 먼저 등록한다(Docs/Design/Prefab 10.6절 —
+            // 등록이 subobject 타입 레코드를 의존으로 잡는다, struct 필드 타입과 같다).
+            foreach (FieldModel field in model.OwnFields.Where(field => field.Spec.Subobject))
+            {
+                if (field.Reference is string target && classes.TryGetValue(target, out ClassModel? subobjectType) && !subobjectType.IsStruct &&
+                    !subobjectType.IsEnum)
+                {
+                    Order(subobjectType);
+                }
+            }
+
             visiting.Remove(model.Name);
             visited.Add(model.Name);
             ordered.Add(model);

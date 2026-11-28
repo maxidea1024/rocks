@@ -378,7 +378,7 @@ TEST(DefaultSubobject_RecordIsDeterministic) {
     CHECK(same(entries.Value()[2].Record(editor), partDefaults.Value()->Record(editor)));
 }
 
-TEST(DefaultSubobject_TableReferencesEqualBaseline) {
+TEST(DefaultSubobject_RevertedHookValueIsSaved) {
     SystemAllocator allocator;
     Fixture fixture(allocator);
     REQUIRE(fixture.Start());
@@ -431,6 +431,34 @@ TEST(DefaultSubobject_NewClassSubobjectAppearsOnLoad) {
     const Fixture::View after = fixture.Read(loaded.Value().Handle());
     // 그래프에 없던 plain도 만들어져 목록에 든다.
     CHECK(!after.plain.IsNull() && fixture.IsClassSubobject(after.plain));
+    CHECK(after.parts == 3 && after.root == after.body);
+}
+
+TEST(DefaultSubobject_CookedBaselineRoundTrip) {
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Start());
+    RootRef<Object> owner = fixture.SpawnOwner();
+    REQUIRE(!owner.Handle().IsNull());
+    {
+        auto arm = fixture.registry.ResolveForWrite<SubobjectPart>(
+            fixture.access, fixture.Read(owner.Handle()).arm);
+        REQUIRE(arm);
+        arm.Value().Get().Value()->count = 9;
+    }
+
+    // Cooked 구성 기준(subobject 기본값 레코드의 cooked Record)으로도 값이 지켜진다.
+    ObjectGraphSaveOptions options;
+    options.baseline = GraphBaseline::Cooked;
+    options.policy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
+    auto bytes =
+        SaveObjectGraph(allocator, fixture.registry, fixture.access, owner.Handle(), options);
+    REQUIRE(bytes);
+    auto loaded = LoadObjectGraph(allocator, fixture.registry, fixture.types, fixture.access,
+                                  bytes.Value().View());
+    REQUIRE(loaded);
+    const Fixture::View after = fixture.Read(loaded.Value().Handle());
+    CHECK(fixture.CountOf(after.arm) == 9 && fixture.CountOf(after.body) == 1);
     CHECK(after.parts == 3 && after.root == after.body);
 }
 

@@ -54,7 +54,7 @@ graph v2에는 "이미 만들어진 객체를 노드로 쓰는" 개념이 없다
   - 결정성 계약은 RCM 59행 그대로다(두 번 실행해 인코딩 비교).
   - Sparks는 `let` 초기값의 필드 지정이 덮기다.
 - **subobject 사이 참조는 표가 정한다**: 소유 필드·`rootComponent`·subobject의 `attachParent`가 가리킬 대상은 표(`Root`·`AttachParent`·필드)가 정하고 instancing이 직접 써 넣는다. 레코드에는 그 필드가 null로 남는다 — 레코드의 non-null 참조 거부(`NonNullReference`, `Object/ClassDefaults.h:38-39`)는 그대로다.
-  - **같음 판정**: 인스턴스의 그 필드가 표가 정한 대상(같은 소유 객체의 같은 SubobjectGuid subobject)을 가리키면 기준과 같다. 지금 차이 쓰기는 non-null 참조를 늘 "다름"으로 보므로(`FieldEncodeContext.h:79-87`, `ObjectSerialization/ClassDefaults.h:94-99`) 노드별 기준 제공자(아래)가 이 규칙을 준다.
+  - **같음 판정**: 인스턴스의 그 필드가 표가 정한 대상(같은 소유 객체의 같은 SubobjectGuid subobject)을 가리키면 기준과 같다. 지금 차이 쓰기는 non-null 참조를 늘 "다름"으로 보므로(`FieldEncodeContext.h:79-87`, `ObjectSerialization/ClassDefaults.h:94-99`) graph 저장의 일반 규칙이 정한다(10.4절).
   - 표 밖 지역 번호 참조(Sparks 형제 참조 등)는 Sparks L2 때 wire 비트 하나(`0x40000000 | k`)를 예약해 더하고, graph decode는 그 비트를 거부한다. 1차 C++ 경로에는 없다.
   - 그래서 RCM 58·68행 개정은 "레코드의 참조 허용"이 아니라 "표가 정한 subobject 참조는 레코드 밖 규칙"이다(7절).
 - **파생 클래스의 덮기**: 파생 클래스는 상속 subobject의 기본값을 SubobjectGuid 키로 덮는다(`InitSubobjectDefaults`에서 — UE ICH가 `AssociatedGuid`로 대응하는 것과 같다, 2.4절). 타입 교체(UE `SetDefaultSubobjectClass`)는 같은 SubobjectGuid에 base 타입의 파생만 허용하고, 제거(UE `DoNotCreateDefaultSubobject`)는 1차에 두지 않는다(비활성화는 `enabled` 덮기).
@@ -62,7 +62,7 @@ graph v2에는 "이미 만들어진 객체를 노드로 쓰는" 개념이 없다
   - 복원 2a는 소유 노드를 만들 때 생긴 subobject를 그 노드 번호에 묶고, 2b는 그 위에 Record를 적용한다.
   - 레벨 저장·prefab 본문·복제가 모두 이 종류로 subobject를 저장한다. A1 Exports도 같은 칸을 쓴다.
   - 형식 버전을 3으로 올린다(하위호환 없음). 클래스 기본값 지문에 `ObjectGraphFormatVersion`이 들어가므로(`ObjectGraph.h:16`, `ObjectSerialization/ClassDefaults.h:29-30`) 모든 지문이 함께 바뀐다. 기존 패키지·TestContent는 다시 만든다.
-- **노드별 차이 기준**: `GraphBaseline`은 지금 구성(None·Editor·Cooked)만 받는다(`ObjectGraph.h:130-134`). 노드별 기준 제공자를 더해, subobject 노드의 기준을 subobject 기본값 레코드로 준다. 이것이 RCM '기준의 일반화'의 첫 몫이고, prefab 원형 기준(PF4)이 같은 자리를 쓴다.
+- **노드별 차이 기준**: `GraphBaseline`은 구성(None·Editor·Cooked)만 고르고, 저장이 노드마다 기준을 고른다 — 선언 subobject 노드는 subobject 기본값 레코드(10.6절). 이것이 RCM '기준의 일반화'의 첫 몫이고, prefab 원형 기준(PF4)이 같은 자리를 쓴다.
 - **생성 출처**: Registry slot 표지로 둔다(graph 저장이 Core에서 읽어야 하므로 World NATIVE 멤버가 아니다). 값은 `ClassSubobject`·`PrefabNode`·`InstanceAdded`·`Runtime`이고, 1차(PF1)는 `ClassSubobject`·`Runtime`만 쓴다.
 - **실행 중 추가 component**: `OnAwake`·게임 코드가 `AddComponent`로 만든 component는 subobject가 아니다. 생성 출처가 `Runtime`이고 원형·레벨 저장에 들어가지 않는다(3.3절 10항).
 - **ERD37 root 이전(PF1 범위)**: 위 규칙을 그대로 두면 `PrepareRoot`가 만든 엔진 Actor root가 `Runtime` 출처가 되어 레벨 저장에서 사라진다. PF1은 `PrepareRoot`를 쓰는 엔진 Actor의 root를 `Root` subobject 선언으로 옮기고, "레벨 로드면 재사용" 경로를 graph "선언 subobject" 노드로 대체한다(ER 17.8·24.2.5절 개정 — 7절).

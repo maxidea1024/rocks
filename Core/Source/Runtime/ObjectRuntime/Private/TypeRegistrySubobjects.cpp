@@ -59,7 +59,9 @@ usize SubobjectBlockLayout::Place(usize offset) noexcept {
     schemaOffset = AlignSubobjectOffset(offset, alignof(SubobjectSchema));
     opsOffset = AlignSubobjectOffset(schemaOffset + count * sizeof(SubobjectSchema),
                                      alignof(RuntimeSubobjectOps));
-    return opsOffset + count * sizeof(RuntimeSubobjectOps);
+    typesOffset =
+        AlignSubobjectOffset(opsOffset + count * sizeof(RuntimeSubobjectOps), alignof(void*));
+    return typesOffset + count * sizeof(void*);
 }
 
 Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,

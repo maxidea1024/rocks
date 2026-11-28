@@ -79,6 +79,10 @@ struct TypeRegistry::Record {
     // 선언 subobject 기본값 슬롯이다(null = 아직 없음 — defaults와 같은 게시 규칙,
     // TypeLease::ResolveSubobjectDefaults).
     SubobjectDefaultsState* subobjectDefaults = nullptr;
+    // 선언 subobject 표의 타입 레코드다(schema.subobjects와 같은 수·순서, 같은 블록 — 의존 계수로
+    // 소유 클래스보다 오래 산다: subobject 타입을 다시 등록해도 subobject 기본값 레코드가 낡지
+    // 않게, Docs/Design/Prefab 10.6절). 표가 없으면 null이다.
+    Record** subobjectTypes = nullptr;
 };
 
 // 등록 한 번의 색인 준비물이다(잠금 밖에서 할당한 새 색인과, 바꾼 뒤 잠금 밖에서 반환할 옛 색인).

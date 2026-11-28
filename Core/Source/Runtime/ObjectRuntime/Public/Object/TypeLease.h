@@ -192,7 +192,7 @@ public:
                          ClassDefaultsDiagnostic* diagnostic = nullptr) const noexcept;
 
     // 이 소유 클래스의 선언 subobject 기본값 레코드다(펼친 subobject 표와 같은 수·순서 —
-    // Docs/Design/ Prefab 10.6절). 게시·실패 기억·잠금·재진입 규칙은 ResolveClassDefaults와
+    // Docs/Design/Prefab 10.6절). 게시·실패 기억·잠금·재진입 규칙은 ResolveClassDefaults와
     // 같다(같은 생성 잠금을 쓴다). 표가 없는 클래스는 빈 span 성공이다(builder를 부르지 않는다).
     // 반환 span은 이 lease가 사는 동안 유효하다.
     //

@@ -7,11 +7,14 @@
 namespace rocks::detail {
 
 // 레코드 블록 안 subobject 배열의 배치다. ValidateSubobjectList가 수를 세고, Place가 주어진 위치
-// 뒤에 두 배열(SubobjectSchema·RuntimeSubobjectOps)의 위치를 정해 끝 위치를 돌려준다.
+// 뒤에 세 배열(SubobjectSchema·RuntimeSubobjectOps·타입 레코드 포인터)의 위치를 정해 끝 위치를
+// 돌려준다.
 struct SubobjectBlockLayout {
     usize count = 0;
     usize schemaOffset = 0;
     usize opsOffset = 0;
+    // subobject 타입 레코드 포인터 배열(의존 계수 — TypeRegistry::Record::subobjectTypes)이다.
+    usize typesOffset = 0;
 
     usize Place(usize offset) noexcept;
 };

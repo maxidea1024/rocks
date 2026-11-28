@@ -270,6 +270,17 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
         --record->base->dependents;
     }
 
+    if (record->subobjectTypes) {
+        platform::LockGuard lock(gate_);
+        for (usize index = 0; index < record->schema.subobjects.Size(); ++index) {
+            if (record->subobjectTypes[index]->dependents == 0) {
+                platform::Fatal("TypeRegistry subobject type dependency underflow");
+            }
+
+            --record->subobjectTypes[index]->dependents;
+        }
+    }
+
     if (record->fieldTypes) {
         platform::LockGuard lock(gate_);
         for (usize index = 0; index < record->schema.fields.Size(); ++index) {
@@ -289,8 +300,7 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
         }
     }
 
-    // 클래스 기본값 상태(성공이면 byte도 같은 블록)를 해제한다. lease가 모두 반환된 뒤라 읽는 쪽이
-    // 없다.
+    // 선언 subobject 기본값 상태(Prefab 10.6절 — 같은 블록에 항목·byte)를 해제한다.
     if (SubobjectDefaultsState* subobjectDefaults = record->subobjectDefaults) {
         record->subobjectDefaults = nullptr;
         subobjectDefaults->~SubobjectDefaultsState();
@@ -299,6 +309,8 @@ void TypeRegistry::DestroyRecord(Record* record) noexcept {
         }
     }
 
+    // 클래스 기본값 상태(성공이면 byte도 같은 블록)를 해제한다. lease가 모두 반환된 뒤라 읽는 쪽이
+    // 없다.
     if (ClassDefaultsState* defaults = record->defaults) {
         record->defaults = nullptr;
         defaults->~ClassDefaultsState();

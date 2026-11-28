@@ -461,6 +461,8 @@ Result<void> BuildSubobjectDefaults(void* user, const TypeLease& lease, TypeRegi
         }
 
         leases[index] = Move(acquired.Value());
+        // 이후 진단은 그 subobject 타입 기준이다(필드 경로가 그 타입의 필드).
+        diagnostic.type = table[index].type;
         const RuntimeTypeOps& ops = leases[index].Ops();
         diagnostic.reason = ops.construct == nullptr   ? ClassDefaultsReason::Abstract
                             : !ops.completeFieldLayout ? ClassDefaultsReason::IncompleteLayout
@@ -494,6 +496,7 @@ Result<void> BuildSubobjectDefaults(void* user, const TypeLease& lease, TypeRegi
     FieldEncodePolicy cookedPolicy;
     cookedPolicy.excludedFlags = static_cast<uint32>(FieldFlags::EditorOnly);
     for (usize index = 0; index < table.Size(); ++index) {
+        diagnostic.type = table[index].type;
         auto editor = EncodeDefaults(scratch, leases[index], types, first.Get(index), editorPolicy,
                                      diagnostic);
         if (!editor) {

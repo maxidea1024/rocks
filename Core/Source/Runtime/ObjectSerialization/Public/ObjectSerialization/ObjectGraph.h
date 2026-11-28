@@ -129,7 +129,8 @@ class OverrideSet;
 // 차이 쓰기의 기준 구성이다(Docs/Design/RuntimeClassMetadata.ko.md '클래스 기본값 구현 명세 —
 // A5b'). None은 전부 저장(기본 — 세이브게임·시험·Rockpile 등), Editor·Cooked는 노드마다 그 구체
 // 클래스의 기본값 레코드(AcquireClassDefaults의 그 구성)와 같은 값을 쓰지 않는다(override 집합
-// 단위는 쓴다).
+// 단위는 쓴다). 소유 객체와 함께 저장하는 선언 subobject 노드(종류 1)는 그 구체 클래스 대신 소유
+// 클래스의 subobject 기본값 레코드(AcquireSubobjectDefaults — Docs/Design/Prefab 10.6절)를 쓴다.
 enum class GraphBaseline : uint8 {
     None,
     Editor,

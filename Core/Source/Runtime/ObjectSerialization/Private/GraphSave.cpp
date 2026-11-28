@@ -592,7 +592,6 @@ private:
     usize fieldWeak_ = 0;
 };
 
-// 노드 하나의 필드를 encode해 Record를 만든다. fileBytes는 지금까지의 출력 byte 누계이고 이 노드의
 // 노드 하나의 차이 쓰기 기준 byte다(opened 거짓이면 기준 없이 전부 쓴다).
 struct NodeBaseline {
     bool opened = false;
@@ -618,9 +617,17 @@ Result<NodeBaseline> NodeBaselineRecord(Allocator& allocator, ObjectRegistry& re
         }
 
         if (origin.Value() == ObjectOrigin::ClassSubobject) {
-            String name(allocator);
-            if (auto named = registry.GetName(access, handle, name); !named) {
-                return Out::Failure(named.Error());
+            // 이름은 NodeTable 이름 버퍼(이미 모았다)에서 읽고, NodeTable을 쓰지 않으면
+            // Registry에서 읽는다(선언 subobject는 그때 가리기가 거부하지만 기준은 먼저 정한다).
+            String fetched(allocator);
+            StringView name(context.Names().Data() + nodes[nodeIndex].nameOffset,
+                            nodes[nodeIndex].nameBytes);
+            if (nodes[nodeIndex].nameBytes == 0) {
+                if (auto named = registry.GetName(access, handle, fetched); !named) {
+                    return Out::Failure(named.Error());
+                }
+
+                name = fetched.View();
             }
 
             const TypeLease& ownerLease = nodes[owner - 1].lease;
@@ -629,8 +636,7 @@ Result<NodeBaseline> NodeBaselineRecord(Allocator& allocator, ObjectRegistry& re
                 const Guid id = ownerSchema.subobjects[index].id;
                 for (const FieldSchema& field : ownerSchema.fields) {
                     const Span<const char> fieldName = EffectiveToolName(field);
-                    if (field.id != id ||
-                        StringView(fieldName.Data(), fieldName.Size()) != name.View()) {
+                    if (field.id != id || StringView(fieldName.Data(), fieldName.Size()) != name) {
                         continue;
                     }
 
@@ -664,6 +670,7 @@ Result<NodeBaseline> NodeBaselineRecord(Allocator& allocator, ObjectRegistry& re
     return Out::Success({});
 }
 
+// 노드 하나의 필드를 encode해 Record를 만든다. fileBytes는 지금까지의 출력 byte 누계이고 이 노드의
 // Bytes(Record)와(NodeTable이면) 노드 항목, 외부 참조 위치 표 메모리를 더해 maxBytes와 비교한다.
 // 필드마다 외부 참조 위치를 필드 writer offset에서 Record offset으로 바꾼다.
 Result<void> SaveNodeFields(Allocator& allocator, ObjectRegistry& registry,
