@@ -13,6 +13,7 @@
 #include <Platform/Thread.h>
 #include <Progress/ProgressCounter.h>
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
+#include <ShaderCompiler/ShaderSourceCache.h>
 #include <ShaderCore/ShaderType.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
 #include <Task/ParallelFor.h>
@@ -664,13 +665,16 @@ private:
             }
         }
 
+        // Compile 한 번 동안 원문을 한 번만 읽는다(16.6절 SSD98).
+        ShaderSourceCache sources(*config_.tree, state_.allocator,
+                                  ShaderPreprocessLimits{}.fileBytes);
         auto body = [&](usize begin, usize end) noexcept {
             for (usize index = begin; index < end; ++index) {
                 if (control_.cancel.IsCancellationRequested()) {
                     return;
                 }
 
-                Prepare(index);
+                Prepare(index, sources);
                 prepared[index] = 1;
             }
         };
@@ -698,7 +702,7 @@ private:
 
     // 정의 조립·전처리·키다. 여러 스레드에서 서로 다른 index로 동시에 불린다(job 칸만 쓴다 —
     // 16.6절 SSD94). 실패는 MarkFailed로 기록만 하고 PrepareAll이 센다.
-    void Prepare(usize index) noexcept {
+    void Prepare(usize index, ShaderSourceCache& sources) noexcept {
         const ShaderCompileJob& job = jobs_[index];
         ShaderCompileJobResult& result = out_[index];
         if (job.format == nullptr || job.entryPoint.IsEmpty()) {
@@ -748,7 +752,7 @@ private:
         const Span<const ShaderGeneratedInclude> generated(includes, includeCount);
         const ShaderSourceStatus preprocessed =
             PreprocessShader(*config_.tree, job.entryPath, defines.Defines(), result.preprocessed,
-                             ShaderPreprocessLimits{}, generated);
+                             ShaderPreprocessLimits{}, generated, &sources);
         if (!preprocessed) {
             char location[MaxShaderVirtualPathBytes + 64];
             snprintf(location, sizeof(location), "%s:%u: %s", preprocessed.path, preprocessed.line,
