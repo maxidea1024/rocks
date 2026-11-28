@@ -29,6 +29,12 @@ namespace rocks::material::detail {
 
 namespace {
 
+// 속성 에셋 참조 선언이다(Docs/Design/MaterialSystem 19.4.3절 "참조 선언").
+constexpr MaterialAssetReferenceField AtlasReference[] = {
+    {"atlas", MaterialAssetReferenceRole::CurveAtlas}};
+constexpr MaterialAssetReferenceField CollectionReference[] = {
+    {"collection", MaterialAssetReferenceRole::Collection}};
+
 constexpr StringView ScalarParameterNonSemantic[] = {
     "group",     "sortPriority", "defaultValue", "controlType",
     "sliderMin", "sliderMax",    "enumeration",  "enumerationIndex"};
@@ -171,16 +177,19 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
               "Static Component Mask Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.ParameterCollectionValue")
+        .AssetReferences(CollectionReference)
         .Properties(&GeneratedType<ParameterCollectionValueProperties>::Schema)
         .Pins(ParameterCollectionValuePins)
         .Menu("Parameter Collection Value", "Parameters", "Parameters CollectionParameter",
               "Parameter Collection Value."),
     MaterialNode("Material.ParameterCollectionTransform")
+        .AssetReferences(CollectionReference)
         .Properties(&GeneratedType<ParameterCollectionTransformProperties>::Schema)
         .Pins(ParameterCollectionTransformPins)
         .Menu("Parameter Collection Transform", "Parameters", "Parameters CollectionTransform",
               "Parameter Collection Transform."),
     MaterialNode("Material.CurveAtlasRowParameter")
+        .AssetReferences(AtlasReference)
         .Properties(&GeneratedType<CurveAtlasRowParameterProperties>::Schema,
                     CurveAtlasRowParameterNonSemantic)
         .TextDefaults(CurveAtlasRowParameterTextDefaults)

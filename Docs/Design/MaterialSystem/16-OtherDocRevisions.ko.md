@@ -74,7 +74,7 @@
 | MAS3 | 12절(텍스처) | 텍스처 샘플 종류 검사(V10)용 메타데이터 조회 API. 노멀맵 쿠킹 형식(채널 수)을 프로필마다 고정해 머티리얼의 노멀 해석이 static이 되게 함(UE의 노멀맵 Z 복원 규칙은 미확인) |
 | MAS4 | 10절(TargetProfile) | 쿠킹 머티리얼 품질 수준 목록 필드 |
 | MAS5 | 10절(cookKey 지역 입력·부분 쿠킹) | 처리기가 AssetIndex 역방향 Hard 의존에서 유도한 값(머티리얼 사용 대상, 8.4절)을 cookKey 지역 입력으로 넣는 규칙. 그러면 메시 추가가 머티리얼 cookKey를 바꿔 부분 쿠킹 대상에 든다 |
-| MAS7 | 10.2절(쿠킹 처리기 문맥) | 처리기가 쿠킹 대상의 Build 의존 패키지를 전이로 열어 읽는 길: `CookContext`에 좁은 인터페이스(예 `CookDependencyOpener* dependencies` — `Open(AssetId, AssetDiagnostic*)` 하나, CookRun이 `EditorPackageSet::Open`으로 구현, 닫기는 지금 Release·CloseOpened). 소유 스레드 전용, Open 뒤 이전 `EditorPackageInfo` 참조는 무효, 열기가 의존 패키지를 dirty로 만들면 처리기가 실패로 다룬다(12.8절 MS3c) |
+| MAS7 | 10.2절(쿠킹 처리기 문맥) | 처리기가 쿠킹 대상의 Build 의존 패키지를 전이로 열어 읽는 길: `CookContext`에 좁은 인터페이스(예 `CookDependencyOpener* dependencies` — `Open(AssetId, AssetDiagnostic*)` 하나, CookRun이 `EditorPackageSet::Open`으로 구현, 닫기는 지금 Release·CloseOpened). 소유 스레드 전용, Open 뒤 이전 `EditorPackageInfo` 참조는 무효, 열기가 의존 패키지를 dirty로 만들어도 메모리 값을 쓴다(12.8절 MS3c). **구현**: 머티리얼 세션이 `CookDependencyOpener`(CookProcessor.h)·`CookContext::dependencies`를 더했다(2026-11-28) |
 | MAS6 | 9절(의존 입력 튜플) | 의존 튜플의 세 번째 값이 "같은 처리기 build key"가 아닌 "의존 에셋 종류가 정한 의존 키"(함수 키·컬렉션 layout 서명, 12.2절)일 수 있다는 일반화. 머티리얼 번역 너겟은 AssetId 없는 평평한 키(셰이더 job 너겟과 같은 Record 키 — 에셋 처리기 SCC 식의 예외, static 변형 공유 8.5절)이고 bucket은 `material_translation`이다 |
 | MAS8 | 쿠킹 진단 코드 | `AssetDiagnosticCode::MaterialTranslationFailed`(detail = MaterialDiagnosticCode, related = 진단 asset) — 노드·문구는 쿠킹 보고서(12.8절 MS3c) |
 

@@ -6,6 +6,7 @@
 #include <Material/Material.generated.h>
 #include <Material/Material.h>
 #include <Material/MaterialAssetHooks.h>
+#include <Material/MaterialGraphReferences.h>
 #include <Material/MaterialFunction.generated.h>
 #include <Material/MaterialFunction.h>
 #include <Material/MaterialFunctionInstance.h>
@@ -81,96 +82,12 @@ Result<void> AddAssetOf(const AssetTypeHookContext& context, ObjectHandle target
 }
 
 #if ROCKS_WITH_EDITOR_DATA
-// 그래프 노드 하나가 참조하는 에셋 id다(field는 MaterialAssetReference 칸 — 읽지 못하면 null,
-// 번역이 진단한다). 오류: 할당 실패.
-Result<AssetId> NodeAssetReference(const nodegraph::GraphNode& node, const TypeSchema& schema,
-                                   StringView field) noexcept {
-    SystemAllocator scratch;
-    auto reader = material::NodePropertyReader::Open(scratch, node.properties.bytes.View(), schema);
-    auto reference = reader ? reader.Value().OpenStruct(
-                                  field, GeneratedType<material::MaterialAssetReference>::Schema())
-                            : Result<material::NodePropertyReader>::Failure(reader.Error());
-    auto id = reference ? reference.Value().ReadGuid("assetId", Guid{})
-                        : Result<Guid>::Failure(reference.Error());
-    if (!id) {
-        return id.Error() == ErrorCode::OutOfMemory ? Result<AssetId>::Failure(id.Error())
-                                                    : Result<AssetId>::Success(AssetId{});
-    }
-
-    return Result<AssetId>::Success(AssetId{id.Value()});
-}
-
-// 레이어 노드(AttributeLayers·LayerStack)의 레이어·혼합 함수와 LayerStack 쓸 수 있는 목록의 에셋
-// id를 out에 더한다(읽지 못하는 칸은 건너뛴다 — 번역이 진단한다). 오류: 할당 실패.
-Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema& schema, bool stack,
-                             Array<AssetId>& out) noexcept {
-    SystemAllocator scratch;
-    auto reader = material::NodePropertyReader::Open(scratch, node.properties.bytes.View(), schema);
-    if (!reader) {
-        return reader.Error() == ErrorCode::OutOfMemory ? Result<void>::Failure(reader.Error())
-                                                        : Result<void>::Success();
-    }
-
-    const auto add = [&](material::NodePropertyReader& element, StringView field) noexcept {
-        auto reference =
-            element.OpenStruct(field, GeneratedType<material::MaterialAssetReference>::Schema());
-        auto id = reference ? reference.Value().ReadGuid("assetId", Guid{})
-                            : Result<Guid>::Failure(reference.Error());
-        if (!id) {
-            return id.Error() == ErrorCode::OutOfMemory ? Result<void>::Failure(id.Error())
-                                                        : Result<void>::Success();
-        }
-
-        return id.Value() == Guid{} ? Result<void>::Success()
-                                    : out.TryPushBack(AssetId{id.Value()});
-    };
-
-    auto defaults = reader.Value().OpenStruct(
-        "defaultLayers", GeneratedType<material::LayerStackDefaults>::Schema());
-    auto layers = defaults ? defaults.Value().OpenStructArray(
-                                 "layers", GeneratedType<material::LayerStackLayer>::Schema())
-                           : Result<material::NodePropertyList>::Failure(defaults.Error());
-    for (usize at = 0; layers && at < layers.Value().Count(); ++at) {
-        auto element = layers.Value().Element(at);
-        if (!element) {
-            break;
-        }
-
-        const StringView fields[] = {"layer", "blend"};
-        for (StringView field : fields) {
-            if (auto added = add(element.Value(), field); !added) {
-                return added;
-            }
-        }
-    }
-
-    if (!stack) {
-        return Result<void>::Success();
-    }
-
-    const StringView lists[] = {"availableLayers", "availableBlends"};
-    for (StringView list : lists) {
-        auto entries = reader.Value().OpenStructArray(
-            list, GeneratedType<material::MaterialAssetReference>::Schema());
-        for (usize at = 0; entries && at < entries.Value().Count(); ++at) {
-            auto element = entries.Value().Element(at);
-            auto id = element ? element.Value().ReadGuid("assetId", Guid{})
-                              : Result<Guid>::Failure(element.Error());
-            if (id && !(id.Value() == Guid{})) {
-                if (auto added = out.TryPushBack(AssetId{id.Value()}); !added) {
-                    return added;
-                }
-            }
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 그래프 안 함수 호출·MaterialSample·레이어 노드 참조와 ColorRamp 색 커브·CurveAtlasRowParameter
-// atlas를 Build 의존으로 더한다(Docs/Design/MaterialSystem 6.12절 MS2e2·MS2e3 — 번역이 펼치는
-// 그래프다, 6.13절 MS2f4 — 번역이 읽는 커브다, 6.10절 MS2c5 — 번역이 읽는 행 목록이다, 4.6.1절).
-// 자기 참조는 건너뛴다(번역이 그래프면 V3, 커브면 커브 없음으로 진단한다).
+// 그래프 안 Build 의존 참조(함수 호출·MaterialSample·레이어·ColorRamp 색
+// 커브·CurveAtlasRowParameter atlas — 노드 정의의 참조 선언, 19.4.3절)를
+// 더한다(Docs/Design/MaterialSystem 6.12절 MS2e2·MS2e3 — 번역이 펼치는 그래프다, 6.13절
+// MS2f4·6.10절 MS2c5 — 번역이 읽는 커브·행 목록이다, 4.6.1절). 텍스처· 컬렉션은 Hard
+// 필드(referencedTextures·parameterCollections)라 여기서 더하지 않는다. 자기 참조는 건너뛴다(번역이
+// 그래프면 V3, 커브면 커브 없음으로 진단한다).
 Result<void> AddGraphReferences(const AssetTypeHookContext& context,
                                 const nodegraph::GraphDocument& document,
                                 AssetDependencySink& sink) noexcept {
@@ -179,72 +96,21 @@ Result<void> AddGraphReferences(const AssetTypeHookContext& context,
         return Result<void>::Success();
     }
 
-    auto call = names->TryFind("Material.FunctionCall");
-    auto sample = names->TryFind("Material.MaterialSample");
-    auto layers = names->TryFind("Material.AttributeLayers");
-    auto stack = names->TryFind("Material.LayerStack");
-    auto ramp = names->TryFind("Material.ColorRamp");
-    auto atlasRow = names->TryFind("Material.CurveAtlasRowParameter");
     SystemAllocator scratch;
-    Array<AssetId> referenced(scratch);
-    for (const nodegraph::Graph& graph : document.graphs) {
-        for (const nodegraph::GraphNode& node : graph.nodes) {
-            const bool stacked = stack && node.type == stack.Value();
-            if (stacked || (layers && node.type == layers.Value())) {
-                referenced.Clear();
-                if (auto read = LayerReferences(
-                        node,
-                        stacked ? GeneratedType<material::LayerStackProperties>::Schema()
-                                : GeneratedType<material::AttributeLayersProperties>::Schema(),
-                        stacked, referenced);
-                    !read) {
-                    return read;
-                }
+    Array<MaterialGraphReference> references(scratch);
+    if (auto collected = CollectMaterialGraphReferences(*names, document, references); !collected) {
+        return collected;
+    }
 
-                for (const AssetId& id : referenced) {
-                    if (id == context.asset) {
-                        continue;
-                    }
+    for (const MaterialGraphReference& reference : references) {
+        if (reference.role == material::MaterialAssetReferenceRole::Texture ||
+            reference.role == material::MaterialAssetReferenceRole::Collection ||
+            reference.asset == context.asset) {
+            continue;
+        }
 
-                    if (auto added = sink.Add(id); !added) {
-                        return added;
-                    }
-                }
-
-                continue;
-            }
-
-            Result<AssetId> asset = Result<AssetId>::Success(AssetId{});
-            if (call && node.type == call.Value()) {
-                asset = NodeAssetReference(
-                    node, GeneratedType<material::FunctionCallProperties>::Schema(),
-                    "materialFunction");
-            } else if (sample && node.type == sample.Value()) {
-                asset = NodeAssetReference(
-                    node, GeneratedType<material::MaterialSampleProperties>::Schema(),
-                    "materialReference");
-            } else if (ramp && node.type == ramp.Value()) {
-                asset = NodeAssetReference(
-                    node, GeneratedType<material::ColorRampProperties>::Schema(), "colorCurve");
-            } else if (atlasRow && node.type == atlasRow.Value()) {
-                asset = NodeAssetReference(
-                    node, GeneratedType<material::CurveAtlasRowParameterProperties>::Schema(),
-                    "atlas");
-            } else {
-                continue;
-            }
-
-            if (!asset) {
-                return Result<void>::Failure(asset.Error());
-            }
-
-            if (asset.Value().IsNull() || asset.Value() == context.asset) {
-                continue;
-            }
-
-            if (auto added = sink.Add(asset.Value()); !added) {
-                return added;
-            }
+        if (auto added = sink.Add(reference.asset); !added) {
+            return added;
         }
     }
 

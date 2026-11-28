@@ -198,6 +198,8 @@ lowering(펼치기·layout 결합·커브 구간식)은 이 interface 위에서 
 - `expectedClass`는 기대 클래스의 도구 이름이다(예: `"Texture2D"`, `"SubsurfaceProfile"`).
 - 참조 대상 클래스가 아직 없어도 형식은 같다. 그래서 그 클래스가 생겨도 속성 struct의 schemaVersion을 올리거나 migration할 필요가 없다.
 - 번역은 snapshot provider로 대상을 찾는다. 클래스가 아직 없으면 그 속성은 속성 TODO 진단이 된다.
+- **참조 선언(MS3c).** 노드 정의는 최상위 `MaterialAssetReference` 속성 필드를 역할(`MaterialAssetReferenceRole` — Texture·Function·Material·ColorCurve·CurveAtlas·Collection)과 함께 선언한다(`MaterialNodeDefinition::AssetReferences` — 등록 검사가 필드 이름·타입을 본다). 에셋 Build 의존 hook(4.6.1절)과 쿠킹 참조 동기화·번역 입력 모으기(12.8절)가 이 선언 하나를 읽는다(노드 이름 하드코딩 없음). 레이어 스택의 중첩 참조(`LayerStackLayer.layer`·`blend`)는 배열 안이라 선언 밖이고 Material 모듈의 그래프 참조 수집이 따로 읽는다. 선언하지 않은 역할(Font·SubsurfaceProfile 등 선행 TODO)은 그 에셋 모듈이 생길 때 더한다.
+- **lowering 버전.** 노드 정의의 `loweringVersion`(기본 1, `LoweringVersion(n)`)은 lowering 규칙이 바뀌면 올린다. 번역 너겟 키의 노드 타입 목록에 든다(12.2절).
 
 ### 19.5 이름 규칙
 
