@@ -84,7 +84,8 @@ struct Fixture {
     }
 
     bool Start() noexcept {
-        if (!GeneratedType<NotifyStyle>::Register(types) ||
+        if (!GeneratedType<reflection_fixture::ValidRange>::Register(types) ||
+            !GeneratedType<NotifyStyle>::Register(types) ||
             !GeneratedType<NotifyCached>::Register(types) ||
             !GeneratedType<NotifyWidget>::Register(types) ||
             !GeneratedType<NotifyWidgetChild>::Register(types)) {

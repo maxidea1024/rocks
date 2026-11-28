@@ -36,6 +36,14 @@ struct SetterAccess<M C::*> {
             return Result<bool>::Success(false);
         }
 
+        // 리플렉션 쓰기(상자 경유)와 같게 값 트리 안의 struct 검증 hook을 먼저 본다(거부는
+        // InvalidArgument — 필드 그대로).
+        if constexpr (ValueValidate<M>::HasHook) {
+            if (auto checked = ValidateValueTree(value); !checked) {
+                return Result<bool>::Failure(checked.Error());
+            }
+        }
+
         if constexpr (IsPlainCopyV<M>) {
             field = value;
         } else if constexpr (IsArrayV<M>) {
@@ -74,6 +82,28 @@ struct SetterAccess<M C::*> {
 
             // 할당 없는 교환이 commit이다. copy가 옛 값을 쥐고 이 함수 끝에서 반환한다.
             ValueSwap<M>::Swap(field, copy);
+        }
+
+        return Result<bool>::Success(true);
+    }
+
+    // value(리플렉션 쓰기의 상자 값 — 호출자가 버린다)를 교환으로 넣는다(생성 setter thunk —
+    // CN-D14). 같으면 false다. 사본을 만들지 않으므로 할당 실패가 없다(값 검증은 상자 위 경로가
+    // 이미 했다).
+    template <M C::* Member, class Value = M>
+    static Result<bool> AssignOwned(Object& object, Value& value) noexcept {
+        static_assert(!IsFunctionV<M>, "the setter thunk needs a data member");
+        M& field = static_cast<C&>(object).*Member;
+        if (ValueSame<M>::Same(field, value)) {
+            return Result<bool>::Success(false);
+        }
+
+        if constexpr (IsPlainCopyV<M>) {
+            field = value;
+        } else {
+            static_assert(ValueSwap<M>::Supported,
+                          "the field cannot be swapped without allocation");
+            ValueSwap<M>::Swap(field, value);
         }
 
         return Result<bool>::Success(true);

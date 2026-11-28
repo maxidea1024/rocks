@@ -370,6 +370,9 @@ TEST(DetachedPath_DetachEditAttachRoundTrip) {
 // EditorOnly fixture 필드(에디터 데이터 조합에만 있는 멤버)를 쓰는 시험이라 ROCKS_WITH_EDITOR_DATA
 // 빌드에서만 돈다 (Docs/Design/BuildTargets 3.4절 BS2c).
 #if ROCKS_WITH_EDITOR_DATA
+// 분리 실패를 차례로 일으키는 시도의 상한이다(struct 사본의 할당 수보다 넉넉하다).
+constexpr uint64 MaxDetachAttempts = 8;
+
 TEST(DetachedPath_DetachFailureLeavesSourceUnchanged) {
     SystemAllocator system;
     Modules modules;
@@ -385,21 +388,31 @@ TEST(DetachedPath_DetachFailureLeavesSourceUnchanged) {
         const ParsedPath extraLabel(lease.Value(), "extra.label");
         FieldValue original = StringValue(system, "실패해도 그대로인 원본");
         REQUIRE(PathWrite(objects, access, handle, extraLabel.View(), original));
-        for (uint64 attempt = 1; attempt <= 2; ++attempt) {
+        // 분리의 할당 시도마다(상자 저장소가 인라인이면 그 할당은 없다) 차례로 실패시킨다. 실패한
+        // 분리는 상자를 비우고 원본을 그대로 둔다. 실패가 한 번도 없거나 끝나지 않으면 시험 실패다.
+        uint64 failures = 0;
+        bool succeeded = false;
+        for (uint64 attempt = 1; attempt <= MaxDetachAttempts && !succeeded; ++attempt) {
             HookAllocator failing(system);
             failing.failAt = attempt;
             {
                 DetachedValue box(failing);
-                CHECK(ErrorOf(PathDetach(objects, access, handle, extra.View(), box)) ==
-                      ErrorCode::OutOfMemory);
-                CHECK(box.IsEmpty());
+                const ErrorCode error =
+                    ErrorOf(PathDetach(objects, access, handle, extra.View(), box));
+                succeeded = error == ErrorCode::None;
+                if (!succeeded) {
+                    ++failures;
+                    CHECK(error == ErrorCode::OutOfMemory);
+                    CHECK(box.IsEmpty());
+                }
             }
 
-            CHECK(failing.allocations - 1 == failing.frees);
+            CHECK(failing.allocations - (succeeded ? 0 : 1) == failing.frees);
             FieldValue read(system);
             CHECK(ReadText(objects, handle, extraLabel.View(), read) == original.string.View());
         }
 
+        CHECK(succeeded && failures != 0);
         lease.Value().Reset();
     }
 
