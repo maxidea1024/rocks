@@ -19,6 +19,8 @@ public:
         ElementChild content{};
         // brush 색에 곱한다(UE ButtonColorAndOpacity).
         Bindable<LinearColor> color{LinearColor{1, 1, 1, 1}};
+        // 키 이름 둘레 여백(왼·위·오른·아래)이다. 버튼 스타일 여백에 더한다(UE Margin, 기본 0).
+        Vec4 margin{};
         Delegate<Result<void>(StringView)> caption{};
         Delegate<void(KeyChord)> onSelected{};
         ElementArgs common{};
@@ -29,6 +31,10 @@ public:
     Result<void> SetSelectedKey(KeyChord chord) noexcept;
     KeyChord SelectedKey() const noexcept;
     void SetAllowModifiers(bool enabled) noexcept;
+    // 키 이름 둘레 여백이다(UE SetMargin). 원하는 크기는 내용 + 스타일 여백 + margin이다. 음수면
+    // InvalidArgument다.
+    Result<void> SetMargin(Vec4 margin) noexcept;
+    Vec4 GetMargin() const noexcept;
     // 게임패드 버튼을 선택할 수 있게 한다. 기본값에서는 키보드와 마우스 버튼을 받는다.
     void SetAllowGamepad(bool enabled) noexcept;
     bool IsSelecting() const noexcept;

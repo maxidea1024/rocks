@@ -50,6 +50,7 @@
 
 - 버튼 스타일은 "Button"(`DefaultButtonStyle`), 글자 스타일은 NormalText다(UMG `UInputKeySelector` 기본 WidgetStyle·TextStyle).
 - 고정 크기 100×24를 지운다. 원하는 크기는 글자 + 버튼 여백 + `margin`(UE `Margin` 인자)이다. 기본 `margin`은 0이다(UMG `UInputKeySelector::Margin`·`SInputKeySelector` `Margin` 인자 기본 — 빈 FMargin).
+- UE는 `Margin`을 안쪽 글자(`STextBlock::Margin`)에 준다. Rocks 내용은 호출자가 넣는 요소라 `margin`을 버튼 내용 여백(`Button::SetContentPadding`)으로 넣는다. 스타일 여백에 더해지는 결과는 같다. `SetMargin`·`GetMargin`이 이를 감싼다.
 - 키를 기다리는 동안의 글자("...")·선택 해제 키(Escape)·허용 키 규칙은 지금 그대로다.
 
 ### 23.5 끄는 동안 커서 숨김·되돌림(UE `FReply::UseHighPrecisionMouseMovement`·`SetMousePos`)

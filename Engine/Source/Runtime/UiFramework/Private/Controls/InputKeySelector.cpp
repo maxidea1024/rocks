@@ -3,18 +3,15 @@
 
 namespace rocks::ui {
 
-namespace {
-
-// 키 선택기 기본 크기다.
-constexpr Vec2 KeySelectorDefaultSize{100, 24};
-
-} // namespace
-
 Result<void> InputKeySelector::Construct(Args&& args) noexcept {
-    // 모양은 UE SInputKeySelector처럼 핵심 스타일 "Button"이다.
+    // 모양은 UE SInputKeySelector처럼 핵심 스타일 "Button"이다. 크기는 내용에서 나온다(고정 크기
+    // 없음 — 23.4절).
     auto result = Button::Construct({.content = args.content, .color = Move(args.color)});
     if (result) {
-        SetDesiredSize(KeySelectorDefaultSize);
+        result = SetMargin(args.margin);
+    }
+
+    if (result) {
         result = SetSelectedKey(args.selectedKey);
     }
 
@@ -33,7 +30,6 @@ Result<void> InputKeySelector::Construct(Args&& args) noexcept {
 
 InputKeySelector::InputKeySelector(Allocator& allocator) noexcept
     : Button(allocator), allocator_(allocator) {
-    SetDesiredSize(KeySelectorDefaultSize);
     // 키 이름은 가운데다(UE SInputKeySelector의 ETextJustify::Center).
     SetContentAlignment(StackAlignment::Center, StackAlignment::Center);
 }
@@ -84,6 +80,14 @@ bool InputKeySelector::IsSelecting() const noexcept {
 
 void InputKeySelector::SetAllowModifiers(bool enabled) noexcept {
     allowModifiers_ = enabled;
+}
+
+Result<void> InputKeySelector::SetMargin(Vec4 margin) noexcept {
+    return SetContentPadding(margin);
+}
+
+Vec4 InputKeySelector::GetMargin() const noexcept {
+    return GetContentPadding();
 }
 
 void InputKeySelector::SetAllowGamepad(bool enabled) noexcept {

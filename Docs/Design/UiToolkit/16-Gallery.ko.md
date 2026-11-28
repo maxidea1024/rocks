@@ -95,7 +95,7 @@ UE 갤러리 행 순서(824–1480행)를 따르고, UE 갤러리에 없는 Rock
 | (Rocks) Button Click Methods | `EButtonClickMethod`·`EButtonPressMethod` | `Button` 클릭·터치·누름 방식(누른 횟수 레이블) | 있음 |
 | (Rocks) Slider vertical / step | `SSlider` Orientation·StepSize | `Slider::SetVertical`·`SetStep`·`SetSnapToStep` | 있음 |
 | (Rocks) Progress directions / mask fill | `SProgressBar` BarFillType | `ProgressBar` 방향 7종·채움 Scale·Mask | 있음 |
-| (Rocks) Input Key Selector | `SInputKeySelector` | `InputKeySelector` | UW4b 스타일 |
+| (Rocks) Input Key Selector | `SInputKeySelector` | `InputKeySelector`(크기는 내용 + "Button" 여백 + `margin`) | 있음(UW4b2c) |
 | (Rocks) Radial Slider | `SRadialSlider`(Runtime/AdvancedWidgets) | `RadialSlider` | UW4b 스타일 |
 | (Rocks) Timeline | `STimeSlider`(Editor/Sequencer — 직접 대응은 아님) | `Timeline` | UW4b 스타일 |
 | (Rocks) Scroll Bar | `SScrollBar` | `ScrollBar` | UW4b 스타일 |

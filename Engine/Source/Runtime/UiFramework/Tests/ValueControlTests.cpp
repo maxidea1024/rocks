@@ -7,6 +7,7 @@
 #include <UiFramework/Controls/ProgressBar.h>
 #include <UiFramework/Controls/Slider.h>
 #include <UiFramework/Controls/SpinBox.h>
+#include <UiFramework/Layout/Frame.h>
 
 namespace rocks::ui {
 
@@ -53,6 +54,31 @@ TEST(UiFramework_SpinBoxCommitsTextAndRejectsInvalidEntry) {
     CHECK(box.OnPointerEvent({PointerEventType::Move, {24, 4}}).handled);
     CHECK(box.OnPointerEvent({PointerEventType::Up, {24, 4}}).releaseCapture);
     CHECK(box.Value() == 3 && changes == 3);
+}
+
+// 키 선택 크기는 내용 + "Button" 여백 + margin이다(23.4절 — 고정 100x24 없음, 기본 margin 0).
+TEST(UiFramework_KeySelectorSizesFromContentStylePaddingAndMargin) {
+    SystemAllocator allocator;
+    auto selector = SharedPtr<InputKeySelector>::TryMake(allocator, allocator);
+    auto content = SharedPtr<Frame>::TryMake(allocator, allocator);
+    REQUIRE(selector && content);
+    constexpr Vec2 ContentSize{12, 14};
+    content.Value()->SetDesiredSize(ContentSize);
+    REQUIRE(selector.Value()->Construct({.content = content.Value()}));
+    CHECK(selector.Value()->GetMargin() == Vec4{});
+    CHECK(selector.Value()->GetStyle() == DefaultButtonStyle());
+    const Vec4 padding = DefaultButtonStyle().normalPadding;
+    REQUIRE(selector.Value()->Prepass(1));
+    CHECK(selector.Value()->GetDesiredSize() ==
+          Vec2(ContentSize.x + padding.x + padding.z, ContentSize.y + padding.y + padding.w));
+    constexpr Vec4 Margin{3, 1, 5, 2};
+    REQUIRE(selector.Value()->SetMargin(Margin));
+    REQUIRE(selector.Value()->Prepass(2));
+    CHECK(selector.Value()->GetDesiredSize() ==
+          Vec2(ContentSize.x + padding.x + padding.z + Margin.x + Margin.z,
+               ContentSize.y + padding.y + padding.w + Margin.y + Margin.w));
+    CHECK(!selector.Value()->SetMargin({-1, 0, 0, 0}));
+    CHECK(selector.Value()->GetMargin() == Margin);
 }
 
 TEST(UiFramework_KeySelectorUsesHeldModifiersAndCancelsOnEscape) {
