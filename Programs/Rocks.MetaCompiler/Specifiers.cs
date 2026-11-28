@@ -112,6 +112,10 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     // (SchemaValidator RMC2901).
     public bool Notify { get; init; }
 
+    // 생성 setter가 대입 뒤 부르는 같은 클래스의 `void Method() noexcept` 이름이다(Docs/Design/ChangeNotification.ko.md CN-D13 — Apply =
+    // "Method", 없으면 ""). ROCKS_SETTER가 없는 필드는 SchemaValidator가 RMC2904로 거부한다.
+    public string Apply { get; init; } = "";
+
     // 이벤트 필드의 Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B20 — UE BlueprintAssignable). 이벤트가 아닌 필드는
     // SchemaValidator가 RMC2603으로 거부한다.
     public bool ScriptAssignable { get; init; }
@@ -314,7 +318,7 @@ internal static class Specifiers
             bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "TextMapMergeByKey" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly" or
                 "ScriptReadOnly" or "ScriptWritable" or "ScriptAssignable" or "Notify" or "Subobject" or "Root";
-            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params" or "AttachParent";
+            bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName" or "AssetBundles" or "ScriptName" or "Params" or "AttachParent" or "Apply";
             bool number = key is "MaxElements";
             if ((!flag && !label && !number) || (flag && value is not null) || (label && value?.Text is null) ||
                 (number && value?.Number is null))
@@ -328,6 +332,13 @@ internal static class Specifiers
         {
             throw new MetadataException($"{symbol}: Name specifier must be a non-empty ASCII identifier ([A-Za-z_][A-Za-z0-9_]*): \"{toolName}\"", "RMC2203",
                 "Use an ASCII identifier for the tool name, or omit Name to use the field name.");
+        }
+
+        string apply = values.GetValueOrDefault("Apply")?.Text ?? "";
+        if (values.ContainsKey("Apply") && !IsAsciiIdentifier(apply))
+        {
+            throw new MetadataException($"{symbol}: Apply must name a member function of the class with an ASCII identifier: \"{apply}\"", "RMC2904",
+                "Write Apply = \"Method\" where Method is `void Method() noexcept` of the same class; the generated setter calls it after a change.");
         }
 
         string consoleName = values.GetValueOrDefault("ConsoleName")?.Text ?? "";
@@ -442,6 +453,7 @@ internal static class Specifiers
             ScriptName = scriptName,
             ScriptAssignable = scriptAssignable,
             Notify = values.ContainsKey("Notify"),
+            Apply = apply,
             Params = values.GetValueOrDefault("Params")?.Text
         };
     }

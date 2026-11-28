@@ -495,6 +495,41 @@ Result<void> ObjectRegistry::NotifyIfTarget(const ObjectAccessContext& access, O
     return NotifyChecked(access, object, Guid{}, index);
 }
 
+Result<void> ObjectRegistry::NotifySelf(ObjectHandle handle, const Object* object,
+                                        Guid id) noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<void>::Failure(access.Error());
+    }
+
+    // 슬롯을 읽기 전에 소유 스레드·문맥을 본다(구독 상태는 소유 스레드만 바꾼다 — CN-D8).
+    if (auto valid = CheckAccess(access.Value()); !valid) {
+        return valid;
+    }
+
+    // 게시 전 객체(ConstructionContext의 Reserved 단계)는 구독자가 있을 수 없다 — 통지 없이
+    // 성공이다(CN-D9).
+    const Slot* slot = FindSlot(handle);
+    if (slot && slot->state == SlotState::Reserved && slot->object == object) {
+        return Result<void>::Success();
+    }
+
+    return NotifyChecked(access.Value(), handle, id, NotifyIndexNone);
+}
+
+Result<void> ObjectRegistry::CheckSelfAccess() const noexcept {
+    auto access = ScopedAccess();
+    if (!access) {
+        return Result<void>::Failure(access.Error());
+    }
+
+    if (auto valid = CheckAccess(access.Value()); !valid) {
+        return valid;
+    }
+
+    return closed_ ? Result<void>::Failure(ErrorCode::ShuttingDown) : Result<void>::Success();
+}
+
 bool ObjectRegistry::NotifyWatched(ObjectHandle object) const noexcept {
     const Slot* slot = FindSlot(object);
     return slot && slot->notified;

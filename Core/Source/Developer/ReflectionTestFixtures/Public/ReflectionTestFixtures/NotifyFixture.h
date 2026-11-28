@@ -1,7 +1,12 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/OrderedMap.h>
+#include <Core/Optional.h>
+#include <Object/SoftObjectRef.h>
 #include <Core/Text/String.h>
+#include <Localization/Text.h>
 #include <Meta/Annotations.h>
 #include <Object/Object.h>
 #include <Object/ObjectRefArray.h>
@@ -115,6 +120,117 @@ class NotifyHolderChild : public NotifyHolder {
 public:
     explicit NotifyHolderChild(Allocator& allocator) noexcept : NotifyHolder(allocator) {
     }
+};
+
+// 생성 setter의 값 struct다(사본 뒤 교환·멤버별 같음 — CN-D13·CN-D15).
+ROCKS_STRUCT()
+struct NotifyStyle {
+    ROCKS_GENERATED_BODY()
+
+    explicit NotifyStyle(Allocator& allocator) noexcept : font(allocator) {
+    }
+
+    ROCKS_PROPERTY() String font;
+    ROCKS_PROPERTY() float size = 0.0f;
+};
+
+// NATIVE 멤버가 있는 struct다(값 같음이 늘 다르다 — CN-D15).
+ROCKS_STRUCT()
+struct NotifyCached {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 value = 0;
+    ROCKS_NATIVE() uint32 cache = 0;
+};
+
+// 생성 setter·getter와 코드 통지(CN2a — CN-D9·CN-D13)의 대상이다: Apply가 있는 문자열 setter, 실수·
+// struct·Text·Soft·Optional<String>·Map setter, 통지하지 않는 필드의 setter, EditorOnly 필드의
+// setter·getter(에디터 데이터 켬·끔 두 조합에서 컴파일), setter 없는 Notify 필드(SetAndNotify),
+// virtual Notify 계산 값 함수. 생성 setter와 .cpp의 진입점을 모듈 밖(시험 실행 파일)에서 부르므로
+// 클래스를 export한다(Modular 빌드 — 생성 setter는 모듈 생성 소스에 정의된다). 생성자가 setter를
+// 불러 Registry 없는 경로를 남긴다(NATIVE 기록).
+ROCKS_CLASS()
+class ROCKS_REFLECTIONTESTFIXTURES_API NotifyWidget : public Object {
+    ROCKS_GENERATED_BODY()
+
+public:
+    explicit NotifyWidget(Allocator& allocator) noexcept
+        : label(allocator), style(allocator), values(allocator), link(allocator),
+          scores(allocator) {
+        constructorScale = SetScale(2.0f);
+        auto caption = Text::Invariant(allocator, "constructed");
+        constructorCaption = caption ? SetCaption(caption.Value()) : Result<void>::Success();
+    }
+
+    ROCKS_PROPERTY(Notify, Apply = "Relayout") String label;
+    ROCKS_PROPERTY(Notify) float scale = 1.0f;
+    ROCKS_PROPERTY(Notify) NotifyStyle style;
+    ROCKS_PROPERTY(Notify) Text caption;
+    ROCKS_PROPERTY() int32 quiet = 0;
+    ROCKS_PROPERTY(Notify) int32 count = 0;
+    ROCKS_PROPERTY(Notify) Array<int32> values;
+    ROCKS_PROPERTY(Notify) NotifyCached cached;
+    ROCKS_PROPERTY(Notify) SoftObjectRef<NotifyModel> link;
+    ROCKS_PROPERTY(Notify) Optional<String> nickname;
+    ROCKS_PROPERTY(Notify) OrderedMap<int32, int32> scores;
+#if ROCKS_WITH_EDITOR_DATA
+    ROCKS_PROPERTY(EditorOnly) int32 note = 0;
+    ROCKS_SETTER(SetNote, note)
+    ROCKS_GETTER(GetNote, note)
+#endif
+
+    ROCKS_NATIVE() uint32 relayouts = 0;
+    ROCKS_NATIVE() Result<void> constructorScale = Result<void>::Success();
+    ROCKS_NATIVE() Result<void> constructorCaption = Result<void>::Success();
+
+    ROCKS_SETTER(SetLabel, label)
+    ROCKS_GETTER(GetLabel, label)
+    ROCKS_SETTER(SetScale, scale)
+    ROCKS_SETTER(SetStyle, style)
+    ROCKS_SETTER(SetCaption, caption)
+    ROCKS_SETTER(SetQuiet, quiet)
+    ROCKS_GETTER(GetCount, count)
+    ROCKS_SETTER(SetLink, link)
+    ROCKS_SETTER(SetNickname, nickname)
+    ROCKS_SETTER(SetScores, scores)
+
+    // count + quiet이다(virtual 계산 값 — NotifyChanged가 템플릿 인자 동등성으로 ID를 찾는다).
+    ROCKS_FUNCTION(Pure, Notify) virtual int32 Total() const noexcept {
+        return count + quiet;
+    }
+
+    // 코드 통지 진입점을 시험에 연다(protected — 정의는 생성 헤더를 include한 NotifyFixture.cpp).
+    Result<bool> PutCount(int32 next) noexcept;
+    Result<bool> PutValues(const Array<int32>& next) noexcept;
+    Result<bool> PutCached(const NotifyCached& next) noexcept;
+    Result<void> TouchTotal() noexcept;
+    Result<void> TouchScale() noexcept;
+
+private:
+    void Relayout() noexcept {
+        ++relayouts;
+    }
+};
+
+// 기반 멤버의 코드 통지(기반의 생성 NotifyId가 답한다)와 재정의한 virtual 계산 값 함수다.
+ROCKS_CLASS()
+class ROCKS_REFLECTIONTESTFIXTURES_API NotifyWidgetChild : public NotifyWidget {
+    ROCKS_GENERATED_BODY()
+
+public:
+    explicit NotifyWidgetChild(Allocator& allocator) noexcept : NotifyWidget(allocator) {
+    }
+
+    ROCKS_PROPERTY(Notify) int32 level = 0;
+
+    int32 Total() const noexcept override {
+        return count + quiet + level;
+    }
+
+    Result<bool> PutBaseCount(int32 next) noexcept;
+    Result<bool> PutLevel(int32 next) noexcept;
+    // 재정의한 함수는 선언한 기반의 이름으로 알린다.
+    Result<void> TouchBaseTotal() noexcept;
 };
 
 } // namespace rocks::reflection_fixture

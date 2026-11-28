@@ -3,10 +3,12 @@
 #include <Base/Guid.h>
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
+#include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <MaterialSchema/MaterialAssetReferenceField.h>
 #include <MaterialSchema/MaterialContextFeature.h>
 #include <MaterialSchema/MaterialGraphKind.h>
+#include <MaterialSchema/MaterialParameterMetadata.h>
 #include <MaterialSchema/MaterialPinDefinition.h>
 #include <MaterialSchema/MaterialPinType.h>
 #include <MaterialSchema/MaterialPrerequisite.h>
@@ -74,6 +76,14 @@ struct MaterialPropertyTextDefault {
     StringView text;
 };
 
+class NodePropertyReader;
+
+// 파라미터 노드의 값·표시 정보를 읽는다(UE UMaterialExpression::GetParameterValue — 12.8절 MS3d1).
+// 읽었으면 true다. 오류: 속성 Record 오류(그래프 오류 — 부르는 쪽이 InvalidProperty로 진단한다),
+// 할당 실패. out의 문자열은 reader 버퍼를 빌린다.
+using MaterialParameterValueFn = Result<bool> (*)(NodePropertyReader& properties,
+                                                  MaterialParameterMetadata& out) noexcept;
+
 // 속성 struct의 생성 스키마를 돌려준다(GeneratedType<T>::Schema). 속성이 없는 노드는 nullptr이다.
 using MaterialPropertiesSchemaFn = const TypeSchema& (*)() noexcept;
 
@@ -108,6 +118,8 @@ struct MaterialNodeDefinition {
     Span<const MaterialAssetReferenceField> assetReferences;
     // lowering 규칙 버전이다(1 이상 — 규칙이 바뀌면 올린다, 번역 너겟 키, 12.2절).
     uint32 loweringVersion = 1;
+    // 파라미터 노드의 값 hook이다(파라미터 노드만 — 번역 기본값과 쿠킹 파라미터 표가 함께 쓴다).
+    MaterialParameterValueFn parameterValue = nullptr;
 
     // 아래 설정 함수는 값을 바꾼 사본을 돌려준다(constexpr 사슬 — 정적 정의 표를 쓰기 위함).
     constexpr MaterialNodeDefinition Version(uint32 value, nodegraph::MigrateFn fn) const noexcept {
@@ -204,6 +216,12 @@ struct MaterialNodeDefinition {
     constexpr MaterialNodeDefinition LoweringVersion(uint32 value) const noexcept {
         MaterialNodeDefinition copy = *this;
         copy.loweringVersion = value;
+        return copy;
+    }
+
+    constexpr MaterialNodeDefinition ParameterValue(MaterialParameterValueFn value) const noexcept {
+        MaterialNodeDefinition copy = *this;
+        copy.parameterValue = value;
         return copy;
     }
 

@@ -369,4 +369,62 @@ Result<Text> Text::DeepClone(Allocator& allocator, TextResolveLimits limits) con
     return Result<Text>::Success(Text(cloned.Value()));
 }
 
+namespace {
+
+// 두 노드의 이력 구조가 같은지 본다(Text::IsIdentical). 예산은 DeepClone과 같은 단위이고, 넘으면
+// 다르다로 답한다. 깊이는 maxDepth(64 이하)로 막히므로 재귀 깊이도 그만큼이다.
+bool SameNode(const detail::TextNode& left, const detail::TextNode& right, uint32 depth,
+              DeepCloneBudget& budget) noexcept {
+    if (&left == &right) {
+        return true;
+    }
+
+    if (depth > budget.maxDepth || !budget.Spend(1)) {
+        return false;
+    }
+
+    if (left.kind != right.kind || left.id != right.id ||
+        left.sourceRevision != right.sourceRevision ||
+        left.arguments.Size() != right.arguments.Size() ||
+        (left.pattern == nullptr) != (right.pattern == nullptr)) {
+        return false;
+    }
+
+    const StringView leftSource = left.source.View();
+    if (!budget.Spend(leftSource.ByteCount()) || leftSource != right.source.View()) {
+        return false;
+    }
+
+    if (left.pattern && !SameNode(*left.pattern, *right.pattern, depth + 1, budget)) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.arguments.Size(); ++index) {
+        const detail::TextArgumentData& leftArgument = left.arguments[index];
+        const detail::TextArgumentData& rightArgument = right.arguments[index];
+        const StringView name = leftArgument.name.View();
+        if (!budget.Spend(name.ByteCount()) || name != rightArgument.name.View() ||
+            !SameNode(*leftArgument.value, *rightArgument.value, depth + 1, budget)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace
+
+bool Text::IsIdentical(const Text& other, TextResolveLimits limits) const noexcept {
+    if (node_ == other.node_) {
+        return true;
+    }
+
+    if (!node_ || !other.node_ || limits.maxDepth > 64) {
+        return false;
+    }
+
+    DeepCloneBudget budget{limits.maxDepth, limits.maxWork};
+    return SameNode(*node_, *other.node_, 1, budget);
+}
+
 } // namespace rocks

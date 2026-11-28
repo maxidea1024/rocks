@@ -20,6 +20,19 @@ namespace detail {
 struct PackageAccess;
 } // namespace detail
 
+// 로드한 쿠킹 패키지의 sidecar 정보다(AS 20.6 2 — Sidecar 섹션 값과 머리 기대값, 범위 읽기 손잡이가
+// 쓴다). 블록 해시 표는 이 객체가 소유한다.
+struct PackageSidecarState {
+    explicit PackageSidecarState(Allocator& allocator) noexcept : blockHashes(allocator) {
+    }
+
+    uint64 fileBytes = 0;
+    Sha256Digest sha256{};
+    uint32 hashBlockBytes = 0;
+    SidecarHeaderExpectation header{};
+    Array<Sha256Digest> blockHashes;
+};
+
 // 에셋 패키지다(Docs/Design/AssetSystem 6.1절, UE UPackage 대응). 에셋 객체 Registry(패키지
 // 정책 Registry)에서 Outer·이름이 없는 유일한 객체이며 정체성은 AssetId다. 소속 객체(export)는
 // 목록이 아니라 Registry의 자식 고리가 붙잡고(패키지 정책 — outer → inner 강한 간선), 소속 객체는
@@ -73,9 +86,19 @@ public:
     Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref,
                                         AssetDiagnostic* failure = nullptr) const noexcept;
 
+    // ref가 가리키는 entry의 자리다(스트리밍 bulk의 sidecar 위치 — AS 20.6 3). 오류: 빈 ref
+    // InvalidArgument, 없는 bulkId NotFound, rawBytes·sha256이 다르면 TypeMismatch, bulk 저장소가
+    // 있는 에디터 패키지 Unsupported.
+    Result<PackageBulkSlot> BulkSlot(const BulkDataRef& ref) const noexcept;
+
     // bulk 저장소다(에디터 패키지 — 없으면 null).
     PackageBulkStore* BulkStore() const noexcept {
         return bulkStore_.Get();
+    }
+
+    // sidecar 정보다(Sidecar 섹션이 있는 쿠킹 패키지 — 없으면 null, AS 20.6 2).
+    const PackageSidecarState* Sidecar() const noexcept {
+        return sidecar_.Get();
     }
 
 private:
@@ -86,6 +109,7 @@ private:
     ROCKS_NATIVE() Array<uint8> bulkBytes_;
     ROCKS_NATIVE() Array<PackageBulkSlot> bulkSlots_;
     ROCKS_NATIVE() UniquePtr<PackageBulkStore> bulkStore_;
+    ROCKS_NATIVE() UniquePtr<PackageSidecarState> sidecar_;
 };
 
 // 에셋 클래스의 기반이다(UE UObject 중 에셋인 것 — Texture·Material 등이 상속한다). 패키지당 대표

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "StreamedBulkSystem.h"
+
 #include <AssetRuntime/AssetManager.h>
 #include <AssetRuntime/Package.h>
 #include <Core/Containers/HashMap.h>
@@ -201,6 +203,8 @@ struct AssetManager::Impl {
     UniquePtr<ObjectRegistry> registry;
     AssetLoaderConfig loaderConfig;
     UniquePtr<AssetLoader> loader;
+    // 스트리밍 bulk 범위 읽기다(AS 20.6 — config.streamedIo가 있을 때만).
+    UniquePtr<detail::StreamedBulkSystem> streamed;
     ObjectAccessContext access{};
     uint64 ownerThread = 0;
     bool shutDown = false;

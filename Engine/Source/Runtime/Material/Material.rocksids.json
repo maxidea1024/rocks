@@ -3,6 +3,20 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::Material::artifacts",
+      "id": "c341bd654ff2487aa5e94e1ec93a542e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::formatArtifacts",
+      "id": "4888f7678be3417fa0e7d9a58432478a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::Material::graph",
       "id": "bef563bb0aa94625b115e3b97c02b10a",
       "aliases": [],
@@ -19,6 +33,13 @@
       "kind": "field",
       "name": "rocks::Material::parameterCollections",
       "id": "dcb576edc51341bbb7a7153b1eb32907",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Material::parameters",
+      "id": "b2976b52e06945c990e758e58139cc8b",
       "aliases": [],
       "retired": false
     },

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Result.h>
 #include <Meta/GeneratedType.h>
 
 // Clang JSON AST가 추가 constant argument를 제공하므로 식별 marker를 인자로 반복한다.
@@ -116,6 +117,63 @@
 //       ROCKS_NATIVE() GpuBufferHandle gpuBuffer{};   // 저장하지 않는 런타임 핸들
 //   };
 #define ROCKS_NATIVE(...) [[clang::annotate("rocks", "rocks.field.native", #__VA_ARGS__)]]
+
+namespace rocks::detail {
+
+// 생성 setter(ROCKS_SETTER)의 매개변수 형식이다: 산술·enum 스칼라는 값, 그 밖은 const 참조다.
+template <class T>
+using SetterParam = ConditionalT<IsArithmeticV<T> || IsEnumV<T>, T, const T&>;
+
+} // namespace rocks::detail
+
+// 리플렉션 클래스 필드의 setter를 선언한다(UE `Setter` 지정자 대응 —
+// Docs/Design/ChangeNotification.ko.md CN-D13). `Result<void> name(SetterParam<decltype(field)>
+// value) noexcept`를 선언하고 메타 컴파일러가 정의를 모듈 생성 .cpp에 쓴다. 정의 순서: 값이
+// 같으면(CN-D15 — Object/ValueSame.h) Success로 끝 → 대입(할당하는 값은 사본을 먼저 만들고 교환 —
+// 실패면 그 오류, 필드는 그대로) → ROCKS_PROPERTY(Apply = "Method")가 있으면 Method() → Notify
+// 필드면 변경 통지(통지 실패는 그 오류 — 값은 이미 새 값). 사본의 allocator는 필드 자신의
+// 것(GetAllocator — String·Array·Map·Set·Soft 경로), 없으면 객체 Registry의 객체 allocator,
+// Registry도 없으면(생성자 안) Unsupported다. 생성자 안·게시 전 객체는 통지하지 않는다(CN-D9).
+//
+// 자리: 그 필드 선언 뒤(decltype — 앞이면 컴파일 오류), 같은 클래스 본문. 매크로가 끝 `;`까지
+// 펼치므로 세미콜론 없이 쓴다. 대상은 그 클래스가 선언한 ROCKS_PROPERTY 필드이고, struct 멤버·
+// 이벤트·bitfield·Registry 참조를 담는
+// 필드(ObjectRef·ObjectRefArray·ObjectRefMap·StructRefArray·참조 struct — Registry API로 제자리에
+// 쓴다)는 RMC2903이다. EditorOnly 필드의 setter는 그 필드와 같은
+// `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 둔다. 이름은 자유다(SetX 강제 없음).
+//
+// 사용 예:
+//   ROCKS_CLASS()
+//   class Label : public rocks::Object {
+//       ROCKS_GENERATED_BODY()
+//
+//   public:
+//       explicit Label(rocks::Allocator& allocator) noexcept : text(allocator) {}
+//
+//   private:
+//       void RebuildLayout() noexcept;   // text가 바뀐 뒤 setter가 부른다
+//
+//       ROCKS_PROPERTY(Notify, Apply = "RebuildLayout") rocks::String text;
+//       ROCKS_PROPERTY(Notify) float size = 12.0f;
+//
+//   public:
+//       ROCKS_SETTER(SetText, text)      // Result<void> SetText(const String& value) noexcept
+//       ROCKS_GETTER(GetText, text)      // const String& GetText() const noexcept
+//       ROCKS_SETTER(SetSize, size)      // Result<void> SetSize(float value) noexcept
+//   };
+#define ROCKS_SETTER(name, field)                                                                  \
+    [[clang::annotate("rocks", "rocks.setter", #field)]] ::rocks::Result<void> name(               \
+        ::rocks::detail::SetterParam<decltype(field)> value) noexcept;
+
+// 리플렉션 클래스 필드의 getter를 선언·정의한다(CN-D13): `const decltype(field)& name() const
+// noexcept`가 필드를 그대로 돌려준다(인라인 — 생성 정의 없음). 자리와 대상 규칙은 ROCKS_SETTER와
+// 같다(Registry 참조를 담는 필드도 받는다 — 읽기만 한다). 리플렉션 읽기가 함수를 거치게 하는
+// ROCKS_PROPERTY(Getter = "Method")와는 다른 기능이다.
+#define ROCKS_GETTER(name, field)                                                                  \
+    [[clang::annotate("rocks", "rocks.getter", #field)]] const decltype(field)& name()             \
+        const noexcept {                                                                           \
+        return field;                                                                              \
+    }
 
 // generated typed 접근기만 private/protected 필드 접근을 허용한다. 파생 타입에 펼친 기반 필드도
 // 해당 GeneratedType specialization을 통해 접근한다. raw 주소 공개나 Object 수명 검사를 우회하지

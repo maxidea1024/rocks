@@ -35,6 +35,27 @@ Result<Span<const uint8>> Package::BulkBytes(const BulkDataRef& ref,
         Span<const uint8>(bulkBytes_.Data() + slot.offset, static_cast<usize>(slot.rawBytes)));
 }
 
+Result<PackageBulkSlot> Package::BulkSlot(const BulkDataRef& ref) const noexcept {
+    if (bulkStore_.Get() != nullptr) {
+        return Result<PackageBulkSlot>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (ref.IsEmpty()) {
+        return Result<PackageBulkSlot>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (ref.bulkId > bulkSlots_.Size()) {
+        return Result<PackageBulkSlot>::Failure(ErrorCode::NotFound);
+    }
+
+    const PackageBulkSlot& slot = bulkSlots_[ref.bulkId - 1];
+    if (slot.rawBytes != ref.rawBytes || !(slot.sha256 == ref.sha256)) {
+        return Result<PackageBulkSlot>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    return Result<PackageBulkSlot>::Success(slot);
+}
+
 Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& store) noexcept {
     if (store.Get() == nullptr || package.BulkStore() != nullptr || package.BulkCount() != 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

@@ -293,6 +293,27 @@ Result<void> PackageLoadState::PrepareContents(AssetDiagnostic* failure) noexcep
         }
     }
 
+    // sidecar 정보를 Package로 넘길 사본으로 둔다(AS 20.6 2 — 범위 읽기 손잡이).
+    if (contents_.sidecarPresent) {
+        auto sidecar = UniquePtr<PackageSidecarState>::TryMake(allocator_, allocator_);
+        if (!sidecar) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, sidecar.Error(), asset,
+                                   static_cast<uint32>(PackageSectionKind::Sidecar), 0);
+        }
+
+        PackageSidecarState& state = *sidecar.Value();
+        state.fileBytes = contents_.sidecar.fileBytes;
+        state.sha256 = contents_.sidecar.sha256;
+        state.hashBlockBytes = contents_.sidecar.hashBlockBytes;
+        state.header = ExpectedSidecarHeader(contents_);
+        if (auto copied = state.blockHashes.TryAppend(contents_.sidecar.blockHashes); !copied) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, copied.Error(), asset,
+                                   static_cast<uint32>(PackageSectionKind::Sidecar), 0);
+        }
+
+        sidecar_ = Move(sidecar.Value());
+    }
+
     // 그래프 1단계(Registry에 닿지 않는다 — worker에서 해도 된다).
     ObjectGraphInput input;
     input.bytes = contents_.objects;
@@ -790,6 +811,10 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                           Move(state.bulkBytes_), Move(state.bulkSlots_));
         if (state.bulkStore_.Get() != nullptr) {
             detail::PackageAccess::SetBulkStore(*package.Value(), Move(state.bulkStore_));
+        }
+
+        if (state.sidecar_.Get() != nullptr) {
+            detail::PackageAccess::SetSidecar(*package.Value(), Move(state.sidecar_));
         }
         auto representative = transaction.GetForWrite<Asset>(state.stage_.Nodes()[0]);
         ROCKS_ASSERT(representative.IsOk());

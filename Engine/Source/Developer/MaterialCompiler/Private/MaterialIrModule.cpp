@@ -379,6 +379,42 @@ Result<void> BuildIrModule(const IrBuilder& builder, Span<const IrResult> result
         }
     }
 
+    // 출처 표: 닿는 수 파라미터와 파라미터 텍스처의 출처를 정체 순으로 복사한다(12.8절 MS3d1 —
+    // lowering이 파라미터를 만들 때 출처를 함께 기록한다).
+    for (const IrParameterOrigin& origin : builder.ParameterOrigins()) {
+        bool reached = false;
+        for (const IrParameter& parameter : out.parameters_) {
+            reached = reached || parameter.id == origin.identity;
+        }
+
+        for (const IrTexture& texture : out.textures_) {
+            reached = reached || (texture.source == IrTextureSource::Parameter &&
+                                  texture.id == origin.identity);
+        }
+
+        if (!reached) {
+            continue;
+        }
+
+        IrParameterOrigin copy(out.values_.GetAllocator());
+        if (auto copied = CopyIrParameterOrigin(origin, copy); !copied) {
+            return FailBuild(out, Move(copied));
+        }
+
+        if (auto added = out.origins_.TryPushBack(Move(copy)); !added) {
+            return FailBuild(out, Move(added));
+        }
+    }
+
+    for (usize index = 1; index < out.origins_.Size(); ++index) {
+        for (usize at = index;
+             at > 0 && less(out.origins_[at].identity, out.origins_[at - 1].identity); --at) {
+            IrParameterOrigin swap = Move(out.origins_[at]);
+            out.origins_[at] = Move(out.origins_[at - 1]);
+            out.origins_[at - 1] = Move(swap);
+        }
+    }
+
     // Custom 함수 표: 닿는 CustomCall의 항목을 값 순서(처음 닿은 순)로 옮기고 즉시값 [0]을 다시
     // 매긴다(6.13절 MS2f5).
     const IrCustomTable& sourceCustoms = builder.CustomFunctions();

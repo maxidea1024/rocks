@@ -243,6 +243,8 @@ struct TextureSite {
     Guid node;
     StringView field;
     Guid texture;
+    // 파라미터 기본값 필드인가(그러면 AssetId 없이 사실만 — 12.8절 MS3d1).
+    bool parameterDefault = false;
 };
 
 bool SiteLess(const TextureSite& left, const TextureSite& right) noexcept {
@@ -274,8 +276,9 @@ Result<void> CollectTextureSites(const MaterialTranslationKeyDesc& desc, Guid gr
             continue;
         }
 
-        if (auto pushed = out.TryPushBack(
-                TextureSite{graphAsset, reference.node, reference.field, reference.asset.value});
+        if (auto pushed =
+                out.TryPushBack(TextureSite{graphAsset, reference.node, reference.field,
+                                            reference.asset.value, reference.parameterDefault});
             !pushed) {
             return pushed;
         }
@@ -284,7 +287,10 @@ Result<void> CollectTextureSites(const MaterialTranslationKeyDesc& desc, Guid gr
     return Result<void>::Success();
 }
 
-// 텍스처 참조 위치 목록이다(AssetId 없이 — 사실만, 루트 그래프는 asset null).
+// 텍스처 참조 위치 목록이다(루트 그래프는 asset null). 파라미터 기본값 필드(이름 있는 파라미터
+// 노드의 비의미 필드)는 AssetId 없이 사실만, 그 밖은 AssetId와 사실이다 — 이름이 빈 파라미터 샘플은
+// 보통 샘플이라 모듈 텍스처 표가 그 AssetId로 slot을 합치고 정렬하는데 그 필드는 semantic hash
+// 밖이다(12.8절 MS3d1, UE TextureReferencesHash).
 Result<void> WriteTextureSites(NuggetKeyWriter& writer,
                                const MaterialTranslationKeyDesc& desc) noexcept {
     SystemAllocator scratch;
@@ -318,6 +324,12 @@ Result<void> WriteTextureSites(NuggetKeyWriter& writer,
         writer.WriteGuid(site.graph);
         writer.WriteGuid(site.node);
         writer.WriteString(site.field);
+        if (site.parameterDefault) {
+            writer.WriteNone();
+        } else {
+            writer.WriteGuid(site.texture);
+        }
+
         if (const material::MaterialTextureFacts* facts = desc.sources->FindTexture(site.texture)) {
             WriteFacts(writer, *facts);
         } else {

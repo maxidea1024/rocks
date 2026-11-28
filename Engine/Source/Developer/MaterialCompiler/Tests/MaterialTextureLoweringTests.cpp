@@ -636,6 +636,29 @@ TEST(MaterialTexture_ParameterSamples) {
     CHECK(out.module.Textures()[0].source == IrTextureSource::Parameter);
     CHECK(out.module.Textures()[0].id == ParameterId);
     CHECK(out.module.Textures()[0].defaultAsset == BrickId);
+    // 파라미터 텍스처의 출처(12.8절 MS3d1): 주 그래프 Global, 이름은 parameterName.
+    const IrParameterOrigin* origin = out.module.FindParameterOrigin(ParameterId);
+    REQUIRE(origin != nullptr);
+    CHECK(origin->parameterId == ParameterId);
+    CHECK(origin->scope == ParameterScopeKind::Global);
+    CHECK(origin->name.View() == StringView("Albedo"));
+
+    // 같은 ParameterId의 기본 텍스처가 다르면 ParameterConflict다(이름을 넣은 문구).
+    TextureSampleParameter2DProperties clamped(env.allocator);
+    clamped.parameterName = env.Intern("Albedo");
+    clamped.parameterId = ParameterId;
+    clamped.texture.assetId = AssetId{ClampedId};
+    GraphFixture differing(env);
+    const Guid first = differing.Add("Material.TextureSampleParameter2D", env.Save(albedo));
+    const Guid second = differing.Add("Material.TextureSampleParameter2D", env.Save(clamped));
+    const Guid both = differing.Add("Material.Add");
+    differing.Connect(first, "R", both, "A");
+    differing.Connect(second, "G", both, "B");
+    differing.Connect(both, "Result", OutputNodeId, "AmbientOcclusion");
+    MaterialTranslation conflict(env.allocator);
+    REQUIRE(TranslateTextures(differing, conflict));
+    CHECK(!conflict.succeeded);
+    CHECK(HasMessage(conflict, "Parameter Albedo has duplicates with different default values"));
 }
 
 // External 샘플 종류는 선행(MPQ-ExternalTexture)이 없어 늦은 진단이다.
