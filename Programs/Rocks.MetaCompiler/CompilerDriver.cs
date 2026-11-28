@@ -454,7 +454,7 @@ internal static class CompilerDriver
 
             var declarations = schema.Ordered.SelectMany(type =>
                 new[] { Declaration("type", type.Name, type.Id, type.Site) }
-                    .Concat(type.OwnFields.Select(field => Declaration("field", field.Owner + "::" + field.Name, field.Id, field.Site)))
+                    .Concat(type.OwnFields.Select(field => Declaration(field.Spec.Subobject ? "subobject" : "field", field.Owner + "::" + field.Name, field.Id, field.Site)))
                     .Concat(type.Functions.Select(function => Declaration("function", function.Owner + "::" + function.Name, function.Id, function.Site))))
                 .ToArray();
             string json = JsonSerializer.Serialize(new { schema = 1, declarations }, new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" }) + "\n";

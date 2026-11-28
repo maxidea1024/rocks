@@ -42,10 +42,13 @@ struct CookedPackage {
     // 대조한다, AS 11.6절 3). NeverCook·색인에 없는 Soft 대상도 남는다(매니페스트 항목이 없어
     // 로드가 NotFound).
     Span<const CookedManifestDependency> dependencies{};
-    // 쿠킹 패키지 byte와 SHA-256, BulkIndex rawBytes 합이다.
+    // 쿠킹 패키지 byte와 SHA-256, 패키지 안 BulkIndex rawBytes 합이다(Sidecar 항목 제외).
     Span<const uint8> bytes{};
     Sha256Digest sha256{};
     uint64 bulkRawBytes = 0;
+    // sidecar 파일 byte와 SHA-256이다(AssetSystem 20.5 3 — 없으면 비어 있고 SHA는 0).
+    Span<const uint8> sidecar{};
+    Sha256Digest sidecarSha256{};
     Sha256Digest cookKey{};
 };
 

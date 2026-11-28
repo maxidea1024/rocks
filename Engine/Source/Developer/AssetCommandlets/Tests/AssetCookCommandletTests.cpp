@@ -726,6 +726,131 @@ TEST(AssetLoadCookedCommand_LoadsAndRejects) {
     CHECK(usage({"--profile=Windows", "--profile=Windows", "/Game/Rock"}));
 }
 
+// asset-load-cooked --verify-sidecars(AS 20.5 7): writer로 만든 sidecar 패키지 하나와 그
+// 매니페스트를 쿠킹 루트에 두면 대상 없이 `sidecars verified 1`이다. sidecar byte 하나를
+// 바꾸면(같은 크기 — 블록 해시가 잡는다) CorruptPackage, sidecar가 없으면 MissingFile
+// 줄(`(sidecar)`)·종료 코드 1이다. 대상도 주면 로드 줄 뒤에 검증 줄이다. `--verify-sidecars`를 두
+// 번 주면 사용법 오류다.
+TEST(AssetLoadCookedCommand_VerifySidecars) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CookScene cook(env.allocator, "load-cooked-sidecars");
+    REQUIRE(cook.ready);
+    // 쿠킹 패키지(대표 에셋의 pixels bulk가 sidecar)와 sidecar를 쓴다.
+    auto package =
+        NewPackage(*env.source, env.source->OwnerAccess(), FixedId(4100), PackageKind::Cooked);
+    REQUIRE(package);
+    const ObjectHandle asset =
+        Make<TestAsset>(*env.source, TestAssetType(), package.Value().Handle(), "");
+    TestAsset* value = Pointer<TestAsset>(*env.source, asset);
+    REQUIRE(value != nullptr);
+    Array<uint8> pixels(env.allocator);
+    constexpr usize PixelCount = 70000;
+    REQUIRE(pixels.TryResize(PixelCount));
+    for (usize index = 0; index < PixelCount; ++index) {
+        pixels[index] = static_cast<uint8>(index * 7 + index / 251);
+    }
+
+    TestBulkSource bulk;
+    value->pixels = bulk.Add(1, pixels.View(), PackageBulkPlacement::Sidecar);
+    PackageWriteOptions options = CookedOptions();
+    options.profileId = "Windows";
+    options.bulkSource = &bulk;
+    MemoryPackageSink packageSink(env.allocator);
+    MemoryPackageSink sidecarSink(env.allocator);
+    options.sidecar = &sidecarSink;
+    auto written = WritePackage(env.allocator, *env.source, env.source->OwnerAccess(),
+                                package.Value().Handle(), options, packageSink);
+    REQUIRE(written && written.Value().sidecarBytes == sidecarSink.Bytes().Size());
+
+    CookedManifest manifest(env.allocator);
+    REQUIRE(manifest.profileId.TryAssign("Windows"));
+    manifest.profileSettings = options.profileSettings;
+    manifest.cookSettings = Sha256::Hash(pixels.View().Slice(0, 16));
+    manifest.cookerVersion = options.cookerVersion;
+    manifest.cookedBy = TestEngineVersion;
+    auto added = manifest.entries.TryEmplaceBack(env.allocator);
+    REQUIRE(added);
+    CookedManifestEntry& entry = *added.Value();
+    entry.asset = FixedId(4100);
+    entry.type = TestAssetType();
+    REQUIRE(entry.pathHint.TryAssign("/Game/Streamed"));
+    entry.packageBytes = packageSink.Bytes().Size();
+    entry.packageSha256 = Sha256::Hash(packageSink.Bytes());
+    entry.sidecarBytes = written.Value().sidecarBytes;
+    entry.sidecarSha256 = written.Value().sidecarSha256;
+    entry.cookKey = Sha256::Hash(pixels.View().Slice(16, 16));
+    Array<uint8> manifestBytes(env.allocator);
+    REQUIRE(WriteCookedManifest(env.allocator, manifest, manifestBytes));
+
+    StringBuilder<256> packageName(env.allocator);
+    StringBuilder<256> sidecarName(env.allocator);
+    REQUIRE(packageName.TryAppend("Saved/Cooked/Windows/") &&
+            AppendCookedPackagePath(packageName, entry.asset, entry.packageSha256));
+    REQUIRE(sidecarName.TryAppend("Saved/Cooked/Windows/") &&
+            AppendCookedSidecarPath(sidecarName, entry.asset, entry.sidecarSha256));
+    StringBuilder<512> directory(env.allocator);
+    const StringView packageView = packageName.View();
+    usize slash = packageView.ByteCount();
+    while (packageView.Data()[slash - 1] != '/') {
+        --slash;
+    }
+
+    REQUIRE(directory.TryAppendFormat("{}/{}", cook.scene.root.Root(),
+                                      StringView(packageView.Data(), slash - 1)));
+    REQUIRE(platform::MakeDirectoryTree(platform::PhysicalFileSystem(), directory.View().Data(),
+                                        directory.View().ByteCount()));
+    const auto text = [](Span<const uint8> bytes) noexcept {
+        return StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size());
+    };
+    REQUIRE(cook.scene.WriteFile("Saved/Cooked/Windows/CookedManifest.rman",
+                                 text(manifestBytes.View())));
+    REQUIRE(cook.scene.WriteFile(packageName.View(), text(packageSink.Bytes())));
+    REQUIRE(cook.scene.WriteFile(sidecarName.View(), text(sidecarSink.Bytes())));
+
+    const auto load = [&](std::initializer_list<StringView> extra) noexcept {
+        StringView args[8] = {cook.project.View()};
+        usize count = 1;
+        for (StringView one : extra) {
+            args[count++] = one;
+        }
+
+        return cook.run.Call(&RunAssetLoadCookedCommand, Span<const StringView>(args, count));
+    };
+    CHECK(load({"--profile=Windows", "--verify-sidecars"}) == 0);
+    CHECK(cook.run.Out("asset-load-cooked: Windows sidecars verified 1\n"));
+    CHECK(load({"--profile=Windows", "/Game/Streamed", "--verify-sidecars"}) == 0);
+    CHECK(cook.run.Out("asset-load-cooked: Windows loaded ") &&
+          cook.run.Out(" (/Game/Streamed) packages 1\n") &&
+          cook.run.Out("asset-load-cooked: Windows sidecars verified 1\n"));
+
+    StringBuilder<64> id(env.allocator);
+    REQUIRE(id.TryAppendFormat("{}", entry.asset));
+    Array<uint8> damaged(env.allocator);
+    REQUIRE(damaged.TryAppend(sidecarSink.Bytes()));
+    damaged[damaged.Size() - 2] ^= 1;
+    REQUIRE(cook.scene.WriteFile(sidecarName.View(), text(damaged.View())));
+    CHECK(load({"--profile=Windows", "--verify-sidecars"}) == 1);
+    StringBuilder<256> corrupt(env.allocator);
+    REQUIRE(corrupt.TryAppendFormat(
+        "asset-load-cooked: CorruptPackage: {}: error CorruptData (sidecar)\n", id.View()));
+    CHECK(cook.run.Error(corrupt.View()));
+
+    StringBuilder<512> sidecarPath(env.allocator);
+    REQUIRE(sidecarPath.TryAppendFormat("{}/{}", cook.scene.root.Root(), sidecarName.View()));
+    REQUIRE(platform::PhysicalFileSystem().Delete(sidecarPath.View().Data(),
+                                                  sidecarPath.View().ByteCount()));
+    CHECK(load({"--profile=Windows", "--verify-sidecars"}) == 1);
+    StringBuilder<256> missing(env.allocator);
+    REQUIRE(missing.TryAppendFormat(
+        "asset-load-cooked: MissingFile: {}: error NotFound (sidecar)\n", id.View()));
+    CHECK(cook.run.Error(missing.View()));
+
+    CHECK(load({"--profile=Windows", "--verify-sidecars", "--verify-sidecars"}) == 2 &&
+          cook.run.Error("usage: asset-load-cooked"));
+    CHECK(load({"--profile=Windows"}) == 2);
+}
+
 // nugget-gc(13.1절 A6): 로컬 backend에 너겟 하나를 둔 뒤 큰 상한(바이트 최대·일수 포화)은 남기고,
 // --max-bytes=0은 지운다(바이트 상한이 결정적으로 보장 — 시계에 기대지 않는다). off·rockpile 설정
 // 줄, 읽기 전용 루트(tmp 자리가 파일) 줄, 사용법 오류(빠짐·문법·u32 넘침·두 번).

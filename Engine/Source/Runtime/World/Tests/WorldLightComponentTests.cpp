@@ -877,9 +877,9 @@ TEST(Light_ReflectionAndSaveRoundTrip) {
         bool abstract;
     };
 
-    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 5 — 태그 ER 31.4절 포함). 광원 클래스가
-    // 더하는 수는 LightComponentBase 11·LightComponent 14·LocalLight 3·Point 5·Spot 2·Rect
-    // 4·Directional 15·Sky 8, 광원 Actor 0이다.
+    // 필드 수는 상속분을 포함한다(SceneComponent 12, Actor 8 — 태그 ER 31.4절·hit·overlap 이벤트
+    // PH4e 포함). 광원 클래스가 더하는 수는 LightComponentBase 11·LightComponent 14·LocalLight
+    // 3·Point 5·Spot 2·Rect 4·Directional 15·Sky 8, 광원 Actor 0이다.
     const Expected expected[] = {
         {ObjectTypeIdOf<LightComponentBase>(), ObjectTypeIdOf<SceneComponent>(), 23, true},
         {ObjectTypeIdOf<LightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 37, true},
@@ -889,9 +889,9 @@ TEST(Light_ReflectionAndSaveRoundTrip) {
         {ObjectTypeIdOf<RectLightComponent>(), ObjectTypeIdOf<LocalLightComponent>(), 44, false},
         {ObjectTypeIdOf<DirectionalLightComponent>(), ObjectTypeIdOf<LightComponent>(), 52, false},
         {ObjectTypeIdOf<SkyLightComponent>(), ObjectTypeIdOf<LightComponentBase>(), 31, false},
-        {ObjectTypeIdOf<Light>(), ObjectTypeIdOf<Actor>(), 5, true},
-        {ObjectTypeIdOf<PointLight>(), ObjectTypeIdOf<Light>(), 5, false},
-        {ObjectTypeIdOf<SkyLight>(), ObjectTypeIdOf<Light>(), 5, false},
+        {ObjectTypeIdOf<Light>(), ObjectTypeIdOf<Actor>(), 8, true},
+        {ObjectTypeIdOf<PointLight>(), ObjectTypeIdOf<Light>(), 8, false},
+        {ObjectTypeIdOf<SkyLight>(), ObjectTypeIdOf<Light>(), 8, false},
     };
     for (const Expected& entry : expected) {
         auto lease = types.Acquire(entry.id);

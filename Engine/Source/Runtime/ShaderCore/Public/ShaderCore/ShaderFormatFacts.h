@@ -30,6 +30,8 @@ struct ShaderFormatFacts {
     uint32 features = 0;
     // ShaderDeviceRequirementBits다.
     uint32 deviceRequirements = 0;
+    // ShaderPlatformClassBits다(형식 정의 platformClass — 16.5절 SSD89).
+    uint32 platformClasses = 0;
 
     StringView FormatId() const noexcept {
         return StringView(formatId);

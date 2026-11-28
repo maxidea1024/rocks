@@ -28,6 +28,8 @@
 // 안이다.
 // - 퍼뮤테이션 도메인이 ValidateShaderPermutationDomain을 통과한다.
 // - 파라미터 레이아웃 표 목록이 ValidateShaderParameterLayouts를 통과한다(7.2절 5항, SSD27).
+// - 거르기 칸이 표지와 맞는다: ShaderTypeMaterialShader 타입은 materialShouldCompile만, 그 밖은
+//   shouldCompile만 쓴다(16.5절 SSD86 — 타입마다 거르기 하나).
 // Freeze 뒤 등록은 ScopeClosed다(등록 창이 닫혔다).
 //
 // 정점 입력 타입(ShaderVertexInputType — RenderBase 10.6절 1항)도 이 등록부가 받고 같은 Freeze로

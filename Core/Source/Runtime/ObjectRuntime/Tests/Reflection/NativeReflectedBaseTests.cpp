@@ -8,6 +8,7 @@
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/StructFixture.generated.h>
+#include <ReflectionTestFixtures/SubobjectFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeClass.h>
 #include <Object/PropertyPath.h>
@@ -68,6 +69,16 @@ public:
     }
 
     ObjectRef<Node> leaf;
+};
+
+// 선언 subobject 표를 가진 리플렉션 base(SubobjectOwner) 위의 native 파생이다(Docs/Design/Prefab
+// 10.2절 — 표·소유 구조 지정자·접근자를 물려받는다).
+class NativeSubobjectOwner final : public reflection_fixture::SubobjectOwner {
+    ROCKS_NATIVE_TYPE(NativeSubobjectOwner, reflection_fixture::SubobjectOwner,
+                      0x5b1d3c7e9a2f4e61ull, 0xb4c8e2a6d0f3a917ull)
+
+public:
+    using SubobjectOwner::SubobjectOwner;
 };
 
 // 리플렉션 두 단계 상속(SceneFixture : WorldFixture — SceneComponent형) 위의 native 파생이다. 손
@@ -1027,6 +1038,26 @@ TEST(NativeReflectedBase_RegisteredKeysMatchLookupKeys) {
     }
 
     CHECK(types.Shutdown());
+}
+
+TEST(NativeReflectedBase_InheritsSubobjectTable) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(GeneratedType<reflection_fixture::SubobjectPart>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::SubobjectScenePart>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::SubobjectOwner>::Register(types));
+    REQUIRE(RegisterNativeClass<NativeSubobjectOwner>(types));
+    auto lease = types.Acquire(ObjectTypeIdOf<NativeSubobjectOwner>());
+    REQUIRE(lease);
+    const TypeSchema& base = GeneratedType<reflection_fixture::SubobjectOwner>::Schema();
+    const TypeSchema& schema = lease.Value().Schema();
+    REQUIRE(schema.subobjects.Size() == base.subobjects.Size());
+    CHECK(schema.subobjects[0].id == base.subobjects[0].id);
+    CHECK(schema.subobjectListField == base.subobjectListField);
+    CHECK(schema.subobjectRootField == base.subobjectRootField);
+    CHECK(lease.Value().Ops().subobjects.Size() == base.subobjects.Size());
+    // 기본값 덮기 hook은 자기 것만 싣는다(native 파생은 선언하지 않는다).
+    CHECK(lease.Value().Ops().initSubobjectDefaults == nullptr);
 }
 
 } // namespace native_reflected_base_tests_file

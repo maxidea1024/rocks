@@ -39,7 +39,7 @@ protected:
 - 접근 지정은 protected 이상이다(private이면 오류 — 파생 클래스가 `InitSubobjectDefaults`에서 `&Base::field_`로 상속 subobject를 덮을 수 있어야 한다).
 - **객체 이름 = 필드의 실효 도구 이름**(`Name=` 또는 C++ 이름). MetaCompiler가 `ValidateNameComponent` 규칙(첫 글자·64 byte·예약어)으로 검사한다.
 - `Root`: `SubobjectRoot`가 있어야 하고 `T`는 그 필드 타입의 파생이다. 클래스 계층 전체에서 하나뿐이다. `Root`와 `AttachParent`를 함께 쓰면 오류다.
-- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다.
+- `AttachParent = "<필드 도구 이름>"`: 같은 클래스나 base의 다른 `Subobject` 필드다. `T`와 대상 타입에 `SubobjectAttach`가 있어야 한다. 순환은 오류다. 생략하면 `SubobjectAttach`가 있는 subobject는 `Root`에 붙고(자신이 `Root`면 붙지 않음), `Root`가 없으면 붙지 않는다. 생략 규칙은 항목을 만들 때 한 번 정한다 — base에 `Root`가 없고 파생이 `Root`를 더하면 base 항목은 붙지 않은 채로 남는다(펼친 표의 앞부분이 바뀌지 않아야 한다).
 - `Transient`·`EditorOnly`·`Required`·`Notify`·Sparks 지정자와 함께 쓰면 오류다.
 - 진단 번호는 MetaCompiler 다음 빈 RMC 번호를 쓴다(구현 때 정한다).
 
@@ -58,14 +58,15 @@ struct SubobjectSchema {
     int32 attachParent = -1;  // 펼친 subobject 표 index(-1 = 붙이지 않음 — 생략 규칙은 MetaCompiler가 풀어 둔다)
     uint32 flags = 0;         // SubobjectFlags
 };
-// TypeSchema에 더한다(자기 선언·자기 지정만 — 상속은 base 체인으로):
-Span<const SubobjectSchema> subobjects{};
-Guid subobjectListField{};      // 0 = 지정 없음
+// TypeSchema에 더한다:
+Span<const SubobjectSchema> subobjects{};   // 펼친 표
+Guid subobjectListField{};      // 실효 값(상속 포함), 0 = 지정 없음
 Guid subobjectRootField{};
 Guid subobjectAttachField{};
 ```
 
-- 객체 이름은 필드 도구 이름이라 따로 싣지 않는다. 펼친 표(base 먼저 + 자기)는 TypeRegistry가 등록 때 만들어 `TypeLease`로 내준다. 등록 검사: id 유일·0 아님, id가 이 타입의 ObjectRef 필드, type이 등록된 클래스, attachParent가 앞쪽 index이거나 −1(MetaCompiler가 위상 정렬), Root 하나, 클래스 지정자 필드의 종류.
+- 객체 이름은 필드 도구 이름이라 따로 싣지 않는다. **스키마는 펼친 표를 싣는다**(상속 필드처럼 — base 표 뒤에 자기 항목, 2026-11-28 PF1a 구현 결정). 등록은 base 표가 앞부분과 같은지(`InheritsSubobjects` — 아니면 `TypeMismatch`)와 클래스 지정자를 base와 같은 값으로 이어받는지를 본다. 등록 검사: id 유일·0 아님(겹치면 `AlreadyExists`), id가 이 타입의 ReadOnly ObjectRef 필드(Transient·EditorOnly·Required·Notify 아님, 목록·root 필드 아님), type이 0 아님, attachParent가 앞쪽 index이거나 −1, Root 하나(Root면 부착 부모 없음), 연산표 수·ID 일치, 클래스 지정자 필드의 종류, 표가 있으면 목록 지정자 필수(그 밖 `InvalidArgument`). struct 스키마는 이 칸을 모두 비워야 한다.
+- **표 순서**(MetaCompiler): base 표 뒤에 자기 항목을 둔다. 자기 `Root`가 자기 항목의 맨 앞이고 나머지는 선언 순서다. `AttachParent`는 base 항목이나 **위에 선언한** 자기 항목만 가리킨다(위상 정렬 대신 선언 순서 규칙 — 생략한 부착 부모가 Root를 가리키도록 Root를 앞에 둔다).
 - 한도 `MaxClassSubobjects` = 256(펼친 표 크기 — MetaSchema 상수, 넘으면 MetaCompiler 오류와 등록 `CapacityExceeded`).
 
 **타입을 지운 접근**(ObjectRuntime이 소유 타입을 모른 채 쓰도록): 지금 `RuntimeFieldOps`에는 필드 주소 thunk가 없고 배열 필드는 `writeStaged`가 없다(`RuntimeTypeOps.h:362-`). 생성 `Ops()`에 클래스마다 자기 것만 더한다.
@@ -76,7 +77,7 @@ struct RuntimeSubobjectOps {
     void* (*field)(Object& owner) noexcept;   // 소유 필드(ObjectRef<T>) 주소
 };
 // RuntimeTypeOps에 더한다:
-Span<const RuntimeSubobjectOps> subobjectOps{};
+Span<const RuntimeSubobjectOps> subobjects{};
 Result<void> (*initSubobjectDefaults)(SubobjectDefaultsContext&) noexcept = nullptr;  // 자기 선언만
 ```
 
@@ -95,8 +96,8 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 }
 ```
 
-- MetaCompiler가 클래스 본문에서 이 이름의 static 멤버 함수를 찾는다(`CheckValidateHook` RMC2309와 같은 방식 — `ClangAstParser.cs:928-931`, 서명이 다르면 오류, 생성 `VerifyGenerated`에 서명 static_assert). 생성 코드는 자기 함수 포인터만 싣고 base를 부르지 않는다. **런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다** — 모듈 경계를 넘는 생성 호출을 피한다.
-- `SubobjectDefaultsContext::With(ObjectRef<T> Owner::* field, fn)`: 소유 객체가 `Owner`의 파생인지(`IsNativeA(NativeTypeKey<Owner>())`) 확인한 뒤 `&(owner.*field)`를 펼친 표 `subobjectOps[k].field(owner)`와 비교해 항목을 고른다. 없는 필드·subobject 아닌 필드·타입 불일치는 `InvalidArgument`다.
+- MetaCompiler가 클래스 본문에서 이 이름의 static 멤버 함수를 찾는다(`CheckValidateHook` RMC2309와 같은 방식 — `ClangAstParser.cs:928-931`, 서명이 다르면 오류, 생성 `Ops()` 본문에 서명 static_assert). 생성 코드는 자기 함수 포인터만 싣고 base를 부르지 않는다. **런타임이 base 체인(가장 먼 base 먼저)을 걸으며 부른다** — 모듈 경계를 넘는 생성 호출을 피한다.
+- `SubobjectDefaultsContext::With(ObjectRef<T> Owner::* field, fn)`: 소유 객체가 `Owner`의 파생인지(`IsNativeA(NativeTypeKey<Owner>())`) 확인한 뒤 `&(owner.*field)`를 펼친 표 `subobjects[k].field(owner)`와 비교해 항목을 고른다. 없는 필드·subobject 아닌 필드·타입 불일치는 `InvalidArgument`다.
 - 두 모드가 같은 함수를 쓴다: **기록 모드**(레코드 생성 — Registry 밖 임시 소유 인스턴스와 임시 subobject 인스턴스, 소유 필드는 비어 있어도 주소 비교는 된다)와 **instancing 모드**(staged 소유 객체와 staged subobject).
 - **World 없는 hook**: 두 모드 모두 World 장부 밖에서 돈다(`HasWorld()` 거짓). 값 설정만 하고 World·Registry·다른 객체를 건드리지 않는다 — 생성자 결정성 계약(RCM 59행)과 같다. 두 번 실행해 인코딩을 비교한다. 등록 때 해석이 필요한 값(예: 충돌 profile 이름)은 `OnRegister`가 다시 해석하므로 그대로 쓴다(`PrimitiveComponent.cpp:1238-1257`).
 
@@ -128,7 +129,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 **저장**:
 
-- **Include**: `AddNode(owner)` 직후 그 선언 subobject를 표 순서로 넣는다. 호출자가 준 집합의 owner에 딸린 subobject는 집합 끝에 덧붙인다. `IncludeNode`가 subobject를 대상으로 받으면 조상 사슬(owner)을 더한 뒤 `locals_`를 다시 확인해 중복을 막는다(`GraphSaveSet.cpp:9-34·117-201`). subobject의 SubobjectGuid는 owner의 `subobjectOps[k].field(owner)`가 그 handle을 담은 항목에서 얻는다.
+- **Include**: `AddNode(owner)` 직후 그 선언 subobject를 표 순서로 넣는다. 호출자가 준 집합의 owner에 딸린 subobject는 집합 끝에 덧붙인다. `IncludeNode`가 subobject를 대상으로 받으면 조상 사슬(owner)을 더한 뒤 `locals_`를 다시 확인해 중복을 막는다(`GraphSaveSet.cpp:9-34·117-201`). subobject의 SubobjectGuid는 owner의 `subobjects[k].field(owner)`가 그 handle을 담은 항목에서 얻는다.
 - 소유 필드(`Subobject`)는 값으로 쓰지 않는다.
 - `SubobjectList` 목록은 선언 subobject를 뺀 나머지만 쓴다. `FieldEncodeContext`에 원소 생략 질의를 두고 배열 codec이 개수를 먼저 센 뒤 쓴다(원소 수가 앞에 오므로 — `ArrayFieldCodec.h:127`).
 - `SubobjectRoot` 필드(종류 0 owner)와 `SubobjectAttach` 필드(종류 1 노드)는 **encode 전에 표 대상과 비교**한다. 같으면 쓰지 않고, 다르면 null이어도 기준 비교(`OmitCurrent` — `GraphSave.cpp:478-485`)를 거치지 않고 **강제로 쓴다**(레코드의 이 필드는 null이라, 그대로 두면 사용자가 지운 null이 기준과 같아 사라지고 복원이 표 대상을 다시 써 넣는다).
@@ -171,7 +172,7 @@ Result<void> PointLight::InitSubobjectDefaults(SubobjectDefaultsContext& context
 
 | 단계 | 내용 | 시험 |
 |---|---|---|
-| PF1a | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경·모듈 경계 상속), 등록 검사, `DefaultSubobject_TableGeneratedWithStableGuid` |
+| PF1a(끝 — 2026-11-28) | MetaSchema `SubobjectSchema`·클래스 지정자 칸·등록 검사·펼친 표, `RuntimeSubobjectOps`, MetaCompiler 지정자·진단·descriptor·`subobject` ID kind·`InitSubobjectDefaults` 탐지·생성 코드 | MetaCompiler 양성·음성(지정자 조합·Root 둘·Root+AttachParent·순환·타입 불일치·private·EditorOnly 타입·이름 규칙·kind 변경), 등록 검사(`SubobjectSchemaTests`), `DefaultSubobject_TableGeneratedWithStableGuid`. 모듈 경계 상속은 PF1e의 StaticMeshActor(WorldIntegration)가 실제 빌드로 덮는다 |
 | PF1b | ObjectRuntime `ObjectOrigin` 슬롯 표지, 타입을 지운 목록 staged 대입, `CreateDeclaredSubobjects`, `SubobjectDefaultsContext` 두 모드 | `DefaultSubobject_CreatedByInstancingNotConstructor`, `DefaultSubobject_TableReferencesResolve`, `DefaultSubobject_DerivedClassOverridesInheritedDefaults`, `DefaultSubobject_NoSharedMutableComponent`, 실패 rollback |
 | PF1c | ObjectSerialization graph 형식 3(종류 1 노드·Include·도달 간선·목록 걸러내기·root/attach 비교·1단계 거부·2b 재짜기), subobject 기본값 레코드·노드별 기준 | `GraphV3_DeclaredSubobjectNodeRoundTrip`, `DefaultSubobject_RecordIsDeterministic`, `DefaultSubobject_TableReferencesEqualBaseline`, `DefaultSubobject_ClearedRootIsSaved`(null 강제 쓰기), `DefaultSubobject_ClassDefaultChangePropagatesToNonOverridden`, `DefaultSubobject_NewClassSubobjectAppearsOnLoad`, `DefaultSubobject_MissingSubobjectRejected`, `DefaultSubobject_NameConflictRejected`, `DefaultSubobject_RenameKeepsGuidAndOverride`, golden 재고정 |
 | PF1d | World SpawnActor 한 트랜잭션·Component Outer·이름 규칙·subobject 장부·부착 함수 추출·Subobject 필드 비우기·편입 Outer 검사 | `DefaultSubobject_SpawnActorSingleTransaction`, `DefaultSubobject_ComponentOuterIsActor`, `AddComponent_NamesAreSmallestFreeNumber`, 기존 World 시험 |

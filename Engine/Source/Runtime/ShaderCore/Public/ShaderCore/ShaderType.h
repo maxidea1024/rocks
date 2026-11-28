@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Core/Containers/Span.h>
 #include <Core/Hash.h>
 #include <Core/Text/StringView.h>
 #include <ShaderCore/ShaderFormatTypes.h>
@@ -83,10 +84,27 @@ inline constexpr VertexInputTypeId NoVertexInputType = 0;
 struct ShaderFormatFacts;
 
 // 셰이더 타입의 거르기 함수다(12.2절 — 순수 함수, 인자와 형식 사실만 읽는다). 엔진 셰이더 서명이다.
-// 머티리얼 셰이더 특성 인자는 머티리얼 시스템이 정할 때 더한다.
 using ShaderShouldCompileFunction = bool (*)(VertexInputTypeId vertexInputType,
                                              uint32 permutationId,
                                              const ShaderFormatFacts& format) noexcept;
+
+// 머티리얼 셰이더 타입(ShaderTypeMaterialShader)의 거르기 함수다(16.5절 SSD86, UE
+// FMaterialShaderPermutationParameters 대응 — 순수 함수). materialTraits는 MaterialShaderTraits
+// 정규 바이트(MaterialSchema WriteMaterialShaderTraits)이고 ShaderCore는 해석하지 않는다. 해석은
+// pass 타입을 정의하는 모듈(RendererShaders)이 MaterialSchema 읽기로 한다. 쿠커가 넘기기 전에
+// 바이트를 검사하므로 늘 읽힌다 — 그래도 읽지 못하면(계약 위반) Log Error와 false다.
+//
+// 사용 예(RendererShaders):
+//   bool BasePassShouldCompile(Span<const uint8> traitsBytes, VertexInputTypeId, uint32,
+//                              const ShaderFormatFacts& format) noexcept {
+//       MaterialShaderTraits traits;
+//       if (!ReadMaterialShaderTraits(traitsBytes, traits)) { Log::Error(...); return false; }
+//       return traits.domain == MaterialDomain::Surface;
+//   }
+using ShaderMaterialShouldCompileFunction = bool (*)(Span<const uint8> materialTraits,
+                                                     VertexInputTypeId vertexInputType,
+                                                     uint32 permutationId,
+                                                     const ShaderFormatFacts& format) noexcept;
 
 // 셰이더 타입 기술이다(읽기 전용 값, 정적 수명). MakeShaderTypeDesc로 만든다.
 struct ShaderTypeDesc {
@@ -106,8 +124,11 @@ struct ShaderTypeDesc {
     ShaderHlsl2021 hlsl2021 = ShaderHlsl2021::FormatDefault;
     // 퍼뮤테이션 도메인이다(차원이 없으면 퍼뮤테이션 하나).
     ShaderPermutationDomain permutation;
-    // 거르기 함수다(null이면 늘 참).
+    // 엔진 셰이더 거르기 함수다(null이면 늘 참). ShaderTypeMaterialShader 타입은 쓰지 않는다.
     ShaderShouldCompileFunction shouldCompile = nullptr;
+    // 머티리얼 셰이더 거르기 함수다(null이면 늘 참 — 16.5절 SSD86). ShaderTypeMaterialShader 타입만
+    // 쓴다.
+    ShaderMaterialShouldCompileFunction materialShouldCompile = nullptr;
     // 손으로 쓴 파라미터 레이아웃 표 목록이다(7.2절 5항, SSD27 — 0개 이상). 서명이 job 키 8행과
     // 라이브러리 항목의 레이아웃 서명이다.
     Span<const ShaderParameterLayout> parameterLayouts;

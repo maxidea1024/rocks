@@ -20,3 +20,4 @@
 - [16.2 SH3 설계](16.02-SH3Design.ko.md)
 - [16.3 SH4 설계](16.03-SH4Design.ko.md)
 - [16.4 컴파일 경고·FXC 분류·워커 분배](16.04-CompileFollowups.ko.md)
+- [16.5 머티리얼 셰이더 묶음·형식 플랫폼 분류](16.05-MaterialBundles.ko.md)
