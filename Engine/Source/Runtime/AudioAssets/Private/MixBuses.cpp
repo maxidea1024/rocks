@@ -49,10 +49,6 @@ Result<void> FillMixBusLink(const MixBus& bus, MixBusLinkValue& link) noexcept {
 
 } // namespace
 
-using audio_assets_detail::FlattenCurve;
-using audio_assets_detail::IsFiniteWithin;
-using audio_assets_detail::IsNonNegativeFinite;
-
 uint64 NextMixBusSerial() noexcept {
     return platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&mixBusSerial, uint64{1}) + 1;
 }
@@ -97,9 +93,10 @@ Result<void> ValidateMixBusSendValue(const MixBusSendValue& send) noexcept {
                              static_cast<uint8>(MixBusSendLevelMethod::DistanceCurve);
     const bool validStage =
         static_cast<uint8>(send.stage) <= static_cast<uint8>(MixBusSendStage::PreAttenuation);
-    if (!validMethod || !validStage || !IsNonNegativeFinite(send.level) ||
+    if (!validMethod || !validStage || !audio_assets_detail::IsNonNegativeFinite(send.level) ||
         !math::IsFinite(send.minLevel) || !math::IsFinite(send.maxLevel) ||
-        !IsNonNegativeFinite(send.minDistance) || !IsNonNegativeFinite(send.maxDistance) ||
+        !audio_assets_detail::IsNonNegativeFinite(send.minDistance) ||
+        !audio_assets_detail::IsNonNegativeFinite(send.maxDistance) ||
         (send.lowPassEnabled && !IsSendFilterHz(send.lowPassHz)) ||
         (send.highPassEnabled && !IsSendFilterHz(send.highPassHz)) ||
         (send.levelMethod == MixBusSendLevelMethod::DistanceCurve && !send.levelCurve)) {
@@ -212,8 +209,8 @@ Result<MixBusSendValue> MakeMixBusSendValue(const MixBusSend& send, Allocator& a
     value.highPassHz = send.highPassHz;
     value.stage = send.stage;
     if (send.levelMethod == MixBusSendLevelMethod::DistanceCurve) {
-        if (auto flattened =
-                FlattenCurve(send.levelCurve, allocator, registry, access, value.levelCurve);
+        if (auto flattened = audio_assets_detail::FlattenCurve(send.levelCurve, allocator, registry,
+                                                               access, value.levelCurve);
             !flattened) {
             return Made::Failure(flattened.Error());
         }
