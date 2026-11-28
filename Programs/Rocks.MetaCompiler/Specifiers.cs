@@ -373,12 +373,6 @@ internal static class Specifiers
                 "ScriptAssignable exposes an Event field to Sparks 'on' handlers; ScriptReadOnly and ScriptWritable expose value fields.");
         }
 
-        if (scriptWritable && values.ContainsKey("ReadOnly"))
-        {
-            throw new MetadataException($"{symbol}: a ReadOnly field cannot be ScriptWritable", "RMC2603",
-                "Reflection writes refuse ReadOnly fields; use ScriptReadOnly, or remove ReadOnly if scripts should write the field.");
-        }
-
         if (values.ContainsKey("ScriptName") && !scriptReadOnly && !scriptWritable && !scriptAssignable)
         {
             throw new MetadataException($"{symbol}: ScriptName needs ScriptReadOnly, ScriptWritable or ScriptAssignable", "RMC2603",

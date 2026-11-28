@@ -6,12 +6,17 @@
 // 출력(little endian):
 //   KernelGolden.bin — "RTPK", 판 1, 항목 수, 항목마다 { 크기 u32, sharpen f32, 1D 가중치 f32 ×
 //   크기, 2D 가중치 f32 × 크기² } (UE FImageKernel2D::BuildSeparatableGaussWithSharpen 결과).
+//   MipChainGolden.bin — "RTPM", 판 1, 경우 수, 경우마다(ProcessingGoldenImages.h MipCases 순서)
+//   { 이름 길이 u32·이름, mip 수 u32, mip마다 { X·Y·slice 수 u32, FNV-1a 64 u64 }, 전체 float 수가
+//   FullDataFloats 이하면 mip마다 float 전부 }.
 //
 // 사용: TextureProcessingProbe <출력 디렉터리>
 
 #include "ProbeShim.h"
 
 #include "TcmExtract.inc"
+
+#include "../../Engine/Source/Developer/TextureTools/Tests/ProcessingGoldenImages.h"
 
 #include <cstring>
 #include <string>
@@ -91,6 +96,141 @@ std::vector<uint8> KernelGolden() {
     return out;
 }
 
+namespace pg = rocks::test::processing_golden;
+
+constexpr uint32 MipChainGoldenVersion = 1;
+
+void PutU64(std::vector<uint8>& out, uint64 value) {
+    PutU32(out, static_cast<uint32>(value));
+    PutU32(out, static_cast<uint32>(value >> 32));
+}
+
+ETextureClass ClassOf(pg::Dimension dimension) {
+    switch (dimension) {
+    case pg::Volume:
+        return ETextureClass::Volume;
+    case pg::Cube:
+        return ETextureClass::Cube;
+    case pg::CubeArray:
+        return ETextureClass::CubeArray;
+    case pg::Array:
+        return ETextureClass::Array;
+    default:
+        return ETextureClass::TwoD;
+    }
+}
+
+// UE GetTextureBuildSettings(TDD 1140–1340)의 mip 관련 칸이다. GetMipGenSettings는 잘라 온
+// 원본이고, alpha coverage 조건(TDD 1159–1170)만 손으로 옮긴다.
+FTextureBuildSettings SettingsFor(const pg::MipCase& one) {
+    UTexture texture;
+    texture.MipGenSettings = static_cast<TextureMipGenSettings>(one.mipGen);
+    texture.CompressionSettings = static_cast<TextureCompressionSettings>(one.compression);
+    texture.Class = ClassOf(one.dimension);
+    UTextureLODSettings lod;
+    FTextureBuildSettings settings;
+    TextureMipGenSettings mipGen = TMGS_SimpleAverage;
+    lod.GetMipGenSettings(texture, mipGen, settings.MipSharpening, settings.SharpenMipKernelSize,
+                          settings.bDownsampleWithAverage, settings.bSharpenWithoutColorShift,
+                          settings.bBorderColorBlack);
+    settings.MipGenSettings = static_cast<uint8>(mipGen);
+    settings.bPreserveBorder = one.preserveBorder;
+    settings.bCubemap = one.dimension == pg::Cube || one.dimension == pg::CubeArray;
+    settings.bVolume = one.dimension == pg::Volume;
+    settings.bTextureArray = one.dimension == pg::Array || one.dimension == pg::CubeArray;
+    settings.bUseNewMipFilter = one.useNewMipFilter;
+    settings.TextureAddressModeX = static_cast<int32>(one.addressX);
+    settings.TextureAddressModeY = static_cast<int32>(one.addressY);
+    // UE 텍스처 값은 double(FVector4)이고 빌드 설정은 FVector4f다.
+    const double thresholds[4] = {one.thresholdMilli[0] / 1000.0, one.thresholdMilli[1] / 1000.0,
+                                  one.thresholdMilli[2] / 1000.0, one.thresholdMilli[3] / 1000.0};
+    if (thresholds[0] != 0.0 || thresholds[1] != 0.0 || thresholds[2] != 0.0 ||
+        thresholds[3] != 0.0) {
+        settings.bDoScaleMipsForAlphaCoverage = true;
+        settings.AlphaCoverageThresholds =
+            FVector4f(static_cast<float>(thresholds[0]), static_cast<float>(thresholds[1]),
+                      static_cast<float>(thresholds[2]), static_cast<float>(thresholds[3]));
+    }
+
+    return settings;
+}
+
+uint32 MipCount(const FImage& top, bool volume) {
+    int64 longest = top.SizeX > top.SizeY ? top.SizeX : top.SizeY;
+    if (volume && top.NumSlices > longest) {
+        longest = top.NumSlices;
+    }
+
+    uint32 count = 1;
+    while (longest > 1) {
+        longest >>= 1;
+        ++count;
+    }
+
+    return count;
+}
+
+// UE BuildTextureMips(TCM 4126–4722)의 mip 부분이다(손으로 옮긴 driver): 최대 크기 단계 경로(4330–
+// 4433 — GenerateMipChain(…, 1) 반복), mip 0 복사, 나머지 사슬(4642).
+std::vector<FImage> BuildChain(const pg::MipCase& one, const FTextureBuildSettings& settings) {
+    FImage base(one.sizeX, one.sizeY, one.slices, ERawImageFormat::RGBA32F);
+    pg::Generate(one, &base.AsRGBA32F()->R);
+    FImage top = base;
+    if (one.maxSize != 0) {
+        TArray<FImage> steps;
+        steps.Empty(20);
+        ITextureCompressorModule::GenerateMipChain(settings, base, steps, 1);
+        while (steps.Last().SizeX > one.maxSize || steps.Last().SizeY > one.maxSize) {
+            FImage& last = steps.Last();
+            ITextureCompressorModule::GenerateMipChain(settings, last, steps, 1);
+        }
+
+        top = steps.Last();
+    }
+
+    const uint32 count = one.mipGen == pg::NoMipmaps ? 1 : MipCount(top, settings.bVolume);
+    TArray<FImage> chain;
+    chain.Empty(count);
+    chain.Emplace_GetRef(top);
+    if (count > 1) {
+        ITextureCompressorModule::GenerateMipChain(settings, chain[0], chain, MAX_uint32);
+    }
+
+    check(chain.Num() == count);
+    return chain.Items;
+}
+
+std::vector<uint8> MipChainGolden() {
+    std::vector<uint8> out = {'R', 'T', 'P', 'M'};
+    PutU32(out, MipChainGoldenVersion);
+    PutU32(out, pg::MipCaseCount);
+    for (const pg::MipCase& one : pg::MipCases) {
+        const std::vector<FImage> chain = BuildChain(one, SettingsFor(one));
+        const uint32 nameBytes = static_cast<uint32>(std::strlen(one.name));
+        PutU32(out, nameBytes);
+        out.insert(out.end(), one.name, one.name + nameBytes);
+        PutU32(out, static_cast<uint32>(chain.size()));
+        uint64 floats = 0;
+        for (const FImage& mip : chain) {
+            PutU32(out, static_cast<uint32>(mip.SizeX));
+            PutU32(out, static_cast<uint32>(mip.SizeY));
+            PutU32(out, static_cast<uint32>(mip.NumSlices));
+            const uint64 bytes = static_cast<uint64>(mip.GetNumPixels()) * sizeof(FLinearColor);
+            PutU64(out, pg::Fnv1a64(mip.RawData.Items.data(), bytes));
+            floats += static_cast<uint64>(mip.GetNumPixels()) * 4;
+        }
+
+        if (floats <= pg::FullDataFloats) {
+            for (const FImage& mip : chain) {
+                const uint64 bytes = static_cast<uint64>(mip.GetNumPixels()) * sizeof(FLinearColor);
+                out.insert(out.end(), mip.RawData.Items.data(), mip.RawData.Items.data() + bytes);
+            }
+        }
+    }
+
+    return out;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -100,8 +240,9 @@ int main(int argc, char** argv) {
     }
 
     const std::string directory = argv[1];
-    if (!WriteFile(directory + "/KernelGolden.bin", KernelGolden())) {
-        std::fprintf(stderr, "cannot write %s/KernelGolden.bin\n", directory.c_str());
+    if (!WriteFile(directory + "/KernelGolden.bin", KernelGolden()) ||
+        !WriteFile(directory + "/MipChainGolden.bin", MipChainGolden())) {
+        std::fprintf(stderr, "cannot write golden files under %s\n", directory.c_str());
         return 1;
     }
 

@@ -57,6 +57,7 @@ public static partial class PolicyChecks
         "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputDocument.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputSession.h",
         "Engine/Source/Developer/MeshTools/Private/MeshBuildInternal.h",
+        "Engine/Source/Developer/TextureTools/Private/TextureBuildSteps.h",
         "Engine/Source/Developer/TextureTools/Private/TextureImportInternal.h"
     ];
 

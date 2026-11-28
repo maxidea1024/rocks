@@ -38,14 +38,79 @@ Result<void> Pad(Allocator& allocator, Level& level, uint32 targetX, uint32 targ
 
 } // namespace build_resize
 
+namespace build_kernel {
+
+// 커널 한 변의 상한이다(UE FImageKernel2D MaxKernelExtend).
+inline constexpr uint32 MaxKernelSize = 12;
+
+// mip 필터 커널이다(UE FImageKernel2D — 1D 가중치와 그 바깥곱 2D 가중치, 앞 size·size² 칸만 뜻이
+// 있다).
+struct MipKernel {
+    uint32 size = 0;
+    float weights1D[MaxKernelSize] = {};
+    float weights2D[MaxKernelSize * MaxKernelSize] = {};
+};
+
+// UE BuildSeparatableGaussWithSharpen이다(12.18 TP1 1): 2는 평균, sharpen < 0이면 Gauss, 4·6·8은
+// sharpen lobe.
+ROCKS_TEXTURETOOLS_API MipKernel BuildMipKernel(uint32 size, float sharpen) noexcept;
+
+// mip 필터 값이다(UE GetMipGenSettings가 내는 다섯 값).
+struct MipFilter {
+    float sharpen = 0.0f;
+    uint32 kernelSize = 2;
+    bool downsampleWithAverage = true;
+    bool sharpenWithoutColorShift = true;
+    bool borderColorBlack = false;
+};
+
+// mipGen(해석 뒤 — FromTextureGroup·Angular는 이미 바뀐 값)과 compression에서 필터 값을 낸다(12.18
+// TP1 2).
+ROCKS_TEXTURETOOLS_API MipFilter MipFilterFor(TextureMipGenSettings mipGen,
+                                              TextureCompressionSettings compression) noexcept;
+
+} // namespace build_kernel
+
 namespace build_mips {
+
+// mip 생성의 원본 밖 처리다(UE EMipGenAddressMode).
+enum class MipAddress : uint8 {
+    Wrap,
+    Clamp,
+    BorderBlack,
+};
+
+// mip 사슬 생성 입력이다(TextureBuildSettings에서 MipChainParamsFor가 만든다).
+struct MipChainParams {
+    build_kernel::MipFilter filter;
+    bool volume = false;
+    bool cube = false;
+    bool unfiltered = false;
+    bool useNewMipFilter = true;
+    bool preserveBorder = false;
+    TextureAddress addressX = TextureAddress::Wrap;
+    TextureAddress addressY = TextureAddress::Wrap;
+    bool alphaCoverage = false;
+    float thresholds[Channels] = {};
+};
 
 // 다음 mip 길이 max(1, n >> 1)이다.
 uint32 Half(uint32 n) noexcept;
-// source의 다음 mip을 out에 만든다(12.5절 mip 규칙). 오류: 할당 실패.
-Result<void> NextMip(const Level& source, bool volume, bool unfiltered, Level& out) noexcept;
-// 테두리 texel을 다시 쓴다(PreserveBorder).
-void RedrawBorder(const Level& source, bool volume, Level& mip) noexcept;
+ROCKS_TEXTURETOOLS_API MipChainParams
+MipChainParamsFor(const TextureBuildSettings& settings) noexcept;
+// base 크기의 주소 방식이다(UE ComputeAddressMode — 12.18 TP1 5).
+MipAddress MipAddressFor(const MipChainParams& params, uint32 width, uint32 height) noexcept;
+// (width, height, 평면 수)에서 1×1(Volume은 ×1)까지 만들 mip 수다.
+uint32 MipChainLength(const MipChainParams& params, uint32 width, uint32 height,
+                      uint32 planes) noexcept;
+// base 다음 mip을 최대 depth개(1×1에서 멈춤) out 뒤에 더한다(UE GenerateMipChain — 평균 사슬·alpha
+// coverage·Volume 두 slice·테두리 다시 쓰기, 12.18 TP1 3–7). base는 out 안에 있어도 되므로 out을
+// 늘리지 않는다 — 호출자가 더할 mip 수만큼 자리를 예약해 둔다(모자라면 InvalidArgument). 오류: 할당
+// 실패.
+ROCKS_TEXTURETOOLS_API Result<void> GenerateMipChain(Allocator& allocator,
+                                                     const MipChainParams& params,
+                                                     const Level& base, uint32 depth,
+                                                     Array<Level>& out) noexcept;
 // 법선을 정규화한다(UE NormalizeMip).
 void NormalizeNormals(Level& level) noexcept;
 

@@ -98,6 +98,23 @@ struct PathRunner {
     static bool RanTopValue(const PathCursor& cursor) noexcept {
         return cursor.topValue_;
     }
+
+    // RedirectHooks를 건 Run이 남긴 최상위 필드의 setter다(없으면 nullptr — CN-D14).
+    static FieldSetterFunction SetterRedirect(const PathCursor& cursor) noexcept {
+        return cursor.setter_;
+    }
+
+    // 상자가 담은 값의 주소다(setter thunk가 교환으로 가져간다 — 빈 상자는 nullptr).
+    static void* BoxValue(DetachedValue& box) noexcept {
+        return box.storage_;
+    }
 };
+
+// setter 있는 필드 fieldId(최상위)의 등록된 write다(FieldWriteOperation — Docs/Design/
+// ChangeNotification.ko.md CN-D14): 한 단계 경로의 Write를 상자 경유로 setter에 넣는다. 검증·실패는
+// 경로 쓰기와 같다(ReadOnly는 막지 않는다).
+Result<void> WriteFieldThroughSetter(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                     ObjectHandle object, Guid fieldId, const FieldValue& value,
+                                     FieldSetterFunction setter) noexcept;
 
 } // namespace rocks::detail

@@ -10,6 +10,7 @@
 #include <TextureTools/TextureBuild.h>
 #include <TextureTools/TextureFormatSelect.h>
 #include <TextureTools/TextureImport.h>
+#include <Texture/TextureSettingsCheck.h>
 
 #include <math.h>
 
@@ -33,10 +34,11 @@ using texture_build_detail::build_encode::Clamp01NansTo0;
 using texture_build_detail::build_encode::Encode;
 using texture_build_detail::build_encode::HasTransparentAlpha;
 using texture_build_detail::build_encode::Replicate;
+using texture_build_detail::build_mips::GenerateMipChain;
 using texture_build_detail::build_mips::Half;
-using texture_build_detail::build_mips::NextMip;
+using texture_build_detail::build_mips::MipChainParams;
+using texture_build_detail::build_mips::MipChainParamsFor;
 using texture_build_detail::build_mips::NormalizeNormals;
-using texture_build_detail::build_mips::RedrawBorder;
 using texture_build_detail::build_resize::DecodeSource;
 using texture_build_detail::build_resize::Pad;
 using texture_build_detail::build_resize::Resample;
@@ -121,6 +123,21 @@ uint32 CookDroppedMips(const TextureBuildSettings& settings, uint32 width, uint3
     return dropped < chain - 1 ? dropped : chain - 1;
 }
 
+// 빌드가 처리하는 mip 생성 설정인지다(해석 뒤 값 — 12.18 TP1: Sharpen·Blur 포함,
+// LeaveExistingMips와 Cube Angular는 계약).
+bool BuildableMipGen(TextureMipGenSettings mipGen) noexcept {
+    return mipGen != TextureMipGenSettings::FromTextureGroup &&
+           mipGen != TextureMipGenSettings::LeaveExistingMips &&
+           mipGen != TextureMipGenSettings::Angular;
+}
+
+// 최대 크기 축소가 mip 단계 경로인지다(UE TCM 4359–4360 — 새 경로이고 Volume·alpha coverage·
+// PreserveBorder가 모두 아닐 때만 한 번 재표본한다).
+bool MaxSizeStepPath(const TextureBuildSettings& settings) noexcept {
+    return !settings.useNewMipFilter || settings.dimension == TextureDimension::Volume ||
+           settings.alphaCoverage || settings.preserveBorder;
+}
+
 bool IsHidden(TextureCompressionSettings compression) noexcept {
     const uint8 value = static_cast<uint8>(compression);
     return value == HiddenCompressionLq || value == HiddenCompressionReflection;
@@ -185,7 +202,7 @@ SizePlan PlanSizes(const TextureBuildSettings& settings) noexcept {
     plan.fitX = plan.targetX;
     plan.fitY = plan.targetY;
     plan.fitZ = plan.targetZ;
-    const bool stepPath = volume || settings.preserveBorder;
+    const bool stepPath = MaxSizeStepPath(settings);
     while (plan.fitX > maximum || plan.fitY > maximum) {
         plan.fitX = Half(plan.fitX);
         plan.fitY = Half(plan.fitY);
@@ -400,10 +417,26 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
         mipGen = group.mipGenSettings;
     }
 
-    if (mipGen != TextureMipGenSettings::SimpleAverage &&
-        mipGen != TextureMipGenSettings::NoMipmaps && mipGen != TextureMipGenSettings::Unfiltered) {
+    // Angular는 Cube에만 뜻이 있다(UE GetMipGenSettings TextureLODSettings.cpp 417 — CubeArray도
+    // SimpleAverage). Cube Angular는 12.18 TP6까지 계약이다.
+    if (mipGen == TextureMipGenSettings::Angular && dimension != TextureDimension::TextureCube) {
+        mipGen = TextureMipGenSettings::SimpleAverage;
+    }
+
+    if (!BuildableMipGen(mipGen)) {
         return Fail(result, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported,
                     static_cast<uint64>(mipGen));
+    }
+
+    // alpha coverage(UE GetTextureBuildSettings TDD 1159–1170 — 두 칸이 모두 켜져야 한다). 잘못된
+    // 임계값은 UE가 check로 멈추는 값이다(12.18 TP1).
+    const bool alphaCoverage =
+        texture.doScaleMipsForAlphaCoverage != 0 &&
+        (texture.alphaCoverageThresholds.x != 0.0 || texture.alphaCoverageThresholds.y != 0.0 ||
+         texture.alphaCoverageThresholds.z != 0.0 || texture.alphaCoverageThresholds.w != 0.0);
+    if (texture.doScaleMipsForAlphaCoverage != 0 &&
+        !TextureAlphaCoverageThresholdsValid(texture.alphaCoverageThresholds)) {
+        return Fail(result, AssetDiagnosticCode::InvalidSetting, ErrorCode::InvalidArgument, 0);
     }
 
     // CPU에서 읽는 Texture2D는 mip이 없다(UE GetTextureBuildSettings).
@@ -433,6 +466,14 @@ Result<void> ResolveTextureBuildSettings(const Texture& texture, TextureDimensio
         texture.resizeDuringBuildY > 0 ? static_cast<uint32>(texture.resizeDuringBuildY) : 0;
     out.mipGenSettings = mipGen;
     out.preserveBorder = texture.preserveBorder != 0;
+    out.useNewMipFilter = texture.useNewMipFilter;
+    out.alphaCoverage = alphaCoverage;
+    if (alphaCoverage) {
+        out.alphaCoverageThresholds = Vec4{static_cast<float>(texture.alphaCoverageThresholds.x),
+                                           static_cast<float>(texture.alphaCoverageThresholds.y),
+                                           static_cast<float>(texture.alphaCoverageThresholds.z),
+                                           static_cast<float>(texture.alphaCoverageThresholds.w)};
+    }
     out.normalizeNormals = texture.normalizeNormals != 0 &&
                            texture.compressionSettings == TextureCompressionSettings::Normalmap;
     // 합은 int32 범위로 자른다(넘침 없이 — 편향은 사슬 길이로 다시 잘린다).
@@ -531,9 +572,7 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
         return Fail(out, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, slices);
     }
 
-    if (settings.mipGenSettings != TextureMipGenSettings::SimpleAverage &&
-        settings.mipGenSettings != TextureMipGenSettings::NoMipmaps &&
-        settings.mipGenSettings != TextureMipGenSettings::Unfiltered) {
+    if (!BuildableMipGen(settings.mipGenSettings)) {
         return Fail(out, AssetDiagnosticCode::UnsupportedSetting, ErrorCode::Unsupported,
                     static_cast<uint64>(settings.mipGenSettings));
     }
@@ -602,7 +641,7 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
         }
     }
 
-    const bool unfiltered = settings.mipGenSettings == TextureMipGenSettings::Unfiltered;
+    const MipChainParams mipParams = MipChainParamsFor(settings);
     // 4. 최대 크기(UE MaxTextureResolution — X·Y만 본다).
     uint64 maximum = MaxDimension2D;
     if (settings.maxTextureSize > 0 && static_cast<uint64>(settings.maxTextureSize) < maximum) {
@@ -617,22 +656,24 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
             fitY = Half(fitY);
         }
 
-        if (!volume && !settings.preserveBorder) {
+        if (!MaxSizeStepPath(settings)) {
             if (auto resized = Resample(allocator, level, fitX, fitY); !resized) {
                 return Fail(out, AssetDiagnosticCode::None, resized.Error(), 0);
             }
         } else {
+            // 단계 경로(UE TCM 4404–4426): GenerateMipChain(…, 1)을 한 단계씩 — 단계마다 텍스처의
+            // mip 필터·주소 방식·alpha coverage(목표는 그 단계 입력에서)·테두리 다시 쓰기를 쓴다.
             while (level.width > maximum || level.height > maximum) {
-                Level next(allocator);
-                if (auto made = NextMip(level, volume, unfiltered, next); !made) {
+                Array<Level> next(allocator);
+                if (auto reserved = next.TryReserve(1); !reserved) {
+                    return Fail(out, AssetDiagnosticCode::None, reserved.Error(), 0);
+                }
+
+                if (auto made = GenerateMipChain(allocator, mipParams, level, 1, next); !made) {
                     return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
                 }
 
-                if (settings.preserveBorder) {
-                    RedrawBorder(level, volume, next);
-                }
-
-                level = rocks::Move(next);
+                level = rocks::Move(next[0]);
             }
         }
     }
@@ -666,17 +707,13 @@ static Result<void> BuildTextureBody(Allocator& allocator, const TextureBuildSet
     }
 
     (void)mips.TryPushBack(rocks::Move(level));
-    for (uint32 mip = 1; mip < chain; ++mip) {
-        Level next(allocator);
-        if (auto made = NextMip(mips[mip - 1], volume, unfiltered, next); !made) {
-            return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
-        }
+    // 나머지 사슬(UE TCM 4642 — 자리는 위에서 chain개 예약했다).
+    if (auto made = GenerateMipChain(allocator, mipParams, mips[0], chain - 1, mips); !made) {
+        return Fail(out, AssetDiagnosticCode::None, made.Error(), 0);
+    }
 
-        if (settings.preserveBorder) {
-            RedrawBorder(mips[mip - 1], volume, next);
-        }
-
-        (void)mips.TryPushBack(rocks::Move(next));
+    if (mips.Size() != chain) {
+        return Fail(out, AssetDiagnosticCode::None, ErrorCode::InvalidArgument, 0);
     }
 
     // 6. NormalizeNormals(사슬을 다 만든 뒤 mip 0 포함 — UE NormalizeMip).

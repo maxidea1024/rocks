@@ -2,10 +2,11 @@
 
 Usage: python make_golden.py <Unreal Engine 5.8 clone> [--clang <clang++>] [--work <directory>]
 
-The script cuts function ranges out of Engine/Source/Developer/TextureCompressor/Private/TextureCompressorModule.cpp
+The script cuts function ranges out of TextureCompressorModule.cpp and TextureLODSettings.cpp
 (UE 5.8.4, commit f45729c0b6f0 - every range is checked by its first and last line), compiles them with ProbeShim.h
 twice and writes the reference build output to Engine/Source/Developer/TextureTools/Tests/Fixtures/TextureProcessingGolden.
-The reference build rounds double transcendental results to float (the Rocks build values); the UE build calls the host
+The reference build computes transcendental functions with Rocks DeterministicMath and rounds to float (the Rocks
+build values); the UE build calls the host
 float libm like UE FMath. The script prints how many floats differ between the two builds and the largest ulp distance.
 UE sources are not copied into the repository. Without --clang the script uses the Rocks LLVM toolchain under
 %LOCALAPPDATA%/Rocks/out/toolchains.
@@ -22,16 +23,20 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HERE = pathlib.Path(__file__).resolve().parent
 TCM_RELATIVE = pathlib.Path('Engine/Source/Developer/TextureCompressor/Private/TextureCompressorModule.cpp')
+LOD_RELATIVE = pathlib.Path('Engine/Source/Runtime/Engine/Private/TextureLODSettings.cpp')
 OUTPUT = ROOT / 'Engine/Source/Developer/TextureTools/Tests/Fixtures/TextureProcessingGolden'
 EXPECTED_COMMIT = 'f45729c0b6f097038e72b52d366a62baeca3275b'
-OUTPUT_FILES = ['KernelGolden.bin']
+OUTPUT_FILES = ['KernelGolden.bin', 'MipChainGolden.bin']
+DETERMINISTIC_MATH = ROOT / 'Core/Source/Runtime/DeterministicMath'
 
-# 잘라 올 구간이다: (첫 줄, 마지막 줄) — 양 끝을 포함하고 내용으로 찾는다(줄 번호에 기대지 않는다).
+# 잘라 올 구간이다: (원본, 첫 줄, 마지막 줄, 마지막 줄 뒤 더 가져올 줄 수) — 양 끝을 포함하고
+# 내용으로 찾는다(줄 번호에 기대지 않는다). 마지막 줄이 None이면 첫 줄 뒤 처음 나오는 '}' 줄까지다.
 RANGES = [
-    ('enum EMipGenAddressMode', '\tfloat KernelWeights1D[MaxKernelExtend];'),
+    (TCM_RELATIVE, 'enum EMipGenAddressMode', '\tfloat KernelWeights1D[MaxKernelExtend];', 1),
+    (TCM_RELATIVE, 'static float DetermineScaledThreshold(float Threshold, float Scale)', '\treturn AddressMode;', 1),
+    (TCM_RELATIVE, 'void ITextureCompressorModule::GenerateMipChain(', '\t\t\tLowLevelTasks::ETaskPriority::BackgroundNormal);', 2),
+    (LOD_RELATIVE, 'void UTextureLODSettings::GetMipGenSettings(const UTexture& Texture, TextureMipGenSettings& OutMipGenSettings, float& OutSharpen, uint32& OutKernelSize, bool& bOutDownsampleWithAverage, bool& bOutSharpenWithoutColorShift, bool &bOutBorderColorBlack) const', None, 0),
 ]
-# 마지막 줄 뒤에 더 가져올 줄 수다(클래스를 닫는 '};').
-RANGE_TAILS = [1]
 
 
 def default_clang() -> pathlib.Path:
@@ -42,19 +47,26 @@ def default_clang() -> pathlib.Path:
     return candidates[-1]
 
 
-def extract(tcm: pathlib.Path) -> str:
-    lines = tcm.read_text(encoding='utf-8-sig').splitlines()
+def extract(unreal: pathlib.Path) -> str:
     pieces = []
-    cursor = 0
-    for (first, last), tail in zip(RANGES, RANGE_TAILS):
+    cursors = {}
+    cache = {}
+    for relative, first, last, tail in RANGES:
+        if relative not in cache:
+            cache[relative] = (unreal / relative).read_text(encoding='utf-8-sig').splitlines()
+        lines = cache[relative]
+        cursor = cursors.get(relative, 0)
         try:
             start = next(i for i in range(cursor, len(lines)) if lines[i] == first)
-            end = next(i for i in range(start, len(lines)) if lines[i] == last) + tail
+            if last is None:
+                end = next(i for i in range(start, len(lines)) if lines[i] == '}')
+            else:
+                end = next(i for i in range(start, len(lines)) if lines[i] == last) + tail
         except StopIteration:
-            sys.exit('range not found in ' + str(tcm) + ': ' + first)
-        pieces.append('#line {} "TextureCompressorModule.cpp"'.format(start + 1))
+            sys.exit('range not found in ' + str(relative) + ': ' + first[:60])
+        pieces.append('#line {} "{}"'.format(start + 1, relative.name))
         pieces.extend(lines[start:end + 1])
-        cursor = end + 1
+        cursors[relative] = end + 1
     return '\n'.join(pieces) + '\n'
 
 
@@ -62,10 +74,18 @@ def build(clang: pathlib.Path, work: pathlib.Path, ue_libm: bool) -> pathlib.Pat
     name = 'TextureProcessingProbe' + ('Ue' if ue_libm else 'Reference')
     probe = work / (name + ('.exe' if os.name == 'nt' else ''))
     command = [
-        str(clang), '-std=c++17', '-O2', '-msse2', '-mno-avx', '-mno-avx2', '-mno-fma', '-ffp-contract=off',
+        str(clang), '-std=c++20', '-O2', '-msse2', '-mno-avx', '-mno-avx2', '-mno-fma', '-ffp-contract=off',
         '-fno-fast-math', '-DNDEBUG', '-DROCKS_PROBE_UE_LIBM=' + ('1' if ue_libm else '0'), '-w',
         '-I', str(work), '-I', str(HERE), str(HERE / 'TextureProcessingProbe.cpp'), '-o', str(probe),
     ]
+    if not ue_libm:
+        # 기준 판은 Rocks DeterministicMath를 같이 컴파일한다(정의상 Rocks 빌드와 같은 값).
+        command += [
+            '-DROCKS_DETERMINISTICMATH_API=', '-DROCKS_PLATFORMBASE_API=', '-DROCKS_BASE_API=', '-I', str(DETERMINISTIC_MATH / 'Public'),
+            '-I', str(ROOT / 'Core/Source/Runtime/Base/Public'),
+            '-I', str(ROOT / 'Core/Source/Runtime/PlatformBase/Public'),
+            str(DETERMINISTIC_MATH / 'Private/DeterministicMath.cpp'),
+        ]
     subprocess.run(command, check=True)
     return probe
 
@@ -93,9 +113,9 @@ def main() -> int:
     args = parser.parse_args()
 
     unreal = pathlib.Path(args.unreal)
-    tcm = unreal / TCM_RELATIVE
-    if not tcm.is_file():
-        sys.exit('TextureCompressorModule.cpp not found under ' + str(unreal))
+    for relative in (TCM_RELATIVE, LOD_RELATIVE):
+        if not (unreal / relative).is_file():
+            sys.exit(str(relative) + ' not found under ' + str(unreal))
 
     head = subprocess.run(['git', '-C', str(unreal), 'rev-parse', 'HEAD'], capture_output=True, text=True)
     if head.returncode != 0 or head.stdout.strip() != EXPECTED_COMMIT:
@@ -104,7 +124,7 @@ def main() -> int:
     clang = pathlib.Path(args.clang) if args.clang else default_clang()
     work = pathlib.Path(args.work) if args.work else pathlib.Path(tempfile.mkdtemp(prefix='texture-processing-'))
     work.mkdir(parents=True, exist_ok=True)
-    (work / 'TcmExtract.inc').write_text(extract(tcm), encoding='utf-8')
+    (work / 'TcmExtract.inc').write_text(extract(unreal), encoding='utf-8')
 
     reference = build(clang, work, False)
     ue = build(clang, work, True)

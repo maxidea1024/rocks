@@ -35,6 +35,12 @@ using DetachedPathFunction = Result<void> (*)(PathCursor& cursor, void* value) n
 //   }
 //
 //   auto count = PathCount(registry, access, PathTarget::Value(box), path.View());
+// 상자가 할당 없이 담는 값의 최대 크기·정렬이다(DetachedValue 안 인라인 저장소 — 단일 값·String·
+// 작은 struct는 상자를 만들 때 할당하지 않는다. setter 경유 쓰기가 쓰기마다 상자를 만든다 —
+// Docs/Design/ChangeNotification.ko.md CN-D14).
+inline constexpr usize DetachedInlineBytes = 64;
+inline constexpr usize DetachedInlineAlignment = 16;
+
 class ROCKS_OBJECTRUNTIME_API DetachedValue {
 public:
     explicit DetachedValue(Allocator& allocator) noexcept : allocator_(&allocator) {
@@ -66,7 +72,8 @@ public:
     }
 
     // 값을 소멸하고 저장소와 lease를 반환한다(빈 상자는 무동작). 해제 콜백은 이 안에서 돈다 — 묶음
-    // 게시 구간 밖에서 부른다.
+    // 게시 구간 밖에서 부른다. 해제 콜백이 같은 상자에 다시 분리하면 계약 위반이다(인라인 저장소의
+    // 값이 아직 소멸 중이다).
     void Reset() noexcept;
 
     // 담은 값을 그 형식의 기본값(T(Allocator&) 또는 T() — 상자의 allocator)으로 바꾼다(리플렉션
@@ -116,8 +123,18 @@ private:
     friend struct detail::PathRunner;
     friend class PreparedAttach;
 
+    // 값 저장소를 얻는다: DetachedInlineBytes·DetachedInlineAlignment 이하는 인라인 저장소(할당
+    // 없음 — 비어 있을 때만 부른다), 그 밖은 allocator다.
+    Result<void*> AcquireStorage(usize size, usize alignment) noexcept;
+    // AcquireStorage로 얻은 저장소를 돌려준다(인라인이면 아무것도 하지 않는다).
+    void ReleaseStorage(void* storage) noexcept;
+
     Allocator* allocator_;
     void* storage_ = nullptr;
+    // 분리·비우기마다 바뀌는 번호다(PreparedAttach가 준비 뒤 상자가 비워지고 다시 분리됐는지 본다 —
+    // 인라인 저장소는 다시 분리해도 같은 주소라 주소만으로는 가를 수 없다).
+    uint32 generation_ = 0;
+    alignas(DetachedInlineAlignment) uint8 inline_[DetachedInlineBytes];
     const RuntimeValueOps* ops_ = nullptr;
     detail::DetachedPathFunction enter_ = nullptr;
     TypeLease lease_;
@@ -182,6 +199,8 @@ private:
     usize bytes_ = 0;
     DetachedValue* box_ = nullptr;
     void* boxStorage_ = nullptr;
+    // 준비할 때 상자의 분리 번호다(DetachedValue::generation_).
+    uint32 boxGeneration_ = 0;
     ObjectHandle owner_{};
     PathTarget::Kind kind_ = PathTarget::Kind::Object;
     ConstructionContext* transaction_ = nullptr;

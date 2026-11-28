@@ -1125,11 +1125,10 @@ TEST(TextureCook_Nuggets) {
         NeverStream,
         Group,
         ProfileId,
-        Address,
         Norm16
     };
-    const Outside outside[] = {Outside::Filter,    Outside::NeverStream, Outside::Group,
-                               Outside::ProfileId, Outside::Address,     Outside::Norm16};
+    const Outside outside[] = {Outside::Filter, Outside::NeverStream, Outside::Group,
+                               Outside::ProfileId, Outside::Norm16};
     for (Outside change : outside) {
         if (change == Outside::ProfileId) {
             // 출력이 같은 다른 플랫폼(Mac — 검증 끔 대상의 BC 표가 같다)은 너겟을 같이 쓴다.
@@ -1137,13 +1136,6 @@ TEST(TextureCook_Nuggets) {
         } else if (change == Outside::Norm16) {
             // 8비트 원본은 norm16과 무관하다(키 정규화 — Windows·Android가 너겟을 함께 쓴다).
             scene.profile.textureNorm16Supported = false;
-        } else if (change == Outside::Address) {
-            // 주소는 mip 결과에 쓰이지 않는다(키 정규화 — 경고는 너겟 밖).
-            REQUIRE(scene.Edit([](Texture& texture) noexcept {
-                static_cast<Texture2D&>(texture).addressX = TextureAddress::Clamp;
-                static_cast<Texture2D&>(texture).addressY = TextureAddress::Mirror;
-                return true;
-            }));
         } else {
             REQUIRE(scene.Edit([&](Texture& texture) noexcept {
                 if (change == Outside::Filter) {
@@ -1170,9 +1162,11 @@ TEST(TextureCook_Nuggets) {
         LodBias,
         CacheId,
         NoAlpha,
+        Address,
         Source
     };
-    const Inside inside[] = {Inside::LodBias, Inside::CacheId, Inside::NoAlpha, Inside::Source};
+    const Inside inside[] = {Inside::LodBias, Inside::CacheId, Inside::NoAlpha, Inside::Address,
+                             Inside::Source};
     uint64 builds = processor.Builds();
     for (Inside change : inside) {
         if (change == Inside::Source) {
@@ -1190,6 +1184,10 @@ TEST(TextureCook_Nuggets) {
                     texture.lodBias = 1;
                 } else if (change == Inside::CacheId) {
                     texture.compressionCacheId = Guid{0xCAC4E, 1};
+                } else if (change == Inside::Address) {
+                    // 주소는 커널 mip의 원본 밖 처리를 바꾼다(12.18 TP1 — 키에 든다).
+                    static_cast<Texture2D&>(texture).addressX = TextureAddress::Clamp;
+                    static_cast<Texture2D&>(texture).addressY = TextureAddress::Mirror;
                 } else {
                     texture.compressionNoAlpha = 1;
                 }
