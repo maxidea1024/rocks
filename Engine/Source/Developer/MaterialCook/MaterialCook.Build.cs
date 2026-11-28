@@ -16,7 +16,7 @@ public sealed class MaterialCook : EngineModuleRules
 
     // Material for the asset classes and the graph reference collection, MaterialCompiler for the translator input types and the
     // source provider interface, AssetCooker for the cook processor interface and the dependency opener.
-    protected override string[] PublicDependencies => ["Core", "Material", "MaterialSchema", "MaterialCompiler", "AssetCooker", "AssetRuntime"];
+    protected override string[] PublicDependencies => ["Core", "Material", "MaterialSchema", "MaterialCompiler", "AssetCooker", "AssetRuntime", "AssetNugget"];
 
     // Texture, CurveAssets and CurveAtlas for reading the referenced assets, ObjectRuntime for Registry access.
     protected override string[] PrivateDependencies => ["Texture", "CurveAssets", "CurveAtlas", "Curves", "ObjectRuntime", "NodeGraph"];

@@ -636,6 +636,35 @@ Result<void> MaterialCookSources::AddCollection(const MaterialCookGatherContext&
     return ownedCollections_.TryPushBack(Move(owned.Value()));
 }
 
+usize MaterialCookSources::GraphCount() const noexcept {
+    return graphs_.Size();
+}
+
+const material::MaterialGraphSnapshot& MaterialCookSources::Graph(usize index) const noexcept {
+    return graphs_[index]->snapshot;
+}
+
+const material::MaterialTextureFacts* MaterialCookSources::FindTexture(Guid asset) const noexcept {
+    for (const material::MaterialTextureFacts& facts : textures_) {
+        if (facts.asset == asset) {
+            return &facts;
+        }
+    }
+
+    return nullptr;
+}
+
+const material::MaterialCollectionLayout*
+MaterialCookSources::FindCollection(Guid asset) const noexcept {
+    for (const material::MaterialCollectionLayout& layout : collections_) {
+        if (layout.asset == asset) {
+            return &layout;
+        }
+    }
+
+    return nullptr;
+}
+
 const material::MaterialGraphSnapshot*
 MaterialCookSources::FindFunction(Guid asset) const noexcept {
     for (const UniquePtr<OwnedGraph>& graph : graphs_) {

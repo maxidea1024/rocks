@@ -64,6 +64,16 @@ public:
         return references_.View();
     }
 
+    // 모은 그래프 snapshot 수와 index번째다(함수·머티리얼 — 모은 순서).
+    usize GraphCount() const noexcept;
+    const material::MaterialGraphSnapshot& Graph(usize index) const noexcept;
+
+    // asset 텍스처의 사실이다(없으면 nullptr).
+    const material::MaterialTextureFacts* FindTexture(Guid asset) const noexcept;
+
+    // asset 컬렉션의 layout이다(없으면 nullptr).
+    const material::MaterialCollectionLayout* FindCollection(Guid asset) const noexcept;
+
 private:
     struct OwnedGraph;
     struct OwnedCurve;

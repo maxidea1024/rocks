@@ -15,13 +15,13 @@ namespace {
 
 using material::MaterialAssetReferenceRole;
 
-Result<void> Add(Array<MaterialGraphReference>& out, MaterialAssetReferenceRole role,
-                 Guid id) noexcept {
+Result<void> Add(Array<MaterialGraphReference>& out, MaterialAssetReferenceRole role, Guid id,
+                 Guid node, StringView field) noexcept {
     if (id == Guid{}) {
         return Result<void>::Success();
     }
 
-    return out.TryPushBack(MaterialGraphReference{role, AssetId{id}});
+    return out.TryPushBack(MaterialGraphReference{role, AssetId{id}, node, field});
 }
 
 // 그래프 노드 하나가 참조하는 에셋 id다(field는 MaterialAssetReference 칸 — 읽지 못하면 null,
@@ -64,7 +64,7 @@ Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema&
                                                         : Result<void>::Success();
         }
 
-        return Add(out, MaterialAssetReferenceRole::Function, id.Value());
+        return Add(out, MaterialAssetReferenceRole::Function, id.Value(), node.id, field);
     };
 
     auto defaults = reader.Value().OpenStruct(
@@ -99,7 +99,8 @@ Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema&
             auto id = element ? element.Value().ReadGuid("assetId", Guid{})
                               : Result<Guid>::Failure(element.Error());
             if (id) {
-                if (auto added = Add(out, MaterialAssetReferenceRole::Function, id.Value());
+                if (auto added =
+                        Add(out, MaterialAssetReferenceRole::Function, id.Value(), node.id, list);
                     !added) {
                     return added;
                 }
@@ -155,7 +156,9 @@ Result<void> CollectMaterialGraphReferences(const NamePool& names,
                             return Result<void>::Failure(asset.Error());
                         }
 
-                        if (auto added = Add(out, field.role, asset.Value().value); !added) {
+                        if (auto added =
+                                Add(out, field.role, asset.Value().value, node.id, field.field);
+                            !added) {
                             return added;
                         }
                     }

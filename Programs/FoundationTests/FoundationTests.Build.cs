@@ -155,7 +155,7 @@ public abstract class TestsModule : ModuleRules
         ["MaterialCompiler"] = ["ObjectSerialization", "ShaderCompiler"],
         // The material cook tests build editor packages with the asset test support and write node properties with the reflection codec
         // (Docs/Design/MaterialSystem section 12.8 MS3c).
-        ["MaterialCook"] = ["AssetTestFixtures", "ObjectSerialization", "CurveAssets", "CurveAtlas", "Curves", "Texture", "NodeGraph"],
+        ["MaterialCook"] = ["AssetTestFixtures", "MaterialCompiler", "ShaderCompiler", "ObjectSerialization", "CurveAssets", "CurveAtlas", "Curves", "Texture", "NodeGraph"],
         ["Mesh"] = ["AssetTestFixtures", "MeshSource"],
         ["MeshSource"] = ["AssetTestFixtures", "CoreTypeBindings", "Mesh"],
         ["MeshTools"] = ["AssetTestFixtures", "Compression", "CoreTypeBindings", "Curves"],
