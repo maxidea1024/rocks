@@ -3142,6 +3142,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyCached::value",
+      "id": "fb125623f8294f4fbfc005de178be351",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::NotifyHolder::byKey",
       "id": "e63cf31b3f0848ad9bc5fde41a27caf1",
       "aliases": [],
@@ -3270,6 +3277,111 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::NotifySlot::item",
       "id": "43484c569ec44f7c8fd97f88508cc468",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyStyle::font",
+      "id": "78b67209cfe04192af0eec6455b94d55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyStyle::size",
+      "id": "f0735d4d9f7b443daf6996475f251543",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::cached",
+      "id": "bb5f73d39c6a42ce998381def9db8f59",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::caption",
+      "id": "8b8ceb0ee98849fcb8c26a7d9e097591",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::count",
+      "id": "7a9f31572d55452d98570bd3d769530a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::label",
+      "id": "e1b3443ea3984828a4b256fd773abd05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::link",
+      "id": "a8916e67a43f4a119681bc27d9ad267c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::nickname",
+      "id": "0a11266113a34cc4bda334b07d0c4ace",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::note",
+      "id": "1b49823035ee41fea13e570eee193883",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::quiet",
+      "id": "6798a971e9cf4d059f614f293d0cccdd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::scale",
+      "id": "161d251bb2054b2ba39cc137337b9e57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::scores",
+      "id": "4a07940ef8d8461da50d3698d1b51527",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::style",
+      "id": "2cd109fa66ff43f193736197bcb4daf7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidget::values",
+      "id": "e920fe05a720485bbff20deaadc7bae0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyWidgetChild::level",
+      "id": "92a9e668f51f45d6bddfa1cdf7ac7e33",
       "aliases": [],
       "retired": false
     },
@@ -4555,6 +4667,13 @@
       "retired": false
     },
     {
+      "kind": "function",
+      "name": "rocks::reflection_fixture::NotifyWidget::Total",
+      "id": "0efa1158e3584580906eafe14d25a975",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "subobject",
       "name": "rocks::reflection_fixture::SubobjectOwner::arm",
       "id": "cefdd342c0794b389922d427cb0ec590",
@@ -5720,6 +5839,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyCached",
+      "id": "defccfda813145a4abd42f37155bed74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::NotifyHolder",
       "id": "7ab1fdd62738464bad6db900ba915a1d",
       "aliases": [],
@@ -5764,6 +5890,27 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::NotifySlot",
       "id": "f3177802656b4cc0bf3850caf1a6a738",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyStyle",
+      "id": "e50c156f4e834b219b41e478531562a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyWidget",
+      "id": "d7364e91844246e3bc2c5fbc302147b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyWidgetChild",
+      "id": "c6ff69929d924ef88b0e92b8bb30f9e7",
       "aliases": [],
       "retired": false
     },

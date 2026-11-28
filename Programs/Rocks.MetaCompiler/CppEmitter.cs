@@ -280,6 +280,9 @@ internal static partial class CppEmitter
         // 경로 접근 thunk 템플릿(PathClassField·PathStructMember — Docs/Design/ReflectionFoundations.ko.md 7.1절)이다. 생성 소스의
         // 함수표가 인스턴스화한다(헤더가 include해 두어 생성 소스는 자기 생성 헤더만 include한다).
         Line("#include <Object/GeneratedPathAccess.h>");
+        // 값 같음(SameValue·detail::ValueSame 특수화)과 코드 통지·생성 setter의 본체(NotifyId를 쓰는 Object::NotifyChanged·SetAndNotify)다
+        // (Docs/Design/ChangeNotification.ko.md CN-D9·CN-D13·CN-D15).
+        Line("#include <Object/ObjectSetter.h>");
         // Binds 미러의 순서 대조(ROCKS_OFFSET_OF)는 Base 매크로를 쓴다(__builtin은 Base 헤더 밖에서 쓰지 않는다).
         if (schema.Ordered.Any(type => type.Header == include && type.Binds.Length != 0))
         {
@@ -403,6 +406,13 @@ internal static partial class CppEmitter
 
         Line("} // namespace rocks");
         Body("} // namespace rocks");
+        // 생성 setter 정의는 사용자 클래스의 멤버 정의라 클래스를 감싸는 이름공간 안이어야 한다 — rocks 밖 이름공간의 클래스도 받도록
+        // 전역 범위에서 한정 이름으로 정의한다.
+        foreach (ClassModel type in own.Where(type => !type.IsEnum && !type.IsStruct))
+        {
+            EmitSetters(type, Body);
+        }
+
         return (header.ToString(), source.ToString());
     }
 
@@ -607,6 +617,7 @@ internal static partial class CppEmitter
         }
 
         EmitVisitFields(schema, type, native, $"::{{0}}", Line);
+        EmitNotifyIds(type, native, Line);
         Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept;");
         Body($"RuntimeTypeOps {self}::Ops(ModuleLease module) noexcept {{");
         Body($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
@@ -1204,6 +1215,7 @@ internal static partial class CppEmitter
         EmitVisitFields(schema, type, native, native, Line);
         string? baseNative = type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName;
         EmitValueCopy(type, native, baseNative, Line, Body);
+        EmitSameValue(type, native, baseNative, Line);
         EmitValidateTree(type, native, baseNative, checks, Line, Body);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept;");
         Body($"RuntimeStructOps {self}::Ops(ModuleLease module) noexcept {{");
@@ -1263,6 +1275,11 @@ internal static partial class CppEmitter
         Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
         Line("};");
         // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S·InstancedStruct 내용)의 검증이 이 struct의 ValidateTree를 쓰게 잇는다(Object/ValueCopy.h).
+        // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S)의 같음이 이 struct의 SameValue를 쓰게 잇는다(Object/ValueSame.h).
+        Line($"template <> struct detail::ValueSame<{native}> {{");
+        Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueComparable;");
+        Line($"static bool Same(const {native}& left, const {native}& right) noexcept {{ return GeneratedType<{native}>::SameValue(left, right); }}");
+        Line("};");
         Line($"template <> struct detail::ValueValidate<{native}> {{");
         Line($"static constexpr bool HasHook = GeneratedType<{native}>::HasValidateTree;");
         Line($"static Result<void> Run(const {native}& value) noexcept {{ return GeneratedType<{native}>::ValidateTree(value); }}");
@@ -1417,6 +1434,126 @@ internal static partial class CppEmitter
         Body($"Result<void> {self}::CopyValue({native}& destination, const {native}& source, Allocator& allocator) noexcept {{");
         Body($"return CopyValueImpl<{native}>(destination, source, allocator);");
         Body("}");
+    }
+
+    // struct 값의 같음이다(Docs/Design/ChangeNotification.ko.md CN-D15 — RuntimeClassMetadata A5b의 인코딩 같음). 리플렉션 base(리플렉션 B9k)
+    // 하위 객체를 base의 SameValue로 먼저 보고, 자기 PROPERTY 멤버를 선언 순서로 detail::ValueSame으로 비교한다. NATIVE 멤버는 저장하지
+    // 않으므로 보지 않되, NATIVE 멤버가 있는 struct는 늘 다르다로 본다. bitfield bool은 값 비교다. ValueComparable은 모든 멤버가 비교할 수 있는지이고(거짓이면 그 멤버의 Same이 늘
+    // 거짓이라 struct도 늘 다르다), 헤더의 inline이다(멤버 struct의 특수화는 생성 헤더 include로 보인다).
+    private static void EmitSameValue(ClassModel type, string native, string? baseNative, Action<string> Line)
+    {
+        IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
+        FieldModel[] members = [.. ownFields.Where(field => !field.IsEvent)];
+        string comparable = (baseNative is null ? "true" : $"GeneratedType<{baseNative}>::ValueComparable") +
+            string.Concat(members.Where(field => !field.Bitfield).Select(field =>
+                Guard(field, $" && ::rocks::detail::ValueSame<decltype({native}::{field.Name})>::Supported", inline: true)));
+        // NATIVE 멤버가 있는 struct는 늘 다르다(저장하지 않는 멤버만 다른 새 값을 같다고 보면 setter가 대입을 건너뛴다).
+        if (type.NativeMembers.Count != 0)
+        {
+            Line("static constexpr bool ValueComparable = false;");
+            Line($"static bool SameValue(const {native}&, const {native}&) noexcept {{ return false; }}");
+            return;
+        }
+
+        Line($"static constexpr bool ValueComparable = {comparable};");
+        Line($"static bool SameValue(const {native}& left, const {native}& right) noexcept {{");
+        if (baseNative is not null)
+        {
+            Line($"if (!GeneratedType<{baseNative}>::SameValue(static_cast<const {baseNative}&>(left), static_cast<const {baseNative}&>(right))) {{ return false; }}");
+        }
+        else if (members.Length == 0)
+        {
+            Line("(void)left;");
+            Line("(void)right;");
+        }
+
+        foreach (FieldModel field in members)
+        {
+            Line(Guard(field, field.Bitfield
+                ? $"if (left.{field.Name} != right.{field.Name}) {{ return false; }}"
+                : $"if (!::rocks::detail::ValueSame<decltype({native}::{field.Name})>::Same(left.{field.Name}, right.{field.Name})) {{ return false; }}"));
+        }
+
+        Line("return true;");
+        Line("}");
+    }
+
+    // 코드 통지의 멤버 → ID 표다(Docs/Design/ChangeNotification.ko.md CN-D9 — Object::NotifyChanged·SetAndNotify·생성 setter). 이 클래스가 선언한
+    // Notify 필드(bitfield 제외 — 멤버 포인터가 없다)와 Notify 함수를 템플릿 인자 동등성(detail::SameMemberV — virtual 함수에서도 상수식)으로
+    // 고른다. 대상이 아니면 static_assert다. 기반의 멤버는 멤버 포인터 형식이 기반을 가리키므로 기반의 표가 답한다.
+    private static void EmitNotifyIds(ClassModel type, string native, Action<string> Line)
+    {
+        (string Name, string Id)[] targets = [.. type.OwnFields.Where(field => field.Spec.Notify && !field.Bitfield && !field.IsEvent).Select(field => (field.Name, field.Id)),
+            .. type.Functions.Where(function => function.Spec.Notify).Select(function => (function.Name, function.Id))];
+        // 생성 setter가 있는 필드다(SetAndNotify가 static_assert로 막는다 — setter가 Apply까지 한다, CN-D13).
+        string setters = string.Concat(type.Accessors.Where(accessor => accessor.Setter).Select(accessor =>
+            Guard(type.OwnFields.First(own => own.Name == accessor.Field), $" || ::rocks::detail::SameMemberV<Member, &{native}::{accessor.Field}>", inline: true)));
+        Line("template <auto Member>");
+        Line($"static constexpr bool HasSetter = false{setters};");
+        Line("template <auto Member>");
+        Line("static constexpr Guid NotifyId() noexcept {");
+        string fallback = $"static_assert(::rocks::detail::NotNotifyTargetV<Member>, \"NotifyChanged/SetAndNotify target must be a Notify field or Notify function declared by {type.Name}; name an inherited or overriding member through the class that declares it, &Base::member (ChangeNotification CN-D9)\");";
+        if (targets.Length == 0)
+        {
+            Line(fallback);
+            Line("return Guid{};");
+        }
+        else
+        {
+            for (int index = 0; index < targets.Length; ++index)
+            {
+                Line($"{(index == 0 ? "if" : "} else if")} constexpr (::rocks::detail::SameMemberV<Member, &{native}::{targets[index].Name}>) {{");
+                Line($"return {GuidValue(targets[index].Id)};");
+            }
+
+            Line("} else {");
+            Line(fallback);
+            Line("return Guid{};");
+            Line("}");
+        }
+
+        Line("}");
+    }
+
+    // 생성 setter 정의다(Docs/Design/ChangeNotification.ko.md CN-D13 — ROCKS_SETTER가 선언). Notify 필드면 대입 전 접근 검사(Prepare — 문맥·
+    // 스레드·종료) → 같은 값이면 끝 → 대입(detail::SetterAccess::Assign — 사본 뒤 교환) → Apply → Notify 필드면 통지(실패는 그 오류 — Busy만 남는다). 매개변수 형식은 선언과 같은 detail::SetterParam<decltype(필드)>이다. EditorOnly
+    // 필드의 setter는 필드와 같은 조건으로 감싼다. Apply 함수의 모양은 static_assert로 대조한다(RMC2904 — 오버로드·없는 이름은 컴파일 오류).
+    private static void EmitSetters(ClassModel type, Action<string> Body)
+    {
+        string native = "::" + type.NativeName;
+        foreach (AccessorModel setter in type.Accessors.Where(accessor => accessor.Setter))
+        {
+            FieldModel field = type.OwnFields.First(own => own.Name == setter.Field);
+            string member = $"&{native}::{field.Name}";
+            List<string> lines =
+            [
+                $"auto {native}::{setter.Name}(::rocks::detail::SetterParam<decltype({native}::{field.Name})> value) noexcept -> ::rocks::Result<void> {{",
+                $"using Access = ::rocks::detail::SetterAccess<decltype({member})>;",
+                .. field.Spec.Notify
+                    ? (string[])["if (auto ready = Access::Prepare(*this); !ready) {", "return ready;", "}", ""]
+                    : [],
+                $"auto assigned = Access::template Assign<{member}>(*this, value);",
+                "if (!assigned) {",
+                "return ::rocks::Result<void>::Failure(assigned.Error());",
+                "}",
+                "",
+                "if (!assigned.Value()) {",
+                "return ::rocks::Result<void>::Success();",
+                "}",
+                ""
+            ];
+            if (field.Spec.Apply.Length != 0)
+            {
+                // 오버로드가 있어도 `void ()` noexcept 하나를 고른다(없으면 RMC2904 문구의 static_assert — decltype(&C::F)는 오버로드에서
+                // ill-formed라 쓰지 않는다 — 템플릿 람다의 의존 requires라야 틀린 식이 오류 대신 거짓이 된다). 기반 클래스의 함수도 받는다(기반 멤버 포인터는 파생 멤버 포인터로 바뀐다).
+                lines.Add($"static_assert([]<class Self = {native}>() noexcept {{ return requires {{ static_cast<void (Self::*)() noexcept>(&Self::{field.Spec.Apply}); }}; }}(), \"Apply method {type.Name}::{field.Spec.Apply} must be 'void {field.Spec.Apply}() noexcept' of {type.Name} or a base (RMC2904)\");");
+                lines.Add($"(this->*static_cast<void ({native}::*)() noexcept>(&{native}::{field.Spec.Apply}))();");
+            }
+
+            lines.Add(field.Spec.Notify ? $"return Access::template Notify<{member}>(*this);" : "return ::rocks::Result<void>::Success();");
+            lines.Add("}");
+            Body(Guard(field, SiteComment(type.Header, setter.Site.Line, $"{type.Name}::{setter.Name}") + "\n" + string.Join("\n", lines)));
+        }
     }
 
     // 클래스·struct 스키마의 필드 배열이다(필드가 없으면 내지 않는다). 배열 필드는 value가 {Array, 0}이고 원소 형식

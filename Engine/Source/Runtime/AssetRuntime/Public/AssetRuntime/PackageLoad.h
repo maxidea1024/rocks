@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetRuntime/BulkStore.h>
+#include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Object/TypeLease.h>
@@ -259,6 +260,8 @@ private:
     Array<uint8> bulkBytes_;
     Array<PackageBulkSlot> bulkSlots_;
     UniquePtr<PackageBulkStore> bulkStore_;
+    // Sidecar 섹션 값의 사본이다(Prepare가 만들고 Package가 이어받는다 — AS 20.6 2).
+    UniquePtr<PackageSidecarState> sidecar_;
     bool prepared_ = false;
     bool attempted_ = false;
     bool readOnly_ = false;

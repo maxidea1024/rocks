@@ -1,4 +1,5 @@
 #include "MaterialBuiltinNodes.h"
+#include "MaterialParameterValues.h"
 
 #include <MaterialSchema/Nodes/Parameters/ChannelMaskParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Parameters/ChannelMaskParameterProperties.h>
@@ -128,18 +129,21 @@ constexpr MaterialPinDefinition CurveAtlasRowParameterPins[] = {
 
 constexpr MaterialNodeDefinition ParametersDefinitions[] = {
     MaterialNode("Material.ScalarParameter")
+        .ParameterValue(&ScalarParameterValue)
         .Properties(&GeneratedType<ScalarParameterProperties>::Schema, ScalarParameterNonSemantic)
         .TextDefaults(ScalarParameterTextDefaults)
         .Pins(ScalarParameterPins)
         .Menu("Scalar Parameter", "Parameters", "Parameters", "Scalar Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.VectorParameter")
+        .ParameterValue(&VectorParameterValue)
         .Properties(&GeneratedType<VectorParameterProperties>::Schema, VectorParameterNonSemantic)
         .TextDefaults(VectorParameterTextDefaults)
         .Pins(VectorParameterPins)
         .Menu("Vector Parameter", "Parameters", "Parameters", "Vector Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.DoubleVectorParameter")
+        .ParameterValue(&DoubleVectorParameterValue)
         .Properties(&GeneratedType<DoubleVectorParameterProperties>::Schema,
                     DoubleVectorParameterNonSemantic)
         .TextDefaults(DoubleVectorParameterTextDefaults)
@@ -147,6 +151,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
         .Menu("Double Vector Parameter", "Parameters", "Parameters", "Double Vector Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.ChannelMaskParameter")
+        .ParameterValue(&ChannelMaskParameterValue)
         .Properties(&GeneratedType<ChannelMaskParameterProperties>::Schema,
                     ChannelMaskParameterNonSemantic)
         .TextDefaults(ChannelMaskParameterTextDefaults)
@@ -155,6 +160,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
               "Channel Mask Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.StaticBoolParameter")
+        .ParameterValue(&StaticSwitchParameterValue)
         .Properties(&GeneratedType<StaticBoolParameterProperties>::Schema,
                     StaticBoolParameterNonSemantic)
         .TextDefaults(StaticBoolParameterTextDefaults)
@@ -162,6 +168,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
         .Menu("Static Bool Parameter", "Parameters", "Parameters", "Static Bool Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.StaticSwitchParameter")
+        .ParameterValue(&StaticSwitchParameterValue)
         .Properties(&GeneratedType<StaticSwitchParameterProperties>::Schema,
                     StaticSwitchParameterNonSemantic)
         .TextDefaults(StaticSwitchParameterTextDefaults)
@@ -169,6 +176,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
         .Menu("Static Switch Parameter", "Parameters", "Parameters", "Static Switch Parameter.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.StaticComponentMaskParameter")
+        .ParameterValue(&StaticComponentMaskParameterValue)
         .Properties(&GeneratedType<StaticComponentMaskParameterProperties>::Schema,
                     StaticComponentMaskParameterNonSemantic)
         .TextDefaults(StaticComponentMaskParameterTextDefaults)
@@ -189,6 +197,7 @@ constexpr MaterialNodeDefinition ParametersDefinitions[] = {
         .Menu("Parameter Collection Transform", "Parameters", "Parameters CollectionTransform",
               "Parameter Collection Transform."),
     MaterialNode("Material.CurveAtlasRowParameter")
+        .ParameterValue(&CurveAtlasRowParameterValue)
         .AssetReferences(AtlasReference)
         .Properties(&GeneratedType<CurveAtlasRowParameterProperties>::Schema,
                     CurveAtlasRowParameterNonSemantic)

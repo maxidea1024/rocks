@@ -974,6 +974,24 @@ internal static class CompilerDriver
                     .At(field.Site);
             }
 
+            // 생성 setter·getter는 대상 필드와 같은 자리다(EditorOnly 필드면 #if ROCKS_WITH_EDITOR_DATA 블록 안, 아니면 밖 — ChangeNotification
+            // CN-D13). 생성 setter 정의도 같은 조건으로 감싼다.
+            foreach (AccessorModel accessor in type.Accessors)
+            {
+                FieldModel? field = type.OwnFields.FirstOrDefault(own => own.Name == accessor.Field);
+                if (field is null || scan.InEditorDataBlock(accessor.Site.File, accessor.Site.Line) == field.Spec.EditorOnly)
+                {
+                    continue;
+                }
+
+                string macro = accessor.Setter ? "ROCKS_SETTER" : "ROCKS_GETTER";
+                string problem = field.Spec.EditorOnly ? $"targets EditorOnly field '{field.Name}' but is not inside '#if ROCKS_WITH_EDITOR_DATA'"
+                    : $"is inside '#if ROCKS_WITH_EDITOR_DATA' but field '{field.Name}' is not EditorOnly";
+                throw new MetadataException($"{type.Name}::{accessor.Name} ({macro}) {problem}", "RMC2502",
+                    $"Write the {macro} of an EditorOnly field in the same '#if ROCKS_WITH_EDITOR_DATA' block as the field, and every other one outside it.")
+                    .At(accessor.Site);
+            }
+
             // 리플렉션 함수도 EditorOnly 지정과 #if ROCKS_WITH_EDITOR 블록 위치가 같아야 한다(RMC2706 — Docs/Design/FunctionReflection.ko.md FD14).
             foreach (FunctionModel function in type.Functions)
             {

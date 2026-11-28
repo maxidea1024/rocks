@@ -6,13 +6,15 @@
 
 ### 7.1.20 PH6 하위 단계(2026-11-28)
 
-PH6은 다섯으로 나눈다(크기 — "순서대로"). 각 하위 단계는 설계 갱신 → 구현 → 리뷰어 1명 → 커밋이다. 메시 로드 시스템(엔진 런타임 30.6절 — `StaticMeshComponent`가 메시 lease를 얻는 곳)이 아직 없으므로 메시에 기대지 않는 PH6a·PH6b를 먼저 한다.
+PH6은 일곱으로 나눈다(크기 — "순서대로", PH6b는 셋 — 2026-11-28). 각 하위 단계는 설계 갱신 → 구현 → 리뷰어 1명 → 커밋이다. 메시 로드 시스템(엔진 런타임 30.6절 — `StaticMeshComponent`가 메시 lease를 얻는 곳)이 아직 없으므로 메시에 기대지 않는 PH6a·PH6b를 먼저 한다.
 
 | 하위 단계 | 내용 | 선행 |
 |---|---|---|
 | PH6a | 여러 형상 body(7.1.21절): World 형상 값을 원소 목록으로, 원소 종류 구·상자·캡슐·테이퍼드 캡슐, 원소 transform·`collisionEnabled`·`contributeToMass`, 원소별 UE scale 굽기, Jolt compound, 원소 충돌 켬 필터(질의·시뮬레이션·probe), `HitResult::elementIndex`, 컴포넌트 sweep 원소별(UE `ComponentSweepMulti`), `IsZeroExtent` 가상, 관성 주값, PA13 | PH5 |
-| PH6b | weld(2.8절): 자식 형상을 부모 body compound에 더하기·빼기, 부착·떼기·상태 파괴, Kinematic 루트 규칙, 질의 결과의 원래 컴포넌트, 질량 다시 계산, 깨움 이벤트 전하기(7.1.19절), weld body 잠금은 부모 설정 | PH6a |
-| PH6c | `StaticMeshComponent` 단순 충돌: 메시 로드 정보의 충돌 사본(엔진 런타임 30.3절 `ApplyLoadedMeshInfo` 확장), `SimpleCollision` → 원소, convex(점 → Jolt hull — 실행 중 만들기는 편집기·개발 빌드만, 계획 16.4절), `useDefaultCollision`·`complexity` Default·SimpleAndComplex·SimpleAsComplex | PH6a, 메시 로드 시스템(없으면 착수 때 런타임 세션에 요청) |
+| PH6b1 | weld 장면 쪽(7.1.22절): `WeldBody`·`UnweldBody`, body 부분(part) 표, 부분 원소를 루트 공간으로 굽기, 잎 user data의 부분 번호, 질의 hit·접촉 hit의 원래 컴포넌트, 부분별 무시 목록, 컴포넌트 sweep 제외 Actor(모든 부분), 부분별 overlap(UE `IsShapeBoundToBody`), 질량 다시 계산 | PH6a |
+| PH6b2 | weld 컴포넌트 쪽(2.8절): `autoWeld` 상태 생성, 부착 규칙 `weldSimulatedBodies`, 떼기·상태 파괴의 unweld, 루트 시뮬레이션 전환의 `ApplyWeldOnChildren`, 직접 이동·형상 변경의 다시 weld, Kinematic 루트 규칙, 힘·속도·질량·잠듦·body 값 API를 루트로(UE `GetBodyInstance()` 기본 weld), 깨움 이벤트 전하기(7.1.19절) | PH6b1 |
+| PH6b3 | weld 부분별 object type·응답·접촉 알림(UE `UpdatePhysicsFilterData`가 원래 body 값으로 형상마다 필터를 만든다) | PH6b2 |
+| PH6c | `StaticMeshComponent` 단순 충돌: 메시 로드 정보의 충돌 사본(엔진 런타임 30.3절 `ApplyLoadedMeshInfo` 확장), `SimpleCollision` → 원소, convex(점 → Jolt hull — 실행 중 만들기는 편집기·개발 빌드만, 계획 16.4절), `useDefaultCollision`·`complexity` Default·SimpleAndComplex·SimpleAsComplex | PH6b3, 메시 로드 시스템(없으면 착수 때 런타임 세션에 요청) |
 | PH6d | complex-as-simple·`traceComplex` 삼각형 메시(Jolt `MeshShape` — 정적·Kinematic만, 어댑터 경계 4절), MTD의 complex 하위 형상 거르기(7.1.14절 한계), 뒷면 모드(7.1.7절 한계), PA06·PA09(메시)·PA11 | PH6c |
 | PH6e | 쿠킹 형상 너겟(계획 16.4절 cook — PC05: Jolt 판·schema·축 사상·단위 변환 판 불일치 거부), 장면 형상 공유(에셋 lease와 같은 수명 — 2.4절), 공유 형상 캐시 수명(7.1.1절 PH6 재검토) | PH6c·PH6d, 에셋 쿠킹 |
 
@@ -66,3 +68,38 @@ UE는 모든 body가 `FKAggregateGeom` 원소들의 형상 묶음이다(shape �
 - `Physics/Tests/PhysicsCompoundSceneTests.cpp`(Monolithic — 장면 직접): 원소 둘(상자 + 구, 위치·회전) 질량·질량 중심 손계산(Jolt 균일 밀도 → 7.1.15절), `contributeToMass` 거짓 원소 제외, 모두 제외 대체값, 비균일 scale 원소별 굽기(회전한 상자 원소 축, 캡슐·구 규칙), 거울 scale 중심, 원소 충돌 켬(질의 전용 원소는 시뮬레이션 접촉 없음·질의 hit 있음, 물리 전용 원소는 질의 hit 없음·접촉 있음, probe 원소는 밀지 않음), `elementIndex`, 관성 주값(대각선 위 두 구 — UE 고유값 식과 순서), 원소 충돌 켬이 섞인 body의 manifold reduction 끔·형상 교체 때 다시 맞춤, probe 원소의 접촉 통지, `SetBodyGeometry` compound 다시 만들기, 회전한 원소의 거울 scale(UE 거울 회전), 원소 하나짜리 대체 질량 중심.
 - PA13(원소 경로 — `PhysicsCompoundSceneTests`): 끝점(ray로 +Z·−Z 끝까지 거리), 선분 중점 = 원소 중심, 반경을 반높이로 자른 한 구 포함, 같은 반경 캡슐, 거울 scale 반경 교환.
 - 컴포넌트 경로(`Physics/Tests/PhysicsCompoundTests.cpp`): 원소 둘을 주는 시험 native 컴포넌트로 body 생성·컴포넌트 sweep 원소별(두 원소가 다른 시간에 닿음 — 시간순·원소 순서), `IsZeroExtent`(Box·Sphere·Capsule 값과, 크기 0 컴포넌트 sweep이 line trace라 같은 Actor 형제를 맞힘), scale 변경의 compound 다시 만들기.
+
+### 7.1.22 PH6b1 구현 세부(2026-11-28)
+
+UE는 weld한 자식 body의 형상을 루트 입자에 더하고(`FBodyInstance::Weld` — `E/Private/PhysicsEngine/BodyInstance.cpp:1940–2033`), 형상마다 원래 body를 `ShapeToBodiesMap`(`FWeldInfo` — 자식 body·상대 transform)으로 기억한다. Rocks 장면은 body 칸에 부분(part) 표를 둔다.
+
+**장면 API(`PhysicsScene`).**
+- `BodyWeldDesc`(World): `component`·`actor`(자식), `geometry`(자식 원소 — 자식 컴포넌트 공간, scale 전), `relative`(자식 월드 transform의 루트 월드 기준 상대 — scale 포함, UE `TheirTM.GetRelativeTransform(MyTM)`), `collisionEnabled`(자식 실효 충돌 켬), `settings`(자식 body 값 — 질량 칸, nullptr이면 기본값).
+- `WeldBody(root, desc)`: 루트 body에 부분을 더하고 형상을 다시 만든다(UE `Weld` → `PostShapeChange` → `UpdateMassProperties` — 질량은 아래 "질량"대로 다시 계산). 같은 컴포넌트가 이미 부분이면 relative·형상을 바꾼다(UE `SetWeldedBodyTransform` = `UnWeld` + `Weld`). 깨움: UE `Weld`는 깨우지 않는다 — 형상 교체만이다(Rocks도 `SetShape`를 깨우지 않게 부른다). 오류: 없는 handle(StaleHandle), 원소 없음·비유한 값·원소 수 합 > `BodyGeometryMaxElements`·부분 수 > `BodyWeldMaxParts`(InvalidArgument), 할당 실패. 실패하면 이전 형상·부분을 둔다.
+- `UnweldBody(root, component)`: 그 부분을 빼고 형상을 다시 만든다(UE `UnWeld` → `PostShapeChange`). 없는 부분·handle은 무시한다.
+- 루트 body를 지우면 부분도 함께 사라진다(UE는 루트 `OnDestroyPhysicsState`가 먼저 `UnWeldChildren` — 컴포넌트 쪽 PH6b2).
+
+**부분 굽기(UE `AddShapesToRigidActor_AssumesLocked(this, Scale3D, …, RelativeTM)` — `GetFinalScaled(Scale3D, RelativeTM)`).** 루트 scale S, 부분 relative R(위치 t, 회전 q, scale s)에 대해 부분 원소는:
+- 크기: S ⊙ s(원소 크기 규칙의 scale — UE `SetupNonUniformHelper(Scale3D * RelativeTM.GetScale3D())`).
+- 중심: (R.TransformPosition(center)) ⊙ S(UE `RelativeTM.TransformPosition(Center) * Scale3D`).
+- 회전: 거울(7.1.21절 `ScaledElementRotation`)을 둘로 나눠 적용한다 — relative scale s의 거울은 원소 축에, 루트 scale S의 거울은 relative 회전 뒤(루트 축)에: Mirror(q · Mirror(r, s), S)(UE `FKBoxElem`: `GetTransform() * RelativeTM * ScaleTransform(Scale3D)` — `BodySetup.cpp:2048–2064`). UE 캡슐·테이퍼드 캡슐은 `RelativeTM.GetRotation() * Mirror(r, Scale3D)`로 다르게 셈한다(`:2144–2165`·`:2249–2270`) — Rocks는 모든 원소에 상자 규칙(기하적으로 맞는 거울)을 쓴다(UE와 다른 점, 거울 루트 scale과 relative 회전이 함께 있을 때만 드러난다). 테이퍼드 캡슐 두 반경은 (S ⊙ s).z < 0이면 바꾼다.
+- 원소 번호는 부분 순서(루트 0, weld 순서)로 이어 붙인 번호다(UE `ShapeIndex` — 루트 입자의 형상 배열 번호).
+- 부분 원소의 충돌 켬은 `CollisionEnabledIntersection(자식 실효 충돌 켬, 원소 값)`로 굽는다(UE가 원래 body 값으로 필터를 만드는 것의 켬 몫 — 부분별 object type·응답은 PH6b3). 필터 때 루트 body 값(층)과 한 번 더 교집합한다(루트 body의 참여가 모든 부분을 가른다 — 한계).
+
+**질량(UE `UpdateMassProperties` — `BodyInstance.cpp:3422–3480`).** 부분이 둘 이상이면 원래 body(부분)마다 그 잎만으로 7.1.15절 질량 규칙(재질 밀도·`RaiseMassToPower`·`massScale`·덮어쓰기·관성 배율·질량 중심 이동)을 따로 적용한다. 질량 중심 이동은 부분의 `MassModifierTransform`(relative 회전 · (relative scale ⊙ 루트 scale))으로 루트 공간에 옮긴다(UE `MassModifierTransform.TransformVector(COMNudge)`). 그다음 Chaos `CombineWorldSpace`(`CH/Private/Chaos/MassProperties.cpp:281–331`)처럼 질량을 더하고, 질량 가중 질량 중심에 평행축 정리로 관성을 합친다. 질량에 넣는 원소가 없는 부분은 빠진다(UE는 그 형상을 먼저 걸러 batch가 없다). 부분이 모두 빠지거나 루트만이면 7.1.21절(원시 질량 = 원소 묶음 값, 0이면 UE 대체값)이다. body 형상의 질량 중심은 합친 질량 중심으로 옮긴다(`OffsetCenterOfMassShape` — inner 질량 중심과의 차, 0이면 감싸지 않는다). 루트 질량 setter(7.1.18절)도 같은 계산이다.
+
+**잎 user data.** 표지 bit | 부분 번호(bit 40–55) | 충돌 켬(bit 32–39) | 원소 번호(bit 0–31)다. 부분 수 상한 `BodyWeldMaxParts` = 65535(16 bit).
+
+**질의.**
+- hit의 `component`·`actor`는 잎 부분의 컴포넌트·Actor다(UE `ShapeToOriginalBodyInstance` — `CollisionConversions.cpp:161`). 질의 수집 기록에 부분 번호를 둔다: overlap 합치기(같은 컴포넌트 하나)는 (칸, 부분)마다, 같은 거리 순서는 (칸, 부분) 순이다.
+- 무시 목록(`ignoreComponents`·`ignoreActors`)과 컴포넌트 질의의 제외는 부분마다 본다(UE 형상 filter data의 owner id가 원래 body 것 — `ShapeFilter`가 `mBodyID2`의 칸·잎 부분으로 판정). 부분이 하나뿐인 body는 지금처럼 body 필터에서 거른다.
+- 컴포넌트 sweep(`TraceBody`)은 루트의 모든 부분 원소를 쓸고, 모든 부분의 Actor를 뺀다(UE "All actors pointed to by shapes should be ignored (This deals with welded Actors)" — `WorldCollision.cpp:531–543`).
+- 컴포넌트 overlap(`OverlapBody`)은 인자 `part`(null = 루트 자신)의 원소만 쓴다(UE `IsShapeBoundToBody` — `BodyInstance.cpp:4440`). 원소마다 질의하고 (칸, 부분)마다 합친다(막음 OR). 자세는 그 부분 컴포넌트 기준이다: 원소 자리는 루트 공간 자리에 부분 원점(relative 이동 ⊙ 루트 scale)·relative 회전의 역을 적용한 것으로 따로 기억한다(같은 형상 — UE `RootSpaceToWeldedSpace`, `BodyInstance.cpp:4358–4376`).
+- MTD(`ComputePenetration`)는 대상 body의 모든 원소다(7.1.21절 그대로).
+
+**접촉 hit.** body 쌍마다 하나다(UE `GetPendingCollisionForContactPair` — `PhysScene_Chaos.cpp:1065`, 충격량은 쌍의 합). 컴포넌트·Actor는 묶음의 첫 접촉 원소(정렬 — 부분 쌍 순)의 부분 것이다(UE `GetBodyInstanceFromProxyAndShape` — `:1110–1114`). 알림 표지는 body 값이다(부분별 표지는 PH6b3). 컴포넌트 sweep은 자기 body를 통째로 뺀다(Actor 없는 부분도).
+
+**결과 반영·깨움.** 루트 body만 결과 목록에 있다(weld 자식은 부착으로 따라간다). 깨움 이벤트 전하기는 컴포넌트 쪽(PH6b2 — UE `DispatchWakeEvents`가 weld 자식에 재귀).
+
+**시험(`PhysicsWeldSceneTests.cpp` — Monolithic).** 루트(구) + weld 자식(위 상자, relative 위치·회전·scale) 형상·질량(부분마다 UE 규칙 뒤 합 — UnrealMass(구) + UnrealMass(상자))·질량 중심(수정한 질량 가중)·자식 질량 중심 이동, 셋 이상 부분의 가운데 unweld·다시 weld 뒤 범위·원소 번호, weld 루트의 `SetBodyGeometry`·scale 변경이 부분을 지킴, relative 회전 굽기와 부분 overlap, 부분별 무시 목록(shape sweep·overlap), 잠든 body weld는 깨우지 않음, 접촉 hit는 body 쌍마다 하나, 루트 scale과 relative scale의 곱(원소 크기)·중심 굽기, hit 컴포넌트·원소 번호(루트 원소 다음), 부분별 무시 목록(자식 무시 → 루트 hit만), overlap 부분별(루트 질의는 자식 원소를 안 씀)·(칸, 부분) 합치기, 컴포넌트 sweep의 부분 Actor 제외, 접촉 hit 컴포넌트, `UnweldBody` 뒤 원래 형상·질량, 같은 자식 다시 weld(relative 변경), 실패 원자성(비유한 relative).
+

@@ -171,6 +171,8 @@ private:
     platform::AsyncIoContext io_;
     bool ioStarted_ = false;
     UniquePtr<AsyncCookedPackageIo> files_;
+    // 스트리밍 bulk 범위 IO다(AssetSystem 20.6 1 — 같은 io_).
+    UniquePtr<AsyncStreamedBulkIo> streamedFiles_;
     UniquePtr<WorkerScheduler> scheduler_;
     UniquePtr<WorkerSchedulerLoaderWorker> worker_;
     UniquePtr<AssetManager> manager_;

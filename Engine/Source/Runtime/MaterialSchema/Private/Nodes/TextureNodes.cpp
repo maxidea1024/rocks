@@ -1,4 +1,5 @@
 #include "MaterialBuiltinNodes.h"
+#include "MaterialParameterValues.h"
 
 #include "MaterialDynamicPins.h"
 #include <MaterialSchema/Nodes/Texture/AntialiasedTextureMaskProperties.generated.h>
@@ -293,6 +294,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .DynamicPins(&TextureObjectOutputPins<TextureObjectProperties>)
         .Menu("Texture Object", "Texture", "Texture Functions", "Texture Object."),
     MaterialNode("Material.TextureObjectParameter")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureObjectParameterProperties>::Schema,
                     TextureObjectParameterNonSemantic)
@@ -310,6 +312,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .DynamicPins(&TextureSampleMipPins<TextureSampleProperties>)
         .Menu("Texture Sample", "Texture", "Texture", "Texture Sample."),
     MaterialNode("Material.TextureSampleParameter2D")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameter2DProperties>::Schema,
                     TextureSampleParameter2DNonSemantic)
@@ -318,6 +321,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("Param2D", "Texture", "Texture Parameters", "Param2D.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameter2DArray")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameter2DArrayProperties>::Schema,
                     TextureSampleParameter2DArrayNonSemantic)
@@ -326,6 +330,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("Param2DArray", "Texture", "Texture Parameters", "Param2DArray.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterCube")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterCubeProperties>::Schema,
                     TextureSampleParameterCubeNonSemantic)
@@ -334,6 +339,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamCube", "Texture", "Texture Parameters", "ParamCube.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterCubeArray")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterCubeArrayProperties>::Schema,
                     TextureSampleParameterCubeArrayNonSemantic)
@@ -342,6 +348,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamCubeArray", "Texture", "Texture Parameters", "ParamCubeArray.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterVolume")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterVolumeProperties>::Schema,
                     TextureSampleParameterVolumeNonSemantic)
@@ -350,6 +357,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("ParamVolume", "Texture", "Texture Parameters", "ParamVolume.")
         .Flags(MaterialNodeFlags::Parameter),
     MaterialNode("Material.TextureSampleParameterSubUv")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<TextureSampleParameterSubUvProperties>::Schema,
                     TextureSampleParameterSubUvNonSemantic)
@@ -365,6 +373,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Pins(TexturePropertyPins)
         .Menu("Texture Property", "Texture", "Texture", "Texture Property."),
     MaterialNode("Material.AntialiasedTextureMask")
+        .ParameterValue(&TextureParameterValue)
         .AssetReferences(TextureReference)
         .Properties(&GeneratedType<AntialiasedTextureMaskProperties>::Schema,
                     AntialiasedTextureMaskNonSemantic)
@@ -383,6 +392,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
         .Menu("Texture Collection", "Texture", "Texture", "Texture Collection.")
         .Missing(MaterialPrerequisite::TextureCollection),
     MaterialNode("Material.TextureCollectionParameter")
+        .ParameterValue(&TextureCollectionParameterValue)
         .Properties(&GeneratedType<TextureCollectionParameterProperties>::Schema,
                     TextureCollectionParameterNonSemantic)
         .Pins(TextureCollectionParameterPins)
@@ -426,6 +436,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
               "SparseVolumeTexture Object.")
         .Missing(MaterialPrerequisite::SparseVolumeTexture),
     MaterialNode("Material.SparseVolumeTextureObjectParameter")
+        .ParameterValue(&SparseVolumeTextureParameterValue)
         .Properties(&GeneratedType<SparseVolumeTextureObjectParameterProperties>::Schema,
                     SparseVolumeTextureObjectParameterNonSemantic)
         .Pins(SparseVolumeTextureObjectParameterPins)
@@ -440,6 +451,7 @@ constexpr MaterialNodeDefinition TextureDefinitions[] = {
               "Material expression for sampling from a runtime virtual texture.")
         .Missing(MaterialPrerequisite::SparseVolumeTexture),
     MaterialNode("Material.SparseVolumeTextureSampleParameter")
+        .ParameterValue(&SparseVolumeTextureParameterValue)
         .Properties(&GeneratedType<SparseVolumeTextureSampleParameterProperties>::Schema,
                     SparseVolumeTextureSampleParameterNonSemantic)
         .Pins(SparseVolumeTextureSampleParameterPins)

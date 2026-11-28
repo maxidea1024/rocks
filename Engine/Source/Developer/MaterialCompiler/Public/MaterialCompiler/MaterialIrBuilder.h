@@ -7,6 +7,7 @@
 #include <Core/Result.h>
 #include <MaterialCompiler/MaterialIrCustomTable.h>
 #include <MaterialCompiler/MaterialIrParameter.h>
+#include <MaterialCompiler/MaterialIrParameterOrigin.h>
 #include <MaterialCompiler/MaterialIrTexture.h>
 #include <MaterialCompiler/MaterialIrTextureSample.h>
 #include <MaterialCompiler/MaterialIrValue.h>
@@ -138,6 +139,15 @@ public:
         return parameters_.View();
     }
 
+    // 파라미터 출처를 기록한다(12.8절 MS3d1 — 정체마다 처음 것만, 같은 정체면 출처도 같다).
+    // 오류: 할당 실패.
+    Result<void> AddParameterOrigin(IrParameterOrigin&& origin) noexcept;
+
+    // 기록한 파라미터 출처다(기록 순).
+    Span<const IrParameterOrigin> ParameterOrigins() const noexcept {
+        return origins_.View();
+    }
+
     const IrValue& Value(IrValueId id) const noexcept;
 
     Span<const IrValue> Values() const noexcept {
@@ -174,6 +184,7 @@ private:
     Array<IrValue> values_;
     Array<IrParameter> parameters_;
     Array<IrTexture> textures_;
+    Array<IrParameterOrigin> origins_;
     IrCustomTable customs_;
     HashMap<Key, IrValueId, KeyHash, KeyEqual> lookup_;
     IrSite site_;

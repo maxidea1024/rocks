@@ -142,8 +142,8 @@ bool Contains(Span<const ObjectHandle> handles, ObjectHandle handle) noexcept {
 
 // a가 b보다 앞인지다(4.5절 — key, 같으면 막음이 아닌 쪽이 앞, 그다음 칸 번호, PMD10). key는
 // fraction(정렬) 또는 Jolt early-out fraction(First 고르기)이다.
-bool HitBefore(float aKey, bool aBlocking, uint32 aSlot, float bKey, bool bBlocking,
-               uint32 bSlot) noexcept {
+bool HitBefore(float aKey, bool aBlocking, uint64 aSlot, float bKey, bool bBlocking,
+               uint64 bSlot) noexcept {
     if (aKey != bKey) {
         return aKey < bKey;
     }
@@ -153,6 +153,17 @@ bool HitBefore(float aKey, bool aBlocking, uint32 aSlot, float bKey, bool bBlock
     }
 
     return aSlot < bSlot;
+}
+
+// 같은 순서 key의 hit를 가르는 값이다: 칸 번호, 그다음 부분 번호(7.1.22절).
+constexpr uint32 HitPartBits = 16;
+static_assert(BodyWeldMaxParts < (usize(1) << HitPartBits) &&
+                  BodyWeldMaxParts <= physics::ElementPartMask,
+              "Weld part indices must fit the hit key and the element user data");
+
+template <class Record>
+uint64 HitKey(const Record& record) noexcept {
+    return (static_cast<uint64>(record.slot) << HitPartBits) | record.part;
 }
 
 // Jolt 벡터 축 수다(x·y·z).
@@ -192,14 +203,17 @@ public:
             return false;
         }
 
-        // 컴포넌트 질의는 자기 Actor(sweep)·자기 컴포넌트(overlap)를 더 뺀다(7.1.9절).
-        if ((!exclusion_.actor.IsNull() && slot->actor == exclusion_.actor) ||
-            (!exclusion_.component.IsNull() && slot->component == exclusion_.component)) {
+        // 컴포넌트 sweep의 자기 body는 통째로 뺀다(Actor가 없는 부분도 — 7.1.22절).
+        if (slot == exclusion_.sweptBody) {
             return false;
         }
 
-        return !Contains(params_.ignoreComponents, slot->component) &&
-               !Contains(params_.ignoreActors, slot->actor);
+        // 부분이 둘 이상인 body(weld)는 무시 목록·제외를 원소 필터가 부분마다 본다(7.1.22절).
+        if (slot->parts.Size() > 1) {
+            return true;
+        }
+
+        return !scene_.IsExcludedPart(slot->parts[0], params_, exclusion_);
     }
 
 private:
@@ -234,6 +248,7 @@ public:
         record.body = result.mBodyID;
         record.subShape = result.mSubShapeID2;
         record.slot = UserDataIndex(bodies.GetUserData(result.mBodyID));
+        record.part = scene_.PartOfHit(result.mBodyID, result.mSubShapeID2);
         record.stops = kind.stops;
         record.reportBlocking = kind.reportBlocking;
         switch (mode_) {
@@ -243,8 +258,8 @@ public:
             return;
 
         case TraceMode::First:
-            if (!found ||
-                HitBefore(record.fraction, true, record.slot, best.fraction, true, best.slot)) {
+            if (!found || HitBefore(record.fraction, true, HitKey(record), best.fraction, true,
+                                    HitKey(best))) {
                 best = record;
                 found = true;
                 Narrow(record.fraction);
@@ -331,6 +346,7 @@ public:
         record.body = result.mBodyID2;
         record.subShape = result.mSubShapeID2;
         record.slot = UserDataIndex(bodies.GetUserData(result.mBodyID2));
+        record.part = scene_.PartOfHit(result.mBodyID2, result.mSubShapeID2);
         // 막는 시작 겹침은 겹침으로 모아 sweep을 계속한다(UE — 결과는 막음으로 보고한다).
         record.stops = kind.stops && !initial;
         record.reportBlocking = kind.reportBlocking;
@@ -344,7 +360,8 @@ public:
             return;
 
         case TraceMode::First:
-            if (!found || HitBefore(record.order, true, record.slot, best.order, true, best.slot)) {
+            if (!found ||
+                HitBefore(record.order, true, HitKey(record), best.order, true, HitKey(best))) {
                 best = record;
                 found = true;
                 Narrow(record.order);
@@ -398,9 +415,9 @@ HitResult JoltPhysicsScene::MakeLineHit(const Vec3d& start, const Vec3d& end,
     hit.traceStart = start;
     hit.traceEnd = end;
     hit.blockingHit = record.reportBlocking;
-    const BodySlot& slot = slots_[record.slot];
-    hit.component = slot.component;
-    hit.actor = slot.actor;
+    const BodyPart& part = PartOf(slots_[record.slot], record.part);
+    hit.component = part.component;
+    hit.actor = part.actor;
     hit.elementIndex = HitElementIndex(record);
     if (record.fraction <= 0.0f) {
         // 시작점이 볼록 형상 안이다(mTreatConvexAsSolid — UE line trace의 시작 겹침: 점 = 시작,
@@ -441,14 +458,15 @@ Result<bool> JoltPhysicsScene::TraceLine(const Vec3d& start, const Vec3d& end,
     JPH::RayCastSettings settings;
     settings.mTreatConvexAsSolid = true;
     QueryLayerFilter layerFilter(responseSets_, filter, params, RuleOf(mode));
-    QueryBodyFilter bodyFilter(*this, params);
+    const QueryExclusion none;
+    QueryBodyFilter bodyFilter(*this, params, none);
     RayHitCollector collector(*this, filter, params, mode);
     // 임시 목록은 All만 쓴다(질의는 게임 thread에서 하나씩 — 장면 콜백이 없어 재진입하지 않는다).
     if (mode == TraceMode::All) {
         queryHits_.Clear();
     }
 
-    const ElementQueryFilter shapeFilter;
+    const ElementQueryFilter shapeFilter(*this, params, none);
     system_.GetNarrowPhaseQuery().CastRay(ray, settings, collector, {}, layerFilter, bodyFilter,
                                           shapeFilter);
     if (collector.failed) {
@@ -477,10 +495,39 @@ int32 JoltPhysicsScene::HitElementIndex(const QueryHitRecord& record) const noex
         return 0;
     }
 
-    uint32 index = 0;
-    CollisionEnabled enabled = CollisionEnabled::NoCollision;
+    ElementTag tag;
     const JPH::uint64 data = lock.GetBody().GetShape()->GetSubShapeUserData(record.subShape);
-    return UnpackElementUserData(data, index, enabled) ? static_cast<int32>(index) : 0;
+    return UnpackElementUserData(data, tag) ? static_cast<int32>(tag.index) : 0;
+}
+
+uint32 JoltPhysicsScene::PartOfHit(const JPH::BodyID& body,
+                                   const JPH::SubShapeID& subShape) const noexcept {
+    const JPH::RefConst<JPH::Shape> shape = system_.GetBodyInterfaceNoLock().GetShape(body);
+    ElementTag tag;
+    return shape != nullptr && UnpackElementUserData(shape->GetSubShapeUserData(subShape), tag)
+               ? tag.part
+               : 0;
+}
+
+bool JoltPhysicsScene::IsExcludedPart(const BodyPart& part, const QueryParams& params,
+                                      const QueryExclusion& exclusion) const noexcept {
+    // 컴포넌트 질의는 자기 Actor(sweep — weld body는 모든 부분의 Actor)·자기 컴포넌트(overlap)를 더
+    // 뺀다(7.1.9·7.1.22절).
+    if ((!exclusion.actor.IsNull() && part.actor == exclusion.actor) ||
+        (!exclusion.component.IsNull() && part.component == exclusion.component)) {
+        return true;
+    }
+
+    if (exclusion.sweptBody != nullptr) {
+        for (const BodyPart& swept : exclusion.sweptBody->parts) {
+            if (!swept.actor.IsNull() && part.actor == swept.actor) {
+                return true;
+            }
+        }
+    }
+
+    return Contains(params.ignoreComponents, part.component) ||
+           Contains(params.ignoreActors, part.actor);
 }
 
 HitResult JoltPhysicsScene::MakeShapeHit(const Vec3d& start, const Vec3d& end,
@@ -491,9 +538,9 @@ HitResult JoltPhysicsScene::MakeShapeHit(const Vec3d& start, const Vec3d& end,
     hit.traceStart = start;
     hit.traceEnd = end;
     hit.blockingHit = record.reportBlocking;
-    const BodySlot& slot = slots_[record.slot];
-    hit.component = slot.component;
-    hit.actor = slot.actor;
+    const BodyPart& part = PartOf(slots_[record.slot], record.part);
+    hit.component = part.component;
+    hit.actor = part.actor;
     hit.elementIndex = HitElementIndex(record);
     hit.impactPoint = FromJoltPosition(record.contact, origin_);
     // 형상을 밀어낼 방향(쓸고 간 형상 쪽 법선)이다 — Jolt penetration axis는 맞은 body를 밀어낼
@@ -584,9 +631,10 @@ Result<bool> JoltPhysicsScene::FlushAllHits(const Vec3d& start, const Vec3d& end
     usize nearest = IndexNone;
     for (usize index = 0; index < queryHits_.Size(); ++index) {
         const QueryHitRecord& record = queryHits_[index];
-        if (record.stops && (nearest == IndexNone || HitBefore(record.fraction, true, record.slot,
-                                                               queryHits_[nearest].fraction, true,
-                                                               queryHits_[nearest].slot))) {
+        if (record.stops &&
+            (nearest == IndexNone ||
+             HitBefore(record.fraction, true, HitKey(record), queryHits_[nearest].fraction, true,
+                       HitKey(queryHits_[nearest])))) {
             nearest = index;
         }
     }
@@ -611,8 +659,8 @@ Result<bool> JoltPhysicsScene::FlushAllHits(const Vec3d& start, const Vec3d& end
 
     // UE FCompareFHitResultTime: time, 같으면 보고된 막음이 뒤(CollisionConversions.cpp:930-939).
     algo::Sort(queryHits_.View(), [](const QueryHitRecord& a, const QueryHitRecord& b) noexcept {
-        return HitBefore(a.fraction, a.reportBlocking, a.slot, b.fraction, b.reportBlocking,
-                         b.slot);
+        return HitBefore(a.fraction, a.reportBlocking, HitKey(a), b.fraction, b.reportBlocking,
+                         HitKey(b));
     });
     if (auto reserved = all.TryEnsureCapacity(all.Size() + queryHits_.Size()); !reserved) {
         queryHits_.Clear();
@@ -673,7 +721,7 @@ Result<bool> JoltPhysicsScene::TraceJoltShape(
     const JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
     QueryLayerFilter layerFilter(responseSets_, filter, params, RuleOf(mode));
     QueryBodyFilter bodyFilter(*this, params, exclusion);
-    const ElementQueryFilter shapeFilter;
+    const ElementQueryFilter shapeFilter(*this, params, exclusion);
     if (mode == TraceMode::All) {
         queryHits_.Clear();
     }
@@ -775,8 +823,8 @@ Result<bool> JoltPhysicsScene::TraceBody(PhysicsBodyHandle body, const Vec3d& st
     // 참조를 먼저 복사한다(질의가 칸 배열을 바꾸지 않지만 잎 형상 수명을 질의 동안 쥔다).
     // 형상이 가리키는 Actor(자기 Actor)를 모두 뺀다.
     QueryExclusion exclusion;
-    exclusion.actor = slot->actor;
     exclusion.component = slot->component;
+    exclusion.sweptBody = slot;
     const usize first = all.Size();
     bool blocking = false;
     for (const ElementShape& element : slot->elementShapes) {
@@ -840,6 +888,7 @@ public:
         QueryHitRecord record;
         record.body = result.mBodyID2;
         record.slot = UserDataIndex(bodies.GetUserData(result.mBodyID2));
+        record.part = scene_.PartOfHit(result.mBodyID2, result.mSubShapeID2);
         record.reportBlocking = kind.reportBlocking;
         if (!scene_.queryHits_.TryPushBack(record)) {
             failed = true;
@@ -857,28 +906,21 @@ private:
     OverlapMode mode_;
 };
 
-Result<bool> JoltPhysicsScene::OverlapJoltShape(const JPH::Shape& joltShape, const Vec3d& position,
-                                                const Quatd& rotation, const QueryFilter& filter,
-                                                const QueryParams& params, OverlapMode mode,
-                                                Array<OverlapResult>* all,
-                                                const QueryExclusion& exclusion) const noexcept {
-    if (filter.kind == QueryFilter::Kind::Profile || (mode == OverlapMode::All && all == nullptr)) {
-        return Result<bool>::Failure(ErrorCode::InvalidArgument);
-    }
-
+Result<bool> JoltPhysicsScene::CollectOverlap(const JPH::Shape& joltShape, const Vec3d& position,
+                                              const Quatd& rotation, const JPH::Mat44& local,
+                                              const QueryFilter& filter, const QueryParams& params,
+                                              OverlapMode mode,
+                                              const QueryExclusion& exclusion) const noexcept {
     const JPH::RVec3 base = ToJoltPosition(position, origin_);
-    const JPH::RMat44 transform = JPH::RMat44::sRotationTranslation(ToJoltRotation(rotation), base);
+    const JPH::RMat44 transform =
+        JPH::RMat44::sRotationTranslation(ToJoltRotation(rotation), base) * local;
     QueryLayerFilter layerFilter(responseSets_, filter, params, RuleOf(mode));
     QueryBodyFilter bodyFilter(*this, params, exclusion);
+    const ElementQueryFilter shapeFilter(*this, params, exclusion);
     // 닿기만 한 형상(깊이 0)도 겹침이다(분리 거리 0).
     JPH::CollideShapeSettings settings;
     settings.mMaxSeparationDistance = 0.0f;
     OverlapCollector collector(*this, filter, params, mode);
-    if (mode == OverlapMode::All) {
-        queryHits_.Clear();
-    }
-
-    const ElementQueryFilter shapeFilter;
     system_.GetNarrowPhaseQuery().CollideShape(&joltShape, JPH::Vec3::sReplicate(1.0f),
                                                transform.PreTranslated(joltShape.GetCenterOfMass()),
                                                settings, base, collector, {}, layerFilter,
@@ -888,21 +930,21 @@ Result<bool> JoltPhysicsScene::OverlapJoltShape(const JPH::Shape& joltShape, con
         return Result<bool>::Failure(ErrorCode::OutOfMemory);
     }
 
-    if (mode != OverlapMode::All) {
-        return Result<bool>::Success(collector.found);
-    }
+    return Result<bool>::Success(collector.found);
+}
 
-    // 같은 컴포넌트(같은 칸)의 여러 hit는 하나로 합치고(막음은 OR — UE ConvertOverlapResults), body
-    // handle 순으로 둔다(PMD10).
+Result<bool> JoltPhysicsScene::FlushOverlaps(Array<OverlapResult>& all) const noexcept {
+    // 같은 컴포넌트(같은 칸·부분)의 여러 hit는 하나로 합치고(막음은 OR — UE ConvertOverlapResults),
+    // body handle·부분 순으로 둔다(PMD10, 7.1.22절).
     algo::Sort(queryHits_.View(), [](const QueryHitRecord& a, const QueryHitRecord& b) noexcept {
-        return a.slot < b.slot;
+        return HitKey(a) < HitKey(b);
     });
     usize kept = 0;
     bool blocking = false;
     for (usize index = 0; index < queryHits_.Size(); ++index) {
         const QueryHitRecord record = queryHits_[index];
         blocking = blocking || record.reportBlocking;
-        if (kept != 0 && queryHits_[kept - 1].slot == record.slot) {
+        if (kept != 0 && HitKey(queryHits_[kept - 1]) == HitKey(record)) {
             queryHits_[kept - 1].reportBlocking =
                 queryHits_[kept - 1].reportBlocking || record.reportBlocking;
             continue;
@@ -911,22 +953,44 @@ Result<bool> JoltPhysicsScene::OverlapJoltShape(const JPH::Shape& joltShape, con
         queryHits_[kept++] = record;
     }
 
-    if (auto reserved = all->TryEnsureCapacity(all->Size() + kept); !reserved) {
+    if (auto reserved = all.TryEnsureCapacity(all.Size() + kept); !reserved) {
         queryHits_.Clear();
         return Result<bool>::Failure(reserved.Error());
     }
 
     for (usize index = 0; index < kept; ++index) {
-        const BodySlot& slot = slots_[queryHits_[index].slot];
+        const BodyPart& part = PartOf(slots_[queryHits_[index].slot], queryHits_[index].part);
         OverlapResult overlap;
-        overlap.component = slot.component;
-        overlap.actor = slot.actor;
+        overlap.component = part.component;
+        overlap.actor = part.actor;
         overlap.blockingHit = queryHits_[index].reportBlocking;
-        (void)all->TryPushBack(overlap);
+        (void)all.TryPushBack(overlap);
     }
 
     queryHits_.Clear();
     return Result<bool>::Success(blocking);
+}
+
+Result<bool> JoltPhysicsScene::OverlapJoltShape(const JPH::Shape& joltShape, const Vec3d& position,
+                                                const Quatd& rotation, const QueryFilter& filter,
+                                                const QueryParams& params, OverlapMode mode,
+                                                Array<OverlapResult>* all,
+                                                const QueryExclusion& exclusion) const noexcept {
+    if (filter.kind == QueryFilter::Kind::Profile || (mode == OverlapMode::All && all == nullptr)) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (mode == OverlapMode::All) {
+        queryHits_.Clear();
+    }
+
+    auto found = CollectOverlap(joltShape, position, rotation, JPH::Mat44::sIdentity(), filter,
+                                params, mode, exclusion);
+    if (!found || mode != OverlapMode::All) {
+        return found;
+    }
+
+    return FlushOverlaps(*all);
 }
 
 Result<bool> JoltPhysicsScene::OverlapShape(const Vec3d& position, const Quatd& rotation,
@@ -1023,9 +1087,9 @@ bool JoltPhysicsScene::ComputePenetration(PhysicsBodyHandle body, const Collisio
     return found && found.Value();
 }
 
-Result<bool> JoltPhysicsScene::OverlapBody(PhysicsBodyHandle body, const Vec3d& position,
-                                           const Quatd& rotation, const QueryFilter& filter,
-                                           const QueryParams& params,
+Result<bool> JoltPhysicsScene::OverlapBody(PhysicsBodyHandle body, ObjectHandle part,
+                                           const Vec3d& position, const Quatd& rotation,
+                                           const QueryFilter& filter, const QueryParams& params,
                                            Array<OverlapResult>& all) const noexcept {
     AssertNotStepping();
     const BodySlot* slot = FindSlot(body);
@@ -1038,21 +1102,43 @@ Result<bool> JoltPhysicsScene::OverlapBody(PhysicsBodyHandle body, const Vec3d& 
         return Result<bool>::Failure(unit.Error());
     }
 
-    JPH::RefConst<JPH::Shape> shape;
-    {
-        JPH::BodyLockRead lock(system_.GetBodyLockInterface(), slot->body);
-        if (!lock.Succeeded()) {
-            return Result<bool>::Failure(ErrorCode::StaleHandle);
+    // 부분(null = 루트 자신)을 찾는다.
+    usize partIndex = 0;
+    if (!part.IsNull()) {
+        partIndex = IndexNone;
+        for (usize index = 0; index < slot->parts.Size(); ++index) {
+            if (slot->parts[index].component == part) {
+                partIndex = index;
+            }
         }
 
-        shape = lock.GetBody().GetShape();
+        if (partIndex == IndexNone) {
+            return Result<bool>::Failure(ErrorCode::StaleHandle);
+        }
     }
 
-    // UE ComponentOverlapMulti: 자기 컴포넌트만 뺀다.
+    // UE ComponentOverlapMulti: 그 부분 컴포넌트만 뺀다. 그 부분의 원소만 쓴다(UE
+    // IsShapeBoundToBody — 7.1.22절). 원소마다 모아 (칸, 부분)마다 합친다. 형상 참조를 먼저
+    // 복사한다.
     QueryExclusion exclusion;
-    exclusion.component = slot->component;
-    return OverlapJoltShape(*shape, position, unit.Value(), filter, params, OverlapMode::All, &all,
-                            exclusion);
+    exclusion.component = slot->parts[partIndex].component;
+    queryHits_.Clear();
+    for (const ElementShape& element : slot->elementShapes) {
+        if (element.part != partIndex) {
+            continue;
+        }
+
+        const JPH::RefConst<JPH::Shape> shape = element.shape;
+        const JPH::Mat44 local = JPH::Mat44::sRotationTranslation(
+            ToJoltRotation(element.partRotation), ToJoltDisplacement(element.partPosition));
+        auto collected = CollectOverlap(*shape, position, unit.Value(), local, filter, params,
+                                        OverlapMode::All, exclusion);
+        if (!collected) {
+            return collected;
+        }
+    }
+
+    return FlushOverlaps(all);
 }
 
 } // namespace rocks::physics

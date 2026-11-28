@@ -77,6 +77,9 @@
 | MAS7 | 10.2절(쿠킹 처리기 문맥) | 처리기가 쿠킹 대상의 Build 의존 패키지를 전이로 열어 읽는 길: `CookContext`에 좁은 인터페이스(예 `CookDependencyOpener* dependencies` — `Open(AssetId, AssetDiagnostic*)` 하나, CookRun이 `EditorPackageSet::Open`으로 구현, 닫기는 지금 Release·CloseOpened). 소유 스레드 전용, Open 뒤 이전 `EditorPackageInfo` 참조는 무효, 열기가 의존 패키지를 dirty로 만들어도 메모리 값을 쓴다(12.8절 MS3c). **구현**: 머티리얼 세션이 `CookDependencyOpener`(CookProcessor.h)·`CookContext::dependencies`를 더했다(2026-11-28) |
 | MAS6 | 9절(의존 입력 튜플) | 의존 튜플의 세 번째 값이 "같은 처리기 build key"가 아닌 "의존 에셋 종류가 정한 의존 키"(함수 키·컬렉션 layout 서명, 12.2절)일 수 있다는 일반화. 머티리얼 번역 너겟은 AssetId 없는 평평한 키(셰이더 job 너겟과 같은 Record 키 — 에셋 처리기 SCC 식의 예외, static 변형 공유 8.5절)이고 bucket은 `material_translation`이다 |
 | MAS8 | 쿠킹 진단 코드 | `AssetDiagnosticCode::MaterialTranslationFailed`(detail = MaterialDiagnosticCode, related = 진단 asset) — 노드·문구는 쿠킹 보고서(12.8절 MS3c) |
+| MAS9 | 10.2절 결정 6(쿠킹 처리기 문맥) | `CookContext::cookKey` — 실행기가 Cook 전에 계산한 패키지 cookKey를 처리기에 준다(머티리얼 셰이더 묶음 Record 키 — 12.8절 MS3d3·MS3d4. 쿠킹 패키지는 Tags를 가질 수 없어(AssetSystem 5장 표, `PackageReader.cpp` 검사) 패키지에 셰이더 집합 id를 적는 대신 이 키로 찾는다). 머티리얼 세션이 구현한다 |
+| MAS10 | AssetDiagnosticCode 목록(`AssetDiagnostic.h`, `AssetDiagnosticIsWarning`) | 머티리얼 쿠킹 진단 `MaterialReferencesOutOfSync`(오류 — 참조 필드 동기화 누락, related = 빠진 AssetId), `MaterialDependencyUndeclared`(오류 — 번역 의존이 모은 집합 밖), `MaterialTranslationWarning`(경고 — setting = 진단 코드), `MaterialShaderSetMissing`(오류 — 묶음 원천이 셰이더 집합을 찾지도 다시 만들지도 못함), `MaterialStaticVariantPending`(경고 — static 변형 인스턴스는 MS6까지 부모 artifact). 머티리얼 세션이 구현한다 |
+| MAS11 | 쿠킹 실행 진단(`CookRun.cpp` 실패 경로) | 처리기 실패의 `AssetDiagnostic::detail`을 쿠킹 진단 `setting`으로 옮긴다(지금은 0 — `MaterialTranslationFailed`의 첫 오류 코드가 보고서에 남게). 머티리얼 세션이 구현한다 |
 
 **엔진 구현 계획(EngineImplementationPlan.ko.md)**
 
