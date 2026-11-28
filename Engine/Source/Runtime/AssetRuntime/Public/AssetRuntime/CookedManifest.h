@@ -359,10 +359,10 @@ Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const
 // — 섹션이 없으면 sidecarBytes 0)·Summary 프로파일
 // 칸(PackageProfile)·Dependencies(PackageDependencies — (asset, kind) 순서 배열이 같아야 한다)를
 // manifest·entry와 본다. 오류는 CheckCookedPackage와 같다.
-Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
-                                        const CookedManifestEntry& entry,
-                                        const PackageContents& contents,
-                                        AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedPackageContents(const CookedManifest& manifest, const CookedManifestEntry& entry,
+                           const PackageContents& contents,
+                           AssetDiagnostic* failure = nullptr) noexcept;
 
 // 쿠킹 루트 기준 패키지 파일 경로(AS 4.2절 `Packages/<a>/<A>-<h>.rpkg`)를 out 뒤에 붙인다.
 //
