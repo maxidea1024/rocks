@@ -18,6 +18,28 @@ Result<TypeLease> Object::TryGetType() const noexcept {
     return registry_->AcquireTypeSelf(handle_, this);
 }
 
+Result<void> Object::NotifySelf(Guid id) noexcept {
+    // 생성자 안(registry_는 생성자 반환 뒤에 놓인다)과 Registry 밖 인스턴스는 통지하지
+    // 않는다(CN-D9).
+    if (!registry_) {
+        return Result<void>::Success();
+    }
+
+    return registry_->NotifySelf(handle_, this, id);
+}
+
+Result<void> Object::CheckNotifyAccess() const noexcept {
+    if (!registry_) {
+        return Result<void>::Success();
+    }
+
+    return registry_->CheckSelfAccess();
+}
+
+Allocator* Object::ValueAllocator() const noexcept {
+    return registry_ ? &registry_->ObjectAllocator() : nullptr;
+}
+
 Result<ObjectLifecycle> Object::InspectLifecycle() const noexcept {
     if (!registry_) {
         return Result<ObjectLifecycle>::Failure(ErrorCode::StaleHandle);

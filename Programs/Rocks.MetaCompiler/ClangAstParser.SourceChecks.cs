@@ -178,6 +178,17 @@ internal sealed partial class ClangAstParser
                 "Put ROCKS_FUNCTION right before a non-template member function of the ROCKS_CLASS (function templates and nested types are not reflected).");
         }
 
+        // ROCKS_SETTER·ROCKS_GETTER(CN-D13)는 리플렉션 클래스 본문의 멤버 함수 선언이다(매크로가 선언을 만든다).
+        foreach (string accessor in (string[])["rocks.setter", "rocks.getter"])
+        {
+            if (Annotation(node, accessor) is not null && (kind != "CXXMethodDecl" || !directReflectedMember) &&
+                !(kind == "CXXMethodDecl" && InheritedAnnotation(node, accessor)))
+            {
+                throw new MetadataException("ROCKS_SETTER and ROCKS_GETTER must be written directly in the body of a reflected CLASS", "RMC2903",
+                    "Write ROCKS_SETTER(SetName, field) or ROCKS_GETTER(GetName, field) in the ROCKS_CLASS body after the field declaration.");
+            }
+        }
+
         if (Annotation(node, "rocks.field.native") is not null && (kind != "FieldDecl" || !reflectedOwner))
         {
             throw new MetadataException("ROCKS_NATIVE must annotate a nonstatic data field owned by a reflected CLASS or STRUCT");

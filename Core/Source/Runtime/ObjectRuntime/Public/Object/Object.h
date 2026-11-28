@@ -3,6 +3,7 @@
 #include <Base/TypeTraits.h>
 #include <Core/Result.h>
 #include <Core/TypeKey.h>
+#include <Meta/Annotations.h>
 #include <Meta/GeneratedType.h>
 #include <Object/BoundCoreValues.h>
 #include <Object/ObjectHandle.h>
@@ -13,6 +14,27 @@ namespace rocks {
 class ObjectRegistry;
 class ConstructionContext;
 class TraceVisitor;
+class Object;
+
+namespace detail {
+
+// 멤버 포인터 형식의 소유 클래스·멤버 형식이다(멤버 함수 포인터면 Value는 함수 형식이다).
+template <class T>
+struct MemberPointerParts;
+
+template <class M, class C>
+struct MemberPointerParts<M C::*> {
+    using Owner = C;
+    using Value = M;
+};
+
+// 코드 통지·생성 setter의 본체다(Object/ObjectSetter.h — 생성 헤더가 include한다). 이 헤더에서는
+// 선언만 하므로 정의가 보이지 않는 번역 단위에서 NotifyChanged·SetAndNotify를 쓰면 불완전 형식
+// 컴파일 오류다.
+template <class MemberPointer>
+struct SetterAccess;
+
+} // namespace detail
 
 // 레지스트리에서 관찰한 한 시점의 논리 상태다. 값은 객체 수명이나 접근권을 보존하지 않는다.
 // Unreachable은 증분 GC cutoff에서 아직 Retired로 분류되지 않은 white 객체다.
@@ -69,8 +91,80 @@ protected:
     Object() noexcept = default;
     ~Object() = default;
 
+    // Member(이 객체 클래스나 그 기반의 Notify 필드·Notify 계산 값 함수 — &Class::member)가
+    // 바뀌었을 수 있음을 구독자에게 알린다(UE BroadcastFieldValueChanged —
+    // Docs/Design/ChangeNotification.ko.md CN-D9). 생성 setter가 없는 필드를 코드가 직접 바꿨을 때,
+    // 계산 값 함수의 입력이 바뀌었을 때 쓴다. Member는 멤버 포인터 템플릿 인자이고 그 클래스의 생성
+    // 헤더(GeneratedType<C>::NotifyId)가 ID로 바꾼다 — Notify 대상이 아니면 컴파일 오류다. bitfield
+    // 필드는 쓸 수 없다(멤버 포인터가 없다). 부르는 코드는 그 클래스의 생성 헤더를 include한 .cpp에
+    // 둔다(본체 detail::SetterAccess와 NotifyId가 생성 헤더로 보인다 — 리플렉션 헤더의 인라인
+    // 본문은 메타 단계 Clang 실행이 생성 헤더 없이 읽으므로 불완전 형식 오류다).
+    //
+    // 조건: 소유 스레드, 이 객체의 접근 문맥(실행 scope, 없으면 Registry 기본 문맥 — 엄격 모드면
+    // scope 누락은 실패). Borrow는 필요 없다(호출자가 이 객체의 멤버 함수 안에 있다). Member는 호출
+    // 클래스나 그 기반의 멤버여야 한다(컴파일 검사). 재정의한 virtual 계산 값 함수는 선언한 기반의
+    // 이름
+    // (&Base::Function)으로 쓴다. 생성자 안(Registry 없음)·게시 전 객체·구독자 없는 객체는 아무것도
+    // 하지 않고 Success다.
+    // 오류: 접근 문맥·스레드(WrongContext·WrongThread 등 Registry 접근 검사의 오류), Registry 종료
+    // ShuttingDown, 처리 표시·묶음 게시 구간 Busy.
+    // 수명: 구독자는 이 호출 안에서 동기로 불린다(CN-D6).
+    //
+    // 사용 예:
+    //   void Health::Damage(int32 amount) noexcept {
+    //       current -= amount;
+    //       (void)NotifyChanged<&Health::current>();
+    //       (void)NotifyChanged<&Health::Percent>();   // ROCKS_FUNCTION(Pure, Notify) 계산 값
+    //   }
+    template <auto Member, class Self>
+    Result<void> NotifyChanged(this Self& self) noexcept {
+        static_assert(IsBaseOfV<typename detail::MemberPointerParts<decltype(Member)>::Owner, Self>,
+                      "NotifyChanged needs a member of the calling class or one of its bases");
+        static_assert(!IsConstV<Self>, "NotifyChanged needs a non-const object (call it from a "
+                                       "non-const member function)");
+        return detail::SetterAccess<decltype(Member)>::template Notify<Member>(self);
+    }
+
+    // Member(Notify 필드 — &Class::member)에 value를 넣고 알린다(UE UE_MVVM_SET_PROPERTY_VALUE —
+    // CN-D9). 지금 값과 같으면(CN-D15 — Object/ValueSame.h) 아무것도 하지 않고 false, 넣었으면 알린
+    // 뒤 true다. 대입 규칙은 생성 setter와 같다(Meta/Annotations.h ROCKS_SETTER — 할당하는 값은
+    // 사본을 먼저 만들고 교환, 실패하면 그 오류이고 필드는 그대로). 생성 setter(ROCKS_SETTER)가
+    // 있는 필드는 쓸 수 없다(컴파일 오류 — setter가 Apply까지 한다). 오류: 접근
+    // 문맥·스레드·Registry 종료는 대입 전에 본다(필드 그대로). 사본 할당 실패(OutOfMemory 등), 사본
+    // allocator가 없음(생성자 안의 Text·struct 등 — Unsupported)도 필드 그대로다. 대입 뒤 통지의
+    // Busy(처리 표시·묶음 게시 구간)는 필드가 이미 새 값이다.
+    //
+    // 사용 예:
+    //   if (auto changed = SetAndNotify<&Health::current>(next); changed && changed.Value()) {
+    //       ...   // 바뀌었다
+    //   }
+    template <auto Member, class Self>
+    Result<bool>
+    SetAndNotify(this Self& self,
+                 detail::SetterParam<typename detail::MemberPointerParts<decltype(Member)>::Value>
+                     value) noexcept {
+        static_assert(IsBaseOfV<typename detail::MemberPointerParts<decltype(Member)>::Owner, Self>,
+                      "SetAndNotify needs a member of the calling class or one of its bases");
+        static_assert(!IsConstV<Self>, "SetAndNotify needs a non-const object (call it from a "
+                                       "non-const member function)");
+        return detail::SetterAccess<decltype(Member)>::template SetAndNotify<Member>(self, value);
+    }
+
 private:
     friend class ObjectRegistry;
+    template <class>
+    friend struct detail::SetterAccess;
+
+    // 이 객체의 통지 진입점이다(ObjectRegistry::NotifySelf — Registry가 없으면 Success).
+    Result<void> NotifySelf(Guid id) noexcept;
+
+    // 통지할 쓰기의 사전 검사다(ObjectRegistry::CheckSelfAccess — Registry가 없으면 Success): 대입
+    // 전에 접근 문맥·스레드·종료를 보아 대입 뒤 실패를 Busy만 남긴다.
+    Result<void> CheckNotifyAccess() const noexcept;
+
+    // setter 사본의 allocator다: Registry의 객체 allocator, Registry가 없으면(생성자 안) nullptr.
+    Allocator* ValueAllocator() const noexcept;
+
     // 생성자 반환 후 설정하며 물리 소멸까지 변경하지 않는다. Registry가 객체보다 오래 산다.
     ObjectRegistry* registry_ = nullptr;
     ObjectHandle handle_;
