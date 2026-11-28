@@ -198,6 +198,9 @@ struct AudioVoiceStatus {
     uint64 unreadFrames = 0;
     uint64 unreadAsOfFrame = UnsetMixFrame;
     bool pausedAtAsOf = false;
+    // 읽지 않은 누적 seqlock을 MaxUnreadReadAttempts번 모두 찢어진 채로 읽었다(값을 모른다 — 0으로
+    // 보지 말고 다음 조회에 다시 본다).
+    bool unreadReadFailed = false;
 };
 
 // CollectFinished가 돌려주는 terminal 기록이다.

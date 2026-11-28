@@ -76,10 +76,19 @@ void AudioDeviceContext::AdvanceCursor(Record& record, uint64 now, bool voiced) 
 
     uint64 elapsed = until - record.cursorMixFrame;
     if (voiced && record.voicePaused) {
-        const uint64 unread = VoiceUnreadAt(record.voice, now);
+        uint64 unread = 0;
+        if (!VoiceUnreadAt(record.voice, now, unread)) {
+            // 찢어진 읽기다: 이번 묶음은 진행하지 않고 다음 묶음에 따라잡는다(0으로 보면 그 구간을
+            // 읽은 것으로 적분해 커서가 영구히 앞선다).
+            ++stats_.cursorUnreadRetries;
+            return;
+        }
+
+        // 이번 구간보다 많이 건너뛴 누적(Thread 렌더가 앞서 게시)은 다음 묶음으로 넘긴다.
         const uint64 skipped = unread > record.cursorUnread ? unread - record.cursorUnread : 0;
-        record.cursorUnread = unread > record.cursorUnread ? unread : record.cursorUnread;
-        elapsed = skipped < elapsed ? elapsed - skipped : 0;
+        const uint64 consumed = skipped < elapsed ? skipped : elapsed;
+        record.cursorUnread += consumed;
+        elapsed -= consumed;
     }
 
     const SoundPlayable& playable = *record.sound.Get();
@@ -100,21 +109,33 @@ void AudioDeviceContext::AdvanceCursor(Record& record, uint64 now, bool voiced) 
     }
 }
 
-uint64 AudioDeviceContext::VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now) const noexcept {
+bool AudioDeviceContext::VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now,
+                                       uint64& unread) const noexcept {
+    unread = 0;
     auto queried = mixer_.QueryVoice(voice);
-    if (!queried || queried.Value().unreadAsOfFrame == audio::UnsetMixFrame) {
-        return 0;
+    if (!queried) {
+        return true;
+    }
+
+    if (queried.Value().unreadReadFailed) {
+        return false;
+    }
+
+    if (queried.Value().unreadAsOfFrame == audio::UnsetMixFrame) {
+        return true;
     }
 
     // 게시값은 블록 끝 기준이다. now가 그 뒤면 Paused 동안의 frame을 더하고, Thread 렌더가 앞서
     // 게시했으면 그만큼 뺀다(3.44.6절).
     const audio::AudioVoiceStatus& status = queried.Value();
     if (status.unreadAsOfFrame <= now) {
-        return status.unreadFrames + (status.pausedAtAsOf ? now - status.unreadAsOfFrame : 0);
+        unread = status.unreadFrames + (status.pausedAtAsOf ? now - status.unreadAsOfFrame : 0);
+        return true;
     }
 
     const uint64 ahead = status.pausedAtAsOf ? status.unreadAsOfFrame - now : 0;
-    return status.unreadFrames > ahead ? status.unreadFrames - ahead : 0;
+    unread = status.unreadFrames > ahead ? status.unreadFrames - ahead : 0;
+    return true;
 }
 
 void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexcept {
@@ -126,7 +147,8 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
 
         const SoundPlayable& playable = *record.sound.Get();
         if (!record.cursorRunning) {
-            record.cursorMixFrame = now;
+            // 시작 전 커서 기준은 record 시계다(3.44.3절 표 — 풀 때 민다).
+            record.cursorMixFrame = RecordNow(record, now);
         } else {
             AdvanceCursor(record, now, record.state == RecordState::Submitted && record.started);
         }

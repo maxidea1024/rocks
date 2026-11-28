@@ -56,6 +56,8 @@ struct AudioControlStats {
     uint64 streamSlotRejects = 0;
     // 지금 일시정지된 재생 수다(3.44.2절 — 현재값).
     uint32 pausedPlaybacks = 0;
+    // 믹서의 읽지 않은 누적을 읽지 못해 커서 진행을 다음 묶음으로 미룬 수다(누계 — 3.44.6절).
+    uint64 cursorUnreadRetries = 0;
 };
 
 } // namespace rocks
