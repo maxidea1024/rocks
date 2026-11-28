@@ -133,17 +133,39 @@ PointerReply EditableText::OnRightPointer(const PointerEvent& event) noexcept {
     }
 
     if (event.type == PointerEventType::Move) {
-        if (ToLocal(event.position, local)) {
-            const float delta = local.y - rightLastY_;
+        if (!ToLocal(event.position, local)) {
+            return {.handled = true};
+        }
+
+        // 커서를 잠갔으면 Application이 준 이동량(창 좌표)을 local로 바꾼다. 위치는 잠금 자리에
+        // 머문다(23.5절).
+        float delta = 0;
+        Vec2 moved{};
+        if (event.hasDelta && ToLocal(event.position + event.delta, moved)) {
+            delta = moved.y - local.y;
+        } else {
+            delta = local.y - rightLastY_;
             rightLastY_ = local.y;
-            // 여러 줄이고 넘칠 때만 끌기 스크롤이다(UE IsRightClickScrolling — 막대가 필요할 때).
-            // 끈 양이 문턱을 넘으면 내용을 잡아 끄는 방향으로 옮긴다(UE OnMouseMove 823–857행).
-            if (multiline_ && contentSize_.y > viewSize_.y) {
-                rightTravel_ += math::Abs(delta);
-                if (rightTravel_ >= PointerDragThreshold) {
+        }
+
+        // 여러 줄이고 넘칠 때만 끌기 스크롤이다(UE IsRightClickScrolling — 막대가 필요할 때).
+        // 끈 양이 문턱을 넘으면 내용을 잡아 끄는 방향으로 옮긴다(UE OnMouseMove 823–857행).
+        if (multiline_ && contentSize_.y > viewSize_.y) {
+            rightTravel_ += math::Abs(delta);
+            if (rightTravel_ >= PointerDragThreshold) {
+                // 스크롤이 시작된 자리가 소프트웨어 커서 자리다. 커서는 그동안 숨긴다(UE
+                // UseHighPrecisionMouseMovement).
+                if (!rightScrolling_) {
                     rightScrolling_ = true;
-                    SetScrollOffset(scroll_.y - delta);
+                    softwareCursor_ = local;
                 }
+
+                const float before = scroll_.y;
+                SetScrollOffset(scroll_.y - delta);
+                // 내용이 움직인 만큼 소프트웨어 커서도 따라간다(잡은 글자 위에 머문다).
+                softwareCursor_.y += before - scroll_.y;
+                InvalidatePaint();
+                return {.handled = true, .lockCursor = true};
             }
         }
 
@@ -155,6 +177,15 @@ PointerReply EditableText::OnRightPointer(const PointerEvent& event) noexcept {
         rightPressed_ = false;
         rightScrolling_ = false;
         rightTravel_ = 0;
+        // 끌어 스크롤했으면 커서를 소프트웨어 커서 자리(잡은 글자)로 되돌린다(UE OnMouseButtonUp
+        // SetMousePos).
+        if (scrolled) {
+            InvalidatePaint();
+            return {.handled = true,
+                    .releaseCapture = true,
+                    .releaseCursorAt = GetGeometry().render.Apply(softwareCursor_)};
+        }
+
         // 끌어 스크롤했으면 메뉴를 열지 않는다. 놓은 자리가 편집기 안이면 그 자리에
         // 연다(UE HandleMouseButtonUp 1436–1470행).
         const Vec2 size = GetGeometry().size;

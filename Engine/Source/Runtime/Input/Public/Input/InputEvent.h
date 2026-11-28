@@ -74,6 +74,11 @@ struct InputEvent {
     bool cancelled = false;
     // 마우스 누름의 연속 횟수다(OS 두 번 누르기 메시지면 2 — UE OnMouseDoubleClick).
     uint8 clickCount = 1;
+    // 커서 잠금 중의 MouseMove다(Docs/Design/UiToolkit 23.5절 — Window::LockPointer). x·y는 잠금
+    // 자리이고, deltaX·deltaY는 창이 잰 이동량(직전 기준에서 움직인 client 픽셀)이다.
+    bool relative = false;
+    float deltaX = 0.0f;
+    float deltaY = 0.0f;
 
     static InputEvent KeyDown(Key value, bool isRepeat = false) noexcept {
         InputEvent event;
@@ -109,6 +114,15 @@ struct InputEvent {
         event.type = InputEventType::MouseMove;
         event.x = positionX;
         event.y = positionY;
+        return event;
+    }
+
+    static InputEvent MouseMoveRelative(float anchorX, float anchorY, float movedX,
+                                        float movedY) noexcept {
+        InputEvent event = MouseMove(anchorX, anchorY);
+        event.relative = true;
+        event.deltaX = movedX;
+        event.deltaY = movedY;
         return event;
     }
 

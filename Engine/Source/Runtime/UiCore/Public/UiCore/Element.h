@@ -3,6 +3,7 @@
 #include <Core/Assert.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SharedPtr.h>
+#include <Core/Optional.h>
 #include <Input/InputEvent.h>
 #include <UiCore/Geometry.h>
 #include <UiCore/KeyChord.h>
@@ -91,6 +92,11 @@ struct PointerEvent {
     float wheel = 0;
     // 누름의 연속 횟수다(두 번 누르기면 2). Down에만 뜻이 있다.
     uint8 clickCount = 1;
+    // 잠근 capture(PointerReply::lockCursor)의 Move 이동량(창 좌표)이다(Docs/Design/UiToolkit
+    // 23.5절). 창이 잰 값(relative)이거나, 서비스가 없으면 직전 위치와의 차이다. 잠근 동안
+    // position은 잠금 자리에 머문다. 잠그지 않은 이벤트는 hasDelta가 거짓이다.
+    bool hasDelta = false;
+    Vec2 delta{};
 };
 
 // 이벤트 소비와 포인터 capture 변경 요청이다.
@@ -100,6 +106,13 @@ struct PointerReply {
     bool releaseCapture = false;
     // 터치 탭을 감시하는 캡처다. 실제 팬이 시작되면 조상 스크롤 영역이 넘겨받을 수 있다.
     bool allowTouchPan = false;
+    // 끄는 동안 커서를 숨기고 잠금 자리에 붙여 둔다(마우스만 — Docs/Design/UiToolkit 23.5절, UE
+    // UseHighPrecisionMouseMovement). capture를 잡는 reply나 capture 중인 요소의 reply에 둔다. 그
+    // 뒤 Move는 delta를 싣는다. capture가 풀리면 커서를 releaseCursorAt(없으면 잠금 자리)에 둔다.
+    bool lockCursor = false;
+    // capture가 풀릴 때 커서를 둘 창 좌표다(UE FReply::SetMousePos). capture 중 어느 reply든 정하면
+    // 기억한다.
+    Optional<Vec2> releaseCursorAt{};
 };
 
 // Game lane에서만 사용하는 트리다. 부모가 자식을 소유하며 부모 포인터는 소유하지 않는다.

@@ -201,6 +201,25 @@ public:
     // 커서를 이 창 client 영역 안에 가둔다(UE LockMouseToWidget). 창이 초점을 잃거나 최소화되면
     // 풀고, 초점을 다시 얻거나 옮기거나 크기가 바뀌면 다시 가둔다. 지원하지 않으면 Unsupported다.
     virtual Result<void> SetMouseLocked(bool locked) noexcept;
+    // 끄는 동안 커서를 숨기고 client (x, y)에 붙여 둔다(Docs/Design/UiToolkit 23.5절 — UE
+    // FReply::UseHighPrecisionMouseMovement). 그 뒤 마우스 이동은 MouseMove(relative, 위치는 잠금
+    // 자리, deltaX·deltaY는 이동량)로 오고, 창이 메시지를 바꾸는 자리에서 커서를 잠금 자리로
+    // 되돌린다 — 화면 끝에 닿지 않는다. 첫 기준은 창이 마지막으로 바꾼 마우스 위치라 잠금 요청 전의
+    // 움직임을 잃지 않는다. 잠금 중 버튼 위치도 잠금 자리다. 초점을 잃으면 스스로 푼다. 숨김은
+    // SetCursorVisible 값과 따로다. 이미 잠갔으면 잠금 자리만 바꾼다. 지원하지 않으면
+    // Unsupported다.
+    //
+    // 사용 예(UI 커서 서비스):
+    //   (void)window.LockPointer(press.x, press.y);     // 끌기 시작
+    //   window.UnlockPointer();                          // 놓음
+    //   (void)window.SetCursorPosition(press.x, press.y);
+    virtual Result<void> LockPointer(float x, float y) noexcept;
+    // 잠금을 풀고 커서 보임을 SetCursorVisible 값으로 되돌린다. 잠그지 않았으면 아무것도 하지
+    // 않는다.
+    virtual void UnlockPointer() noexcept;
+    // 커서를 client (x, y)로 옮긴다(UE ICursor::SetPosition). 창에 초점이 없으면 옮기지 않고
+    // 성공이다(다른 창을 쓰는 사람의 커서를 뺏지 않는다). 지원하지 않으면 Unsupported다.
+    virtual Result<void> SetCursorPosition(float x, float y) noexcept;
 
     // 이 창의 DPI 배율(유효 DPI / 96)이다(Docs/Design/UiToolkit 19.2절 DPI). 프로세스가 DPI를
     // 인식하지 않으면(EnableHighDpiAwareness를 부르지 않음) 늘 1이고 OS가 늘려 그린다. 창은

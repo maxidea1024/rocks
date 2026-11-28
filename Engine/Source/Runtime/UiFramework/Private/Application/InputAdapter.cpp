@@ -94,7 +94,14 @@ Result<bool> InputAdapter::RouteWithin(const input::InputEvent& event,
         mouseUserId_ = event.userId;
         position_ = Vec2(event.x, event.y);
         hasPosition_ = true;
-        return pointer({PointerEventType::Move, position_});
+        PointerEvent move{PointerEventType::Move, position_};
+        // 커서 잠금 중이면 창이 잰 이동량이다(23.5절 — 위치는 잠금 자리).
+        if (event.relative) {
+            move.hasDelta = true;
+            move.delta = Vec2(event.deltaX, event.deltaY);
+        }
+
+        return pointer(move);
     }
 
     if (event.type == input::InputEventType::MouseWheel && event.hasPointerPosition) {

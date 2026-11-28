@@ -10,6 +10,7 @@
 #include <PlatformWindow/Window.h>
 
 #include "../Common/GamepadMotorMapping.h"
+#include "../Common/PointerLock.h"
 #include "../Common/PointerTouchMapping.h"
 #include "../Common/TextInputSession.h"
 #include "Win64TextServices.h"
@@ -587,7 +588,7 @@ public:
             (!captured && GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
              ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
              PtInRect(&client, point))) {
-            SetCursor(cursorHidden_ ? nullptr : cursor_);
+            SetCursor(CursorHidden() ? nullptr : cursor_);
         }
     }
 
@@ -599,14 +600,7 @@ public:
         }
 
         cursorHidden_ = !visible;
-        POINT point{};
-        RECT client{};
-        if (GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
-            ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
-            PtInRect(&client, point)) {
-            SetCursor(cursorHidden_ ? nullptr : cursor_);
-        }
-
+        RefreshCursorOverClient();
         return Result<void>::Success();
     }
 
@@ -614,6 +608,38 @@ public:
         AssertOwnerThread();
         mouseLocked_ = locked;
         ApplyMouseClip();
+        return Result<void>::Success();
+    }
+
+    // 끄는 동안의 잠금이다(23.5절). 이동량은 WM_MOUSEMOVE를 바꾸는 자리에서 잰다(PointerLock).
+    Result<void> LockPointer(float x, float y) noexcept override {
+        AssertOwnerThread();
+        pointerLock_.Lock(x, y);
+        RefreshCursorOverClient();
+        return Result<void>::Success();
+    }
+
+    void UnlockPointer() noexcept override {
+        AssertOwnerThread();
+        if (!pointerLock_.IsLocked()) {
+            return;
+        }
+
+        pointerLock_.Unlock();
+        RefreshCursorOverClient();
+    }
+
+    Result<void> SetCursorPosition(float x, float y) noexcept override {
+        AssertOwnerThread();
+        if (!focused_) {
+            return Result<void>::Success();
+        }
+
+        if (!WarpCursor(x, y)) {
+            return Result<void>::Failure(ErrorCode::IoError);
+        }
+
+        pointerLock_.NoteWarp(x, y);
         return Result<void>::Success();
     }
 
@@ -1191,8 +1217,16 @@ private:
 
     void MouseButton(input::MouseButton button, bool down, LPARAM position,
                      uint8 clicks = 1) noexcept {
-        const float x = static_cast<float>(static_cast<int16>(LOWORD(position)));
-        const float y = static_cast<float>(static_cast<int16>(HIWORD(position)));
+        float x = static_cast<float>(static_cast<int16>(LOWORD(position)));
+        float y = static_cast<float>(static_cast<int16>(HIWORD(position)));
+        // 잠금 중 버튼 위치는 잠금 자리다(23.5절 — 커서는 보이지 않고 그 자리에 붙어 있다).
+        if (pointerLock_.IsLocked()) {
+            x = pointerLock_.AnchorX();
+            y = pointerLock_.AnchorY();
+        } else {
+            pointerLock_.NoteMove(x, y);
+        }
+
         // 버튼을 누른 채 창 밖으로 나가도 놓기 이벤트를 받도록 캡처한다.
         const uint32 bit = 1u << static_cast<uint32>(button);
         if (down) {
@@ -1539,8 +1573,8 @@ private:
             break;
         case WM_SETCURSOR:
             if (reinterpret_cast<HWND>(wParam) == window_ && LOWORD(lParam) == HTCLIENT &&
-                (cursor_ || cursorHidden_)) {
-                SetCursor(cursorHidden_ ? nullptr : cursor_);
+                (cursor_ || CursorHidden())) {
+                SetCursor(CursorHidden() ? nullptr : cursor_);
                 return TRUE;
             }
             break;
@@ -1582,8 +1616,10 @@ private:
             return 0;
         case WM_KILLFOCUS: {
             focused_ = false;
-            // 초점이 없는 창이 커서를 가두지 않는다(다른 창·OS를 쓸 수 있게).
+            // 초점이 없는 창이 커서를 가두지 않는다(다른 창·OS를 쓸 수 있게). 끄는 동안의 잠금도
+            // 푼다(UI는 FocusLost로 capture를 푼다 — 23.5절).
             ReleaseMouseClip();
+            UnlockPointer();
             capturedButtons_ = 0;
             if (GetCapture() == window_) {
                 ReleaseCapture();
@@ -1706,9 +1742,28 @@ private:
                 trackingMouse_ = TrackMouseEvent(&tracking) != FALSE;
             }
 
-            Push(input::InputEvent::MouseMove(
-                static_cast<float>(static_cast<int16>(LOWORD(lParam))),
-                static_cast<float>(static_cast<int16>(HIWORD(lParam)))));
+            {
+                const float x = static_cast<float>(static_cast<int16>(LOWORD(lParam)));
+                const float y = static_cast<float>(static_cast<int16>(HIWORD(lParam)));
+                if (!pointerLock_.IsLocked()) {
+                    pointerLock_.NoteMove(x, y);
+                    Push(input::InputEvent::MouseMove(x, y));
+                    return 0;
+                }
+
+                // 잠금 중: 이동량을 싣고 커서를 잠금 자리로 되돌린다. 되돌림이 만든 이동은
+                // 이동량 0이라 내지 않는다(23.5절).
+                const PointerLockMove move = pointerLock_.Move(x, y);
+                if (move.warp) {
+                    (void)WarpCursor(move.x, move.y);
+                }
+
+                if (move.push) {
+                    Push(input::InputEvent::MouseMoveRelative(move.x, move.y, move.deltaX,
+                                                              move.deltaY));
+                }
+            }
+
             return 0;
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONDOWN:
@@ -1868,6 +1923,28 @@ private:
         ReleaseMouseClip();
     }
 
+    // client 영역 위의 커서를 숨김 상태에 맞춘다(SetCursorVisible·LockPointer 뒤).
+    void RefreshCursorOverClient() noexcept {
+        POINT point{};
+        RECT client{};
+        if (GetCursorPos(&point) && WindowFromPoint(point) == window_ &&
+            ScreenToClient(window_, &point) && GetClientRect(window_, &client) &&
+            PtInRect(&client, point)) {
+            SetCursor(CursorHidden() ? nullptr : cursor_);
+        }
+    }
+
+    // SetCursorVisible(false)이거나 끄는 동안 잠갔으면 client 영역에서 빈 커서다.
+    bool CursorHidden() const noexcept {
+        return cursorHidden_ || pointerLock_.IsLocked();
+    }
+
+    // 커서를 client (x, y)로 옮긴다.
+    bool WarpCursor(float x, float y) noexcept {
+        POINT point{static_cast<LONG>(x), static_cast<LONG>(y)};
+        return ClientToScreen(window_, &point) != FALSE && SetCursorPos(point.x, point.y) != FALSE;
+    }
+
     // 이 창이 건 잠금만 푼다(다른 프로그램의 ClipCursor를 지우지 않게).
     void ReleaseMouseClip() noexcept {
         if (clipping_) {
@@ -1883,6 +1960,8 @@ private:
     // SetMouseLocked 값과 지금 이 창이 ClipCursor를 걸었는지다.
     bool mouseLocked_ = false;
     bool clipping_ = false;
+    // 끄는 동안 커서를 붙여 두는 잠금이다(23.5절 — LockPointer).
+    PointerLock pointerLock_;
     // UI가 게시한 영역 지도다(OS 질의가 다른 스레드에서 와도 읽도록 잠금 아래 둔다).
     mutable Mutex regionGate_;
     input::WindowRegionMap regionMap_;

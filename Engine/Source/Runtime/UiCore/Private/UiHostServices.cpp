@@ -110,6 +110,14 @@ const SharedPtr<TextInputService>& UiHostServices::TextInput() const noexcept {
     return textInput_;
 }
 
+void UiHostServices::SetCursorService(SharedPtr<CursorService> service) noexcept {
+    cursor_ = Move(service);
+}
+
+const SharedPtr<CursorService>& UiHostServices::Cursor() const noexcept {
+    return cursor_;
+}
+
 void UiHostServices::SetFrameTime(const FrameTime& time) noexcept {
     time_ = time;
 }

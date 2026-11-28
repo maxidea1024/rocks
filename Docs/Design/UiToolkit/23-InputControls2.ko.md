@@ -56,15 +56,22 @@
 ### 23.5 끄는 동안 커서 숨김·되돌림(UE `FReply::UseHighPrecisionMouseMovement`·`SetMousePos`)
 
 - **왜**: 숫자 입력 끌기(UE `SSpinBox`)와 편집 텍스트 오른쪽 끌기 스크롤(UE `SMultiLineEditableText` — 22.7a절)은 끄는 동안 커서를 숨기고, 화면 끝에 닿아도 계속 움직이며, 놓으면 누른 자리(또는 정한 자리)로 커서를 되돌린다.
-- **창**: `Window::SetCursorPosition(Vec2 client)`(UE `ICursor::SetPosition` — Win64 `ClientToScreen` + `SetCursorPos`)를 더한다. 지원하지 않으면 Unsupported다.
+- **이동량은 창이 잰다**: 커서를 되돌리는 일(재중심)은 창 메시지를 바꾸는 자리에서 한다. UI가 큐를 처리하면서 되돌리면 이미 큐에 쌓인 절대 위치들이 옛 기준이라 이동을 두 번 센다. UE Windows high precision mouse는 raw input이지만 Rocks 창 입력은 raw mouse가 없어 재중심 방식이다. 창 메시지 처리와 UI는 같은 게임 lane이라 잠금 요청과 메시지 변환 사이에 경쟁이 없다.
+- **창**(UE `ICursor::SetPosition`·`FWindowsCursor::SetPosition`)
+  - `Window::LockPointer(x, y)`: 커서를 숨기고(`SetCursorVisible` 값과 따로) 잠금 자리 (x, y)(client)를 정한다. 그 뒤 마우스 이동은 `MouseMove`에 `relative = true`·`deltaX`·`deltaY`(직전 기준에서 움직인 client 픽셀)를 싣고, 위치는 잠금 자리다. 이동을 받을 때마다 커서를 잠금 자리로 되돌린다(`ClientToScreen` + `SetCursorPos`). 첫 기준은 창이 마지막으로 바꾼 마우스 위치다 — 잠금 요청 전에 움직였지만 아직 받지 않은 이동을 잃지 않는다. 되돌림이 만든 이동(이동량 0)은 이벤트를 내지 않는다. 잠금 중 버튼 이벤트 위치도 잠금 자리다.
+  - `Window::UnlockPointer()`: 잠금을 풀고 커서 보임을 `SetCursorVisible` 값으로 되돌린다. 잠그지 않았으면 아무것도 하지 않는다.
+  - `Window::SetCursorPosition(x, y)`: 커서를 client (x, y)로 옮긴다. 창에 초점이 없으면 옮기지 않는다(다른 창을 쓰는 사람의 커서를 뺏지 않는다).
+  - 창이 초점을 잃으면 잠금을 스스로 푼다(UI는 FocusLost로 capture를 푼다).
+  - 지원하지 않는 backend는 Unsupported다(기본 구현).
 - **UI 계약**
-  - `PointerReply`에 `lockCursor`를 더한다(누름 처리 — capture와 함께). Application이 그 포인터에 대해 "잠금"에 들어간다: 커서를 숨기고(`SetCursorVisible(false)`), 누른 창 좌표를 기억한다.
-  - 잠금 중 Move는 위치 대신 이동량을 싣는다: `PointerEvent::delta`(새 필드 — 직전 Move 뒤 움직인 창 좌표)를 채우고, 커서를 잠금 자리로 되돌려(`SetCursorPosition`) 화면 끝에 닿지 않게 한다(재중심 방식 — UE Windows high precision mouse는 raw input이지만 Rocks 창 입력은 raw mouse가 없어 이 방식이다). `position`은 잠금 자리 그대로다.
-  - Up·capture 잃음이면 잠금을 풀고 커서를 보인다. 커서를 둘 자리는 reply `releaseCursorAt`(Optional 창 좌표 — 없으면 누른 자리)이다(UE `FReply::SetMousePos`).
-  - 커서 서비스는 호스트가 준다(`UiHostServices::SetCursorService` — 숨김·보임·위치. UiCore는 PlatformWindow에 의존하지 않는다). 서비스가 없으면 잠금은 capture만 하고 delta는 위치 차이다(시험·헤드리스).
-  - 잠금 중 그 포인터의 hover·툴팁은 멈춘다(커서가 보이지 않는다).
-- **쓰는 곳**: 24장 숫자 입력, 22.7a절 편집 텍스트 오른쪽 끌기 스크롤(놓을 때 누른 자리로 — UE `SoftwareCursorPosition`).
-- **시험**: 가짜 커서 서비스가 받은 숨김·위치·보임 순서, delta 누적, Up·capture 잃음 복원, 서비스 없을 때.
+  - `PointerReply::lockCursor`(마우스만): capture를 잡는 reply(Down) 또는 capture 중인 요소의 reply(Move — UE `UseHighPrecisionMouseMovement`는 끌기가 시작된 Move에서 온다)에 둔다. Application이 그 capture를 잠근다. 그 이벤트 위치를 잠금 자리로 기억하고 커서 서비스 `LockPointer(잠금 자리)`를 부른다. 이미 잠갔으면 다시 부르지 않는다. capture가 없는 요소의 lockCursor는 무시한다.
+  - `PointerEvent::delta`·`hasDelta`: 잠근 capture의 Move에 이동량을 싣는다. 창이 준 이동량(`relative`)이면 그대로, 아니면(서비스 없음·Unsupported) 직전 위치와의 차이다. 잠근 동안 Move의 `position`은 잠금 자리 그대로다(커서가 보이지 않는다). 잠그지 않은 Move는 `hasDelta`가 거짓이다.
+  - `PointerReply::releaseCursorAt`(Optional 창 좌표): capture 중 어느 reply든 정하면 기억한다. capture가 풀리면(Up·`releaseCapture`·capture 잃음·요소 떼어짐·FocusLost) 서비스 `UnlockPointer(releaseCursorAt 또는 잠금 자리)`를 부른다(UE `FReply::SetMousePos`).
+  - 커서 서비스는 호스트가 준다(`UiCore/CursorService.h` — `LockPointer(Vec2)`·`UnlockPointer(Vec2 releaseAt)`, `Application::SetCursorService`. UiCore는 PlatformWindow에 의존하지 않는다). 서비스가 없으면 잠금은 capture만 하고 delta는 위치 차이다(시험·헤드리스). `LockPointer`가 실패하면 원인을 경고 로그로 남기고 capture만 한다(조용히 넘기지 않는다).
+  - 잠금 중 마우스 hover·툴팁은 멈춘다(커서가 보이지 않는다).
+- **쓰는 곳**: 24장 숫자 입력, 22.7a절 편집 텍스트 오른쪽 끌기 스크롤.
+- **편집 텍스트 오른쪽 끌기**(UE `SMultiLineEditableText::OnMouseMove`·`OnMouseButtonUp`): 끌기 스크롤이 시작된 Move reply에 `lockCursor`를 둔다. 그때 위치를 소프트웨어 커서 자리로 기억하고, 스크롤로 내용이 움직인 만큼 그 자리도 옮긴다(UE `SoftwareCursorPosition.Y += 이전 - 새 offset`). 그동안 그 자리에 잡은 손 아이콘(`icons::CursorGrab` — UE `SoftwareCursor_Grab`, Rocks가 그린 SVG, 16px)을 그린다. 놓으면 `releaseCursorAt`을 그 자리로 둔다(커서가 잡았던 글자 위로 돌아온다). 이동량은 `delta.y`다.
+- **시험**: 가짜 커서 서비스가 받은 잠금·풀기 자리와 순서, 창 이동량(relative) 그대로 전달, 서비스 없을 때 위치 차이, Up·capture 잃음·FocusLost·`releaseCursorAt` 복원, 잠금 중 hover 멈춤, Win64 창의 잠금 상태 전이(초점 잃음 풀기).
 - **사람 확인**: 실제 창에서 끄는 동안 커서가 보이지 않고 화면 끝에서도 값이 계속 바뀌는지, 놓으면 제자리인지.
 
 ### 23.6 스크롤 막대 표시 정책(UW4v — 9.1절)
@@ -99,7 +106,7 @@
 - **UW4b2a**: 콤보 스타일·고정 크기 지우기(23.2절).
 - **UW4b2b**: 체크 상자 형식(토글·라디오·투명)(23.3절).
 - **UW4b2c**: 키 선택 스타일·고정 크기 지우기(23.4절).
-- **UW4b2d**: 끄는 동안 커서 숨김·되돌림(23.5절) — 창 `SetCursorPosition`, UI 잠금 계약, 편집 텍스트 오른쪽 끌기 적용.
+- **UW4b2d**: 끄는 동안 커서 숨김·되돌림(23.5절) — 창 `LockPointer`·`UnlockPointer`·`SetCursorPosition`(창이 이동량을 재고 되돌림), 입력 `relative`·`deltaX`·`deltaY`, UI 잠금 계약(`CursorService`), 편집 텍스트 오른쪽 끌기(소프트웨어 커서 `icons::CursorGrab`).
 - **UW4b2e**: 스크롤 막대 표시 정책(23.6절).
 - **UW4n**: 숫자 입력(24장 — 착수 때 쓴다).
 - 리뷰어는 9.1절대로 UW4b 2차 끝(UW4n 포함)에 한 번 둔다.

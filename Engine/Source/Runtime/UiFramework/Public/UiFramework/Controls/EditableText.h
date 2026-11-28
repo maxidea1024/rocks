@@ -286,8 +286,11 @@ private:
     bool contextMenuOpen_ = false;
     bool canPaste_ = false;
     // 오른쪽 단추 누름 상태다: 끈 양(세로 절댓값 누적)과 마지막 local 세로 위치, 스크롤 중인지.
+    // 스크롤하는 동안은 커서를 잠그고(23.5절) 소프트웨어 커서 자리(local — 내용과 함께
+    // 움직인다, UE SoftwareCursorPosition)에 잡은 손을 그린다.
     bool rightPressed_ = false;
     bool rightScrolling_ = false;
+    Vec2 softwareCursor_{};
     float rightTravel_ = 0;
     float rightLastY_ = 0;
     uint32 rightPointer_ = 0;

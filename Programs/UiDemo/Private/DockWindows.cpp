@@ -71,6 +71,13 @@ DockWindows::Surface::Surface(Allocator& allocator, UiRenderer& uiRenderer,
         textInput = Move(service.Value());
         (void)app.SetTextInputService(textInput);
     }
+
+    // 끄는 동안 커서를 숨기고 놓으면 되돌린다(23.5절). 만들지 못하면 잠금은 capture만 한다.
+    auto pointer = SharedPtr<DemoCursor>::TryMake(allocator, *window);
+    if (pointer) {
+        cursor = Move(pointer.Value());
+        (void)app.SetCursorService(cursor);
+    }
 }
 
 DockWindows::Surface::~Surface() noexcept {
@@ -81,6 +88,10 @@ DockWindows::Surface::~Surface() noexcept {
     // 편집 요소가 서비스를 더 오래 쥘 수 있어 창과의 연결을 먼저 끊는다.
     if (textInput) {
         textInput->Detach();
+    }
+
+    if (cursor) {
+        cursor->Detach();
     }
 
     area->SetOnExternalDrop({});

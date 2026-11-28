@@ -5,6 +5,7 @@
 #include <Core/Math/Rect.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Text/String.h>
+#include <UiCore/CursorService.h>
 #include <UiCore/FrameTime.h>
 #include <UiCore/StyleRegistry.h>
 #include <UiCore/TextInputService.h>
@@ -17,6 +18,7 @@ namespace rocks::ui {
 //
 // - 팝업 허용 영역(9.1절 UW7d): 창 좌표 지점이 놓인 모니터의 작업 영역을 창 좌표로 준다.
 // - 텍스트 입력 서비스(19.2절): 편집 요소가 초점 때 Activate한다.
+// - 커서 서비스(23.5절): Application이 끄는 동안 커서를 잠그고 되돌린다.
 // - 프레임 시각(20.3절): Application::BeginFrame이 정한다. 그리기 밖(속성 갱신·배치·입력)에서도
 //   같은 값을 읽는다.
 //
@@ -33,6 +35,9 @@ public:
 
     void SetTextInputService(SharedPtr<TextInputService> service) noexcept;
     const SharedPtr<TextInputService>& TextInput() const noexcept;
+
+    void SetCursorService(SharedPtr<CursorService> service) noexcept;
+    const SharedPtr<CursorService>& Cursor() const noexcept;
 
     void SetFrameTime(const FrameTime& time) noexcept;
     const FrameTime& Time() const noexcept;
@@ -96,6 +101,7 @@ public:
 private:
     PopupWorkArea popupWorkArea_;
     SharedPtr<TextInputService> textInput_;
+    SharedPtr<CursorService> cursor_;
     FrameTime time_{};
     SharedPtr<StyleRegistry> registry_;
     String appStyle_;

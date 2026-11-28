@@ -89,6 +89,17 @@ Result<void> Window::SetMouseLocked(bool) noexcept {
     return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
+Result<void> Window::LockPointer(float, float) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+void Window::UnlockPointer() noexcept {
+}
+
+Result<void> Window::SetCursorPosition(float, float) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
 Result<IntVec2> Window::ClientToDesktop(IntVec2) const noexcept {
     return Result<IntVec2>::Failure(ErrorCode::Unsupported);
 }

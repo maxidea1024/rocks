@@ -3,6 +3,7 @@
 #include <Input/WindowRegionMap.h>
 
 #include <UiCore/CacheRoot.h>
+#include <UiCore/CursorService.h>
 #include <UiCore/HitGrid.h>
 #include <UiFramework/Application/Commands.h>
 #include <UiFramework/Application/AccessibleNode.h>
@@ -61,6 +62,13 @@ public:
     Result<void> SetTextInputService(SharedPtr<TextInputService> service) noexcept;
     // IME 기록 표지(TextInputMethod)를 서비스에 넘긴다. 서비스가 없으면 false다.
     bool ProcessTextInput(uint32 record) noexcept;
+
+    // 창의 커서 서비스다(Docs/Design/UiToolkit 23.5절). 잠근 capture(PointerReply::lockCursor)에
+    // LockPointer, 풀릴 때 UnlockPointer를 부른다. 빈 포인터면 뗀다(잠금은 capture만 하고 delta는
+    // 위치 차이다). 이미 잠근 capture는 잠글 때의 서비스로 푼다.
+    Result<void> SetCursorService(SharedPtr<CursorService> service) noexcept;
+    // 그 포인터의 capture가 커서를 잠갔는지다(시험·진단).
+    bool IsCursorLocked(PointerSource source, uint32 user, uint32 pointer) const noexcept;
 
     // 위젯 스타일 색을 풀 테마다(UW3b — 기본은 UE 다크 테마). 바꾸면 그리기 캐시를 모두 다시
     // 만든다. BuildPaintList에 넘긴 목록은 이 Application의 테마를 빌린다.
@@ -286,7 +294,20 @@ private:
         WeakPtr<Element> target;
         Vec2 pressPosition;
         bool allowTouchPan;
+        // 끄는 동안의 커서 잠금이다(23.5절): 잠금 자리, 서비스 없을 때 이동량을 잴 직전 위치, 풀 때
+        // 커서를 둘 자리, 잠근 서비스(풀 때 같은 서비스로 — 실패했으면 비어 있다).
+        bool cursorLocked = false;
+        Vec2 lockPosition{};
+        Vec2 lastPosition{};
+        Optional<Vec2> releaseAt{};
+        SharedPtr<CursorService> cursor{};
     };
+
+    // 그 포인터의 capture가 target이면 커서를 잠근다(23.5절). 이미 잠갔으면 아무것도 하지 않는다.
+    void LockCaptureCursor(const PointerEvent& event, const SharedPtr<Element>& target) noexcept;
+    // capture가 풀릴 때 커서를 둘 자리를 기억한다(target의 capture일 때만).
+    void StoreCursorRelease(const PointerEvent& event, const SharedPtr<Element>& target,
+                            Vec2 at) noexcept;
 
     Result<bool> NavigateInternal(uint32 user, FocusDirection direction,
                                   const SharedPtr<Element>& scope, bool wrap,

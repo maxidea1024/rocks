@@ -19,6 +19,9 @@ inline constexpr VectorImageKey RadioOff =
     VectorImageKey::FromPath("CoreWidgets/CheckBox/RadioOff");
 inline constexpr VectorImageKey WideChevronDown =
     VectorImageKey::FromPath("CoreWidgets/ComboBox/WideChevronDown");
+// 편집 텍스트 오른쪽 끌기 스크롤의 소프트웨어 커서다(UE "SoftwareCursor_Grab" — 23.5절, Rocks가
+// 그린 SVG).
+inline constexpr VectorImageKey CursorGrab = VectorImageKey::FromPath("CoreWidgets/Cursor/Grab");
 inline constexpr VectorImageKey SortUp = VectorImageKey::FromPath("CoreWidgets/TableView/SortUp");
 inline constexpr VectorImageKey SortDown =
     VectorImageKey::FromPath("CoreWidgets/TableView/SortDown");

@@ -52,6 +52,7 @@ public static partial class PolicyChecks
         "Engine/Source/Runtime/EngineAssets/Private/EngineAssetsInternal.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadMotorMapping.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/GamepadSlotTable.h",
+        "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerLock.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/PointerTouchMapping.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputDocument.h",
         "Engine/Source/Runtime/PlatformWindow/Private/Common/TextInputSession.h",

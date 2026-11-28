@@ -1,6 +1,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
 #include <UiCore/PaintList.h>
+#include <UiCore/Styles/CoreIcons.h>
 #include <UiCore/InputMetrics.h>
 #include <UiCore/UiHostServices.h>
 #include <UiFramework/Application/Application.h>
@@ -12,6 +13,8 @@
 #include <UiFramework/Menus/MenuRow.h>
 #include <UiFramework/Popups/MenuAnchor.h>
 #include <UiFramework/Scrolling/ScrollBar.h>
+#include <UiFramework/Window/WindowChrome.h>
+#include <UiFramework/Window/WindowTitleBar.h>
 
 // Element 층 편집 텍스트 시험이다(Docs/Design/UiToolkit 21.2절 — UE SEditableText). Widget·객체
 // 등록부 없이 Element가 글자·이력·사건을 스스로 드는지 본다: 사용자 편집만 onTextChanged, 프로그램
@@ -1096,6 +1099,101 @@ TEST(UiFramework_EditableTextContextMenuFollowsUeItemsAndFocus) {
     bench.app.Shutdown();
 }
 
+namespace {
+
+// 오른쪽 끌기 잠금이 받은 자리를 적는 커서 서비스다(23.5절).
+class EditCursorProbe final : public CursorService {
+public:
+    Result<void> LockPointer(Vec2 at) noexcept override {
+        ++locks;
+        lockedAt = at;
+        return Result<void>::Success();
+    }
+
+    void UnlockPointer(Vec2 releaseAt) noexcept override {
+        ++unlocks;
+        releasedAt = releaseAt;
+    }
+
+    int locks = 0;
+    int unlocks = 0;
+    Vec2 lockedAt{};
+    Vec2 releasedAt{};
+};
+
+// 받은 키를 적는 벡터 이미지 resolver다(잡은 손 아이콘을 그리게 한다).
+class GrabIconProbe final : public VectorImageResolver {
+public:
+    Result<ResolvedVectorImage> Resolve(VectorImageKey key, uint32, uint32) noexcept override {
+        if (key == icons::CursorGrab) {
+            ++grabs;
+        }
+
+        ResolvedVectorImage image;
+        image.resource = SlotHandle{1, 1};
+        return Result<ResolvedVectorImage>::Success(image);
+    }
+
+    uint64 Revision() const noexcept override {
+        return 0;
+    }
+
+    int grabs = 0;
+};
+
+} // namespace
+
+// 오른쪽 끌기 스크롤은 시작된 Move에서 커서를 잠그고, 그동안 소프트웨어 커서(잡은 손)를 내용과 함께
+// 옮겨 그리며, 놓으면 그 자리로 커서를 되돌린다(23.5절 — UE SMultiLineEditableText
+// SoftwareCursorPosition·SetMousePos).
+TEST(UiFramework_EditableTextRightDragLocksTheCursorAndReturnsItToTheGrabbedText) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, true) && bench.Place());
+    const String text = Lines(allocator, 20);
+    REQUIRE(bench.box->Initialize(text.View(), EditFontSize));
+    EditableText& editor = bench.box->Editor();
+    auto cursor = SharedPtr<EditCursorProbe>::TryMake(allocator);
+    REQUIRE(cursor && bench.app.SetCursorService(cursor.Value()));
+    bench.app.SetRoot(bench.root);
+    REQUIRE(bench.Layout());
+    editor.SetScrollOffset(0);
+    REQUIRE(bench.Layout());
+    const Vec2 at = editor.GetGeometry().render.Apply(editor.GetGeometry().size * 0.5f);
+    REQUIRE(bench.app.RoutePointer(
+        {.type = PointerEventType::Down, .position = at, .button = input::MouseButton::Right}));
+    REQUIRE(bench.app.RoutePointer({.type = PointerEventType::Move, .position = at + Vec2{0, -3}}));
+    CHECK(cursor.Value()->locks == 0);
+    // 문턱을 넘은 Move에서 잠근다 — 잠금 자리는 그 위치다. 스크롤 3만큼 소프트웨어 커서도 올라간다.
+    REQUIRE(bench.app.RoutePointer({.type = PointerEventType::Move, .position = at + Vec2{0, -6}}));
+    CHECK(cursor.Value()->locks == 1 && cursor.Value()->lockedAt == at + Vec2(0, -6));
+    CHECK(editor.ScrollOffset() == 3);
+    // 잠근 뒤에는 창이 잰 이동량으로 스크롤한다(위치는 잠금 자리에 머문다).
+    PointerEvent relative{.type = PointerEventType::Move, .position = at + Vec2{0, -6}};
+    relative.hasDelta = true;
+    relative.delta = {0, -10};
+    REQUIRE(bench.app.RoutePointer(relative));
+    CHECK(editor.ScrollOffset() == 13);
+    // 소프트웨어 커서를 그린다(잡은 손 — 진짜 커서는 숨어 있다).
+    GrabIconProbe icons;
+    PaintList overlay(allocator);
+    overlay.SetVectorImageResolver(&icons);
+    REQUIRE(editor.OnPaintOverlay(overlay, 0));
+    CHECK(icons.grabs == 1);
+    // 놓으면 잡은 글자 자리로 되돌린다: 시작 자리 - 스크롤 13. 메뉴는 열지 않는다.
+    REQUIRE(bench.app.RoutePointer({.type = PointerEventType::Up,
+                                    .position = at + Vec2{0, -6},
+                                    .button = input::MouseButton::Right}));
+    CHECK(cursor.Value()->unlocks == 1 && cursor.Value()->releasedAt == at + Vec2(0, -19));
+    CHECK(!editor.IsContextMenuOpen());
+    PaintList after(allocator);
+    after.SetVectorImageResolver(&icons);
+    REQUIRE(editor.OnPaintOverlay(after, 0));
+    // 잡은 손이 빠진다(caret은 초점 상태대로 남는다).
+    CHECK(icons.grabs == 1);
+    bench.app.Shutdown();
+}
+
 TEST(UiFramework_EditableTextRightDragScrollsInsteadOfOpeningTheMenu) {
     SystemAllocator allocator;
     BoxBench bench(allocator);
@@ -1393,6 +1491,50 @@ TEST(UiFramework_HiddenAnchorsCloseMenusButKeepErrorPopups) {
     REQUIRE(switcher.Value()->SetActiveIndex(0));
     REQUIRE(bench.Layout());
     CHECK(marker->IsOpen() && errorLayer->GetVisibility() != Visibility::Collapsed);
+    bench.app.Shutdown();
+}
+
+// 창 루트가 WindowChrome(Arrange를 대신하는 Overlay 파생)이어도 고르지 않은 탭의 오류 팝업을
+// 접는다(2026-11-28 사용자 보고 — 실제 UiDemo 창 루트다).
+TEST(UiFramework_WindowChromeCollapsesErrorPopupsOfHiddenTabs) {
+    SystemAllocator allocator;
+    BoxBench bench(allocator);
+    REQUIRE(bench.Make(allocator, false));
+    auto chrome = SharedPtr<WindowChrome>::TryMake(allocator, allocator);
+    auto switcher = SharedPtr<Switcher>::TryMake(allocator, allocator);
+    auto other = SharedPtr<AnchorCanvas>::TryMake(allocator, allocator);
+    auto titleBar = SharedPtr<WindowTitleBar>::TryMake(allocator, allocator);
+    REQUIRE(chrome && switcher && other && titleBar && titleBar.Value()->Construct({}));
+    // WindowChrome → 제목 막대 + 내용 Switcher[0: 상자가 있는 캔버스, 1: 빈 캔버스].
+    REQUIRE(bench.root->RemoveChild(*bench.canvas));
+    REQUIRE(switcher.Value()->TryAddChild(bench.canvas));
+    REQUIRE(switcher.Value()->TryAddChild(other.Value()));
+    REQUIRE(chrome.Value()->Construct({.titleBar = titleBar.Value(), .content = switcher.Value()}));
+    REQUIRE(bench.Place());
+    REQUIRE(bench.box->Initialize("abc", EditFontSize));
+    auto required = Text::Invariant(allocator, "Required");
+    REQUIRE(required);
+    bench.app.SetRoot(chrome.Value());
+    REQUIRE(bench.Layout());
+    REQUIRE(bench.box->SetError(required.Value()));
+    MenuAnchor* marker = bench.box->ErrorMarker();
+    REQUIRE(marker != nullptr && marker->IsOpen());
+    REQUIRE(bench.Layout());
+    Element* errorLayer = nullptr;
+    for (usize i = 0; i < chrome.Value()->ChildCount(); ++i) {
+        Element* child = chrome.Value()->ChildAt(i);
+        const bool frame = child == switcher.Value().Get() || child == titleBar.Value().Get();
+        errorLayer = frame ? errorLayer : child;
+    }
+
+    REQUIRE(errorLayer != nullptr);
+    CHECK(errorLayer->GetVisibility() != Visibility::Collapsed);
+    REQUIRE(switcher.Value()->SetActiveIndex(1));
+    REQUIRE(bench.Layout());
+    CHECK(marker->IsOpen() && errorLayer->GetVisibility() == Visibility::Collapsed);
+    REQUIRE(switcher.Value()->SetActiveIndex(0));
+    REQUIRE(bench.Layout());
+    CHECK(errorLayer->GetVisibility() != Visibility::Collapsed);
     bench.app.Shutdown();
 }
 

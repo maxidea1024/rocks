@@ -3,6 +3,7 @@
 #include <Core/Assert.h>
 
 #include <UiCore/InputMetrics.h>
+#include <UiCore/Styles/CoreIcons.h>
 #include <UiCore/TextInputPositions.h>
 #include <UiFramework/Popups/MenuAnchor.h>
 
@@ -1425,9 +1426,13 @@ void EditableText::OnPointerCaptureLost(PointerSource source, uint32 user,
         dragging_ = false;
     }
 
-    // 오른쪽 누름을 잃으면 메뉴를 열지 않는다(놓기가 오지 않는다).
+    // 오른쪽 누름을 잃으면 메뉴를 열지 않는다(놓기가 오지 않는다). 소프트웨어 커서도 지운다.
     if (rightPressed_ && source == PointerSource::Mouse && user == rightUser_ &&
         pointer == rightPointer_) {
+        if (rightScrolling_) {
+            InvalidatePaint();
+        }
+
         rightPressed_ = false;
         rightScrolling_ = false;
         rightTravel_ = 0;
@@ -1493,6 +1498,22 @@ Result<void> EditableText::OnPaint(PaintList& list, int32 layer) const noexcept 
 }
 
 Result<void> EditableText::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
+    // 오른쪽 끌기 스크롤 중이면 소프트웨어 커서(잡은 손)를 그 자리 가운데에 그린다(UE
+    // SMultiLineEditableText OnPaint "SoftwareCursor_Grab" — 23.5절). 진짜 커서는 숨어 있다.
+    if (rightScrolling_) {
+        const Vec2 size = icons::Icon16;
+        const auto cursor = GetGeometry().MakeChild(
+            size,
+            {1, 0, 0, 1, softwareCursor_.x - size.x * 0.5f, softwareCursor_.y - size.y * 0.5f}, {},
+            {});
+        const StyleBrush grab = StyleBrush::SvgForeground(icons::CursorGrab, size);
+        auto painted = list.TryAddBrush(cursor, grab.Resolve(list.Theme(), list.ColorContext()),
+                                        LinearColor{1, 1, 1, 1}, layer);
+        if (!painted) {
+            return painted;
+        }
+    }
+
     // 문맥 메뉴가 열린 동안은 caret을 그리지 않는다(초점이 메뉴에 있다 — 22.7a절).
     if (!focused_ || contextMenuOpen_ || !IsCaretVisible()) {
         return Result<void>::Success();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DemoCursor.h"
 #include "DemoTextInput.h"
 #include "FrameStats.h"
 
@@ -64,6 +65,8 @@ private:
         ErrorCode liveResizeError = ErrorCode::None;
         // 창의 텍스트 입력 서비스다(19.2절 — 만들지 못하면 IME 글자가 Text 이벤트로 온다).
         SharedPtr<DemoTextInput> textInput;
+        // 창의 커서 서비스다(23.5절 — 끄는 동안 커서 숨김·되돌림).
+        SharedPtr<DemoCursor> cursor;
         // --frame-stats 단계별 시간이다(제출은 모든 창을 한 번에 하므로 DockWindows가 센다).
         FrameStats stats;
         // 로그에서 창을 가르는 번호다(만든 순서 — 0은 주 창).

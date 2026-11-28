@@ -94,6 +94,7 @@ Application::~Application() noexcept {
         // 공급자 delegate가 잡은 호스트 객체보다 Element가 오래 살 수 있다.
         host_->SetPopupWorkArea({});
         host_->SetTextInputService({});
+        host_->SetCursorService({});
     }
 }
 
@@ -331,6 +332,26 @@ Result<void> Application::SetTextInputService(SharedPtr<TextInputService> servic
 
     host->SetTextInputService(Move(service));
     return Result<void>::Success();
+}
+
+Result<void> Application::SetCursorService(SharedPtr<CursorService> service) noexcept {
+    UiHostServices* host = EnsureHostServices();
+    if (!host) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    host->SetCursorService(Move(service));
+    return Result<void>::Success();
+}
+
+bool Application::IsCursorLocked(PointerSource source, uint32 user, uint32 pointer) const noexcept {
+    for (const auto& capture : captures_) {
+        if (capture.source == source && capture.userId == user && capture.pointerId == pointer) {
+            return capture.cursorLocked;
+        }
+    }
+
+    return false;
 }
 
 bool Application::ProcessTextInput(uint32 record) noexcept {
@@ -1176,8 +1197,12 @@ Result<bool> Application::RoutePointer(const PointerEvent& event) noexcept {
     return RoutePointerWithin(event, {});
 }
 
-Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
+Result<bool> Application::RoutePointerWithin(const PointerEvent& routed,
                                              const SharedPtr<Element>& scope) noexcept {
+    // 잠근 capture면 이동량을 채운다(아래 capture 찾기). 그 밖에는 이동량이 없다.
+    PointerEvent event = routed;
+    event.hasDelta = false;
+    event.delta = {};
     EnsureFrame();
     if (cancelling_) {
         return Result<bool>::Failure(ErrorCode::Busy);
@@ -1191,6 +1216,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
     SharedPtr<Element> captured;
     Vec2 pressPosition{};
     bool allowTouchPan = false;
+    bool cursorLocked = false;
     bool releaseOnUp = event.source == PointerSource::Touch;
     for (usize i = 0; i < captures_.Size(); ++i) {
         if (captures_[i].source == event.source && captures_[i].userId == event.userId &&
@@ -1199,6 +1225,21 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             pressPosition = captures_[i].pressPosition;
             allowTouchPan = captures_[i].allowTouchPan;
             releaseOnUp = releaseOnUp || captures_[i].button == event.button;
+            // 끄는 동안 잠근 capture: Move에 이동량을 싣는다. 창이 잰 값(relative)이 있으면 그대로,
+            // 없으면(서비스 없음·잠금 실패) 직전 위치와의 차이다(23.5절).
+            if (captures_[i].cursorLocked) {
+                cursorLocked = true;
+                if (event.type == PointerEventType::Move) {
+                    event.hasDelta = true;
+                    event.delta =
+                        routed.hasDelta ? routed.delta : event.position - captures_[i].lastPosition;
+                }
+
+                if (!routed.hasDelta) {
+                    captures_[i].lastPosition = event.position;
+                }
+            }
+
             if (!captured) {
                 ReleaseCapture(event.source, event.userId, event.pointerId);
             }
@@ -1224,7 +1265,8 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
         }
     }
 
-    if (event.source == PointerSource::Mouse) {
+    // 끄는 동안 잠갔으면 hover·툴팁을 멈춘다(커서가 보이지 않는다 — 23.5절).
+    if (event.source == PointerSource::Mouse && !cursorLocked) {
         const uint64 previousHoverVersion = hoverVersion_;
         auto hovered =
             UpdateHover(event.userId, event.type == PointerEventType::Cancel ? nullptr : hit, root);
@@ -1247,7 +1289,7 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
         }
     }
 
-    if (event.source == PointerSource::Mouse) {
+    if (event.source == PointerSource::Mouse && !cursorLocked) {
         // 툴팁은 비활성 요소도 띄운다 — 활성을 무시한 대상으로 본다(UE SlateUser.cpp 1351행).
         SharedPtr<Element> tipRecorded;
         Element* tipHit = hit;
@@ -1301,6 +1343,11 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
 
     auto applyReply = [&](const PointerReply& reply,
                           const SharedPtr<Element>& target) noexcept -> Result<void> {
+        // 놓을 자리는 capture를 풀기 전에 기억한다(같은 reply의 releaseCapture가 그 자리를 쓴다).
+        if (reply.releaseCursorAt) {
+            StoreCursorRelease(event, target, reply.releaseCursorAt.Value());
+        }
+
         if (reply.releaseCapture) {
             ReleaseCapture(event.source, event.userId, event.pointerId);
         } else if (reply.capture) {
@@ -1313,6 +1360,10 @@ Result<bool> Application::RoutePointerWithin(const PointerEvent& event,
             if (!stored) {
                 return stored;
             }
+        }
+
+        if (reply.lockCursor && !reply.releaseCapture) {
+            LockCaptureCursor(event, target);
         }
 
         return Result<void>::Success();
@@ -1539,7 +1590,14 @@ void Application::ReleaseCapture(PointerSource source, uint32 userId, uint32 poi
         if (captures_[i].source == source && captures_[i].userId == userId &&
             captures_[i].pointerId == pointerId) {
             SharedPtr<Element> target = captures_[i].target.Lock();
+            // 잠근 서비스로 커서를 되돌린다(놓을 자리가 없으면 잠금 자리 — 23.5절).
+            const SharedPtr<CursorService> cursor = Move(captures_[i].cursor);
+            const Vec2 releaseAt = captures_[i].releaseAt.ValueOr(captures_[i].lockPosition);
             (void)captures_.TryRemoveAt(i);
+            if (cursor) {
+                cursor->UnlockPointer(releaseAt);
+            }
+
             if (target) {
                 target->OnPointerCaptureLost(source, userId, pointerId);
             }
@@ -1563,6 +1621,55 @@ Result<void> Application::SetCapture(const PointerEvent& event, const SharedPtr<
     ReleaseCapture(event.source, event.userId, event.pointerId);
     return captures_.TryPushBack({event.source, event.userId, event.pointerId, event.button,
                                   WeakPtr<Element>(target), event.position, allowTouchPan});
+}
+
+void Application::LockCaptureCursor(const PointerEvent& event,
+                                    const SharedPtr<Element>& target) noexcept {
+    if (event.source != PointerSource::Mouse) {
+        return;
+    }
+
+    for (auto& capture : captures_) {
+        if (capture.source != event.source || capture.userId != event.userId ||
+            capture.pointerId != event.pointerId || capture.target.Lock().Get() != target.Get()) {
+            continue;
+        }
+
+        if (capture.cursorLocked) {
+            return;
+        }
+
+        capture.cursorLocked = true;
+        capture.lockPosition = event.position;
+        capture.lastPosition = event.position;
+        SharedPtr<CursorService> service = host_ ? host_->Cursor() : SharedPtr<CursorService>{};
+        if (!service) {
+            return;
+        }
+
+        // 잠그지 못하면 capture만 한다 — 원인을 남긴다(이동량은 위치 차이다).
+        auto locked = service->LockPointer(event.position);
+        if (!locked) {
+            Log::Warning(LogUiApplication,
+                         "Cursor lock failed ({Error}); dragging without hiding the cursor",
+                         ErrorCodeName(locked.Error()));
+            return;
+        }
+
+        capture.cursor = service;
+        return;
+    }
+}
+
+void Application::StoreCursorRelease(const PointerEvent& event, const SharedPtr<Element>& target,
+                                     Vec2 at) noexcept {
+    for (auto& capture : captures_) {
+        if (capture.source == event.source && capture.userId == event.userId &&
+            capture.pointerId == event.pointerId && capture.target.Lock().Get() == target.Get()) {
+            capture.releaseAt = at;
+            return;
+        }
+    }
 }
 
 Result<bool> Application::MoveFocus(uint32 userId, bool forward, bool wrap,

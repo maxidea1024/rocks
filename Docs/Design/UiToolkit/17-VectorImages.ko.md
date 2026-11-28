@@ -51,6 +51,7 @@ UE 5.8 에디터의 아이콘은 거의 모두 SVG 벡터 이미지다(`FSlateVe
 | `CoreWidgets/CheckBox/Check`·`Indeterminate` | `CheckBox/check`·`indeterminate` | 체크 상자 |
 | `CoreWidgets/CheckBox/RadioOn`·`RadioOff` | `radio-on`·`radio-off` | 라디오 |
 | `CoreWidgets/ComboBox/WideChevronDown` | `ComboBox/wide-chevron-down` | 콤보 버튼 |
+| `CoreWidgets/Cursor/Grab` | (Rocks가 그림 — UE `SoftwareCursor_Grab`는 png) | 편집 텍스트 오른쪽 끌기 소프트웨어 커서(23.5절) |
 | `CoreWidgets/TableView/SortUp`·`SortDown` | `sort-up-arrow`·`sort-down-arrow` | 표 머리 |
 | `Common/CaretRight`·`CaretDown` | `caret-right`·`caret-down` | 펼침 영역·트리 |
 | `Common/ChevronUp`·`ChevronDown`·`ChevronLeft`·`ChevronRight` | `chevron-*` | 메뉴 하위 표시·검색 상자 |
