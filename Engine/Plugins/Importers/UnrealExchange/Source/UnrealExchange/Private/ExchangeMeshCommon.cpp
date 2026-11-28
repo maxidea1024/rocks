@@ -170,7 +170,8 @@ Result<void> ExchangeMeshContext::DumpReference(JsonValue value, AssetId& out, b
 }
 
 Result<void> ExchangeMeshContext::Translate(JsonValue object, Span<const ExchangeSettingRow> rows,
-                                            ExchangeClass output, JsonDocument& out) noexcept {
+                                            ExchangeClass output, JsonDocument& out,
+                                            Span<const StringView> groups) noexcept {
     StringBuilder<> text(allocator);
     JsonWriter writer(text);
     ExchangeSettingInput settings;
@@ -178,6 +179,7 @@ Result<void> ExchangeMeshContext::Translate(JsonValue object, Span<const Exchang
     settings.rows = rows;
     settings.output = output;
     settings.references = references;
+    settings.groups = groups;
     // 번역의 CorruptData만 덤프 내용(값이 행 종류와 맞지 않음)이다. 그 밖(행 표의 결함
     // InvalidArgument, writer 한도·할당)은 코드 없이 그대로다.
     if (auto translated = TranslateExchangeSettings(settings, writer, warnings); !translated) {

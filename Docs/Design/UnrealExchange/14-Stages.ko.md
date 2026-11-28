@@ -14,10 +14,11 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX3b1 | Rocks | 정적 메시 순수 변환(5.5절 1–9번 — 기록 적재 `LoadExchangeMeshSource`·모드·LOD와 에셋 설정·슬롯·섹션·소켓·충돌 → `StaticMeshImportSpec`), 설정 번역 행의 `rocksKey`, 경고 `UnrealNameNormalized` | UX3a, UX2b, MeshAnimationAssets MA2b–MA3 |
 | UX3b2 | Rocks | 정적 메시 임포트(5.5절 10–12번 — A2f 임포터 `unreal_static_mesh`, 종류별 임포터 일반화 `ExchangeServiceKind`, 옵션 `meshNormals`, 제품 연결, 명령·C# 시험) | UX3b1, UXR11(complex collision 메시 순환은 계획이 `HardCycle`로 막는다) |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
-| UX4b1 | Rocks | 머티리얼 그래프 번역(8.7절 1–10번 — 카탈로그 기준 노드·핀·속성, 출력 `SurfaceFromShadingModel`, 설정, 파라미터 병합, 함수·컬렉션, 대체 규칙 3번). **명세**(2026-11-27, 8.7절) | UX4a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10, UXR12–UXR16 |
-| UX4b2 | Rocks | 머티리얼 인스턴스(8.7절 11·12번 — override 키, trait override, 결과 따름, `resolved` 대조는 MS4 뒤) | UX4b1, MaterialSystem MS6(대조는 MS4) |
+| UX4b1a | Rocks | 머티리얼 설정 번역(8.7절 7번 "구현에서 정함" — `ExchangeMaterialSettingRows`, 행 묶음·`Flatten`·`EnumMap` 없는 값(10.6절 8번), `traits`·`usage`·`preview`). 그래프와 무관해 UXR·MS6 전에 먼저 한다(개정 32) | UX4a, MaterialSystem MS3b |
+| UX4b1b | Rocks | 머티리얼 그래프 번역(8.7절 1–6·8–10번 — 카탈로그 기준 노드·핀·속성, 출력 `SurfaceFromShadingModel`, 파라미터 병합, 함수·컬렉션, 대체 규칙 3번, A2f 임포터). **명세**(2026-11-27, 8.7절) | UX4b1a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10, UXR12–UXR16 |
+| UX4b2 | Rocks | 머티리얼 인스턴스(8.7절 11·12번 — override 키, trait override, 결과 따름, `resolved` 대조는 MS4 뒤) | UX4b1b, MaterialSystem MS6(대조는 MS4) |
 | UX5a | UE | 속성 집합 머티리얼의 `FrontMaterial` 핀 덤프, Substrate 시험 프로젝트 `HostSubstrate`, golden `M_GoldenSubstrate`·`M_GoldenSubstrateAttributes`·`GoldenSubstrate.rxbundle`, 자기 시험 `RocksExport.SubstrateExtraction`(8.8절 6번). **명세**(2026-11-27, 8.8절). **구현**(2026-11-27, 8.8절 6번 "구현" — 미확인 두 항목은 개정 29에서 원본으로 확인) | UX4a |
-| UX5b | Rocks | Substrate 번역(8.8절 1–5·7번 — 모드 판정, FrontMaterial → `Output.Surface`·속성 집합 FrontMaterial 칸, 잇는 핀 표, 설정, 핀 별칭, 한도 경고) | UX5a, UX4b1, UXR17 |
+| UX5b | Rocks | Substrate 번역(8.8절 1–5·7번 — 모드 판정, FrontMaterial → `Output.Surface`·속성 집합 FrontMaterial 칸, 잇는 핀 표, 설정, 핀 별칭, 한도 경고) | UX5a, UX4b1b, UXR17 |
 | UX6a | UE | 굽기(8.9절 1·2번 — `-BakeMaterials`·`-BakeSize`, `FRocksMaterialBaker`, `data.baked`, `environment`, 자기 시험 `RocksExport.MaterialBaking`, Rocks 리더 구조 검사). **명세**(2026-11-27, 8.9절). **구현**(2026-11-27 — 8.9절 9번) | UX4a |
 | UX6b | Rocks | 굽기 대체(8.9절 3–8번 — 결과 2번 구운 표면 그래프·보조 출력 텍스처·경로 충돌 계획 검사, 결과 3번 `MaterialSample` 그래프, 결과 태그, 인스턴스, 재임포트) | UX6a, UX4b2, UX2b, UXR15 |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |

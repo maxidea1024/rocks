@@ -31,3 +31,4 @@
 - 개정 29(2026-11-28): 16장 UX5a 미확인 두 항목을 UE 5.8 원본으로 확인해 8.8절 3·4번에 적고 16장에서 뺐다 — Substrate가 꺼진 프로젝트의 ColoredTransmittance는 로드 값이 남아도 `Translucent`로 컴파일된다, 함수 slab 로드 변환은 옛 버전(`AddMaterialSubstrateSubsurfaceType` 전) 머티리얼에서만 돌고 마지막에 로드된 호출 머티리얼의 판정이다.
 - 개정 30(2026-11-28): 16장 "같은 이름 파라미터의 기본값이 다를 때 UE가 쓰는 값"을 UE 5.8 원본으로 확인했다 — 처음 만난 노드의 값을 고정한다(MaterialCachedData.cpp:173-218). UX4b 병합(8.5절·8.7절 2·8번·8.6절 1번)의 남기는 노드를 `ExpressionGUID` 순에서 UE 순회 순서(`data.nodes` 순서, 함수 호출은 의존 함수 먼저)로 고쳤다.
 - 개정 31(2026-11-28): 16장의 정적 메시 임계값 항목을 뺐다(MeshAnimationAssets 5.5절 4번이 UE 원본으로 확정 — 남아 있던 낡은 행). 16장 미확인 항목 없음.
+- 개정 32(2026-11-28): UX4b1을 UX4b1a(설정 번역 — MS3b 필드로 지금 가능)와 UX4b1b(그래프 — UXR·MS6 대기)로 나눴다. 8.7절 7번 "구현에서 정함"(표는 MaterialSystem 19.9–19.11절 대응, TODO 칸은 Unsupported, enum 대응을 UE 5.8 원본으로 확인, 사용 대상·미리보기는 변환이 옮김), 10.6절 8번에 행 묶음·`Flatten`·`EnumMap`의 Rocks에 없는 값을 더했다.

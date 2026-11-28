@@ -12,7 +12,8 @@
 
 // 설정 번역 시험이다(Docs/Design/UnrealExchange 10.6절 8번, 4.6절 3번): 처리 종류마다 양성·음성
 // (bool 접두, enum 접두, Guid 순서, PerPlatform, 참조·참조 배열, struct·struct 배열, Ignore,
-// Unsupported 기본값·비기본값, 모르는 키, 클래스 밖 키), 텍스처 표 행 수, 그리고 UE 5.8 엔진 콘텐츠
+// Unsupported 기본값·비기본값, 모르는 키, 클래스 밖 키, 행 묶음·Flatten·EnumMap의 Rocks에 없는 값 —
+// UX4b1a), 텍스처 표 행 수, 그리고 UE 5.8 엔진 콘텐츠
 // 텍스처 20개의 설정(Tests/Settings/EngineTextureSettings.json — AssetImportData 본문을 뺀 사본)이
 // 경고 없이 번역되고 ImportJson을 통과하는지.
 using namespace rocks;
@@ -45,11 +46,12 @@ constexpr ExchangeSettingRow SampleRows[] = {
 };
 
 // settings 원문을 rows로 compact 번역해 out에 쓴다.
-Result<void> Translate(
-    Allocator& allocator, StringView settings, ExchangeClass output,
-    const OrderedMap<String, AssetId>* references, StringBuilder<>& out,
-    Array<ExchangeSettingWarning>& warnings,
-    Span<const ExchangeSettingRow> rows = Span<const ExchangeSettingRow>(SampleRows)) noexcept {
+Result<void>
+Translate(Allocator& allocator, StringView settings, ExchangeClass output,
+          const OrderedMap<String, AssetId>* references, StringBuilder<>& out,
+          Array<ExchangeSettingWarning>& warnings,
+          Span<const ExchangeSettingRow> rows = Span<const ExchangeSettingRow>(SampleRows),
+          Span<const StringView> groups = Span<const StringView>()) noexcept {
     JsonDocument document(allocator);
     if (!document.Parse(settings).Succeeded()) {
         return Result<void>::Failure(ErrorCode::CorruptData);
@@ -65,6 +67,7 @@ Result<void> Translate(
     input.rows = rows;
     input.output = output;
     input.references = references;
+    input.groups = groups;
     if (auto translated = TranslateExchangeSettings(input, writer, warnings); !translated) {
         return translated;
     }
@@ -283,6 +286,158 @@ TEST(UnrealExchange_SettingsRejects) {
         // 행 표의 기본값 텍스트가 JSON이 아니면 표의 결함이다(덤프 내용이 아니다).
         CHECK(Translate(allocator, R"({"BadDefault": 1})", ExchangeClass::Texture2D, nullptr, out,
                         warnings)
+                  .Error() == ErrorCode::InvalidArgument);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 행 묶음·Flatten·EnumMap의 Rocks에 없는 값(UX4b1a — 10.6절 8번): 묶음 행은 최상위 키 뒤 묶음
+// 객체 안에 settings 순서로 쓰고 빈 묶음도 쓴다, 모르는 키 경고는 한 번, Flatten은 멤버 표의 출력
+// 키로 형제 키를 쓰고 모르는 멤버는 그 행 번호로 경고, Rocks에 없는 enum 값은 키를 버리고 경고,
+// 묶음 번호가 묶음 이름 수를 넘거나 멤버 표에 묶음이 있으면 표의 결함, Flatten 값이 객체가 아니면
+// CorruptData다.
+TEST(UnrealExchange_SettingsGroupsFlattenUnmapped) {
+    SystemAllocator allocator;
+    {
+        constexpr ExchangeSettingRow PointRows[] = {
+            {"X", Kind::Same, 0, nullptr, 0, {}, "pointX", 0},
+            {"Y", Kind::Same, 0, nullptr, 0, {}, "pointY", 0},
+        };
+        constexpr ExchangeSettingRow ModeValues[] = {
+            {"M_One", Kind::Same, 0, nullptr, 0, {}, "One", 0},
+            {"M_Gone", Kind::Same, 0, nullptr, 0, {}, {}, 0},
+        };
+        const ExchangeSettingRow rows[] = {
+            {"Top", Kind::Same, 0, nullptr, 0, {}, {}, 0},
+            {"Inner", Kind::Same, 0, nullptr, 0, {}, "inner", 1},
+            {"Point", Kind::Flatten, 0, PointRows, 2, {}, {}, 1},
+            {"Mode", Kind::EnumMap, 0, ModeValues, 2, {}, "mode", 0},
+            {"Late", Kind::Same, 0, nullptr, 0, {}, {}, 1},
+        };
+        const StringView groups[] = {"first", "second"};
+        const Span<const ExchangeSettingRow> table(rows);
+        StringBuilder<> out(allocator);
+        Array<ExchangeSettingWarning> warnings(allocator);
+        REQUIRE(Translate(allocator,
+                          R"({"Late": 4, "Point": {"X": 2, "Y": 3, "Z": 9}, "Top": 1,
+"Mystery": 0, "Inner": 5, "Mode": "M_One"})",
+                          ExchangeClass::Material, nullptr, out, warnings, table,
+                          Span<const StringView>(groups)));
+        CHECK(out.View() ==
+              StringView(R"({"Top":1,"mode":"One","first":{"Late":4,"pointX":2,"pointY":3,)"
+                         R"("inner":5},"second":{}})"
+                         "\n"));
+        REQUIRE(warnings.Size() == 2);
+        // 경고는 최상위 순회(모르는 키) 뒤에 묶음 순회(Flatten의 모르는 멤버) 순서다.
+        CHECK(warnings[0].detail == ExchangeUnknownSettingDetail && warnings[1].detail == 2);
+
+        // Rocks에 없는 enum 값은 키를 쓰지 않고 그 행 번호로 경고한다. 표에 없는 값은
+        // CorruptData다.
+        REQUIRE(Translate(allocator, R"({"Mode": "M_Gone", "Top": 2})", ExchangeClass::Material,
+                          nullptr, out, warnings, table, Span<const StringView>(groups)));
+        CHECK(out.View() == StringView(R"({"Top":2,"first":{},"second":{}})"
+                                       "\n"));
+        REQUIRE(warnings.Size() == 1);
+        CHECK(warnings[0].code == AssetDiagnosticCode::UnsupportedSetting &&
+              warnings[0].detail == 3);
+        CHECK(Translate(allocator, R"({"Mode": "M_Other"})", ExchangeClass::Material, nullptr, out,
+                        warnings, table, Span<const StringView>(groups))
+                  .Error() == ErrorCode::CorruptData);
+
+        // Flatten 값이 객체가 아니면 덤프 내용 오류다.
+        CHECK(Translate(allocator, R"({"Point": [1, 2]})", ExchangeClass::Material, nullptr, out,
+                        warnings, table, Span<const StringView>(groups))
+                  .Error() == ErrorCode::CorruptData);
+
+        // 묶음 이름이 모자라면(묶음 1 행이 있는데 이름이 없음) 표의 결함이다.
+        CHECK(Translate(allocator, R"({"Top": 1})", ExchangeClass::Material, nullptr, out, warnings,
+                        table)
+                  .Error() == ErrorCode::InvalidArgument);
+
+        // 멤버 표의 행에 묶음이 있으면 표의 결함이다.
+        constexpr ExchangeSettingRow GroupedMembers[] = {
+            {"A", Kind::Same, 0, nullptr, 0, {}, {}, 1},
+        };
+        const ExchangeSettingRow structRows[] = {
+            {"S", Kind::Struct, 0, GroupedMembers, 1, {}, {}, 0},
+        };
+        CHECK(Translate(allocator, R"({"S": {"A": 1}})", ExchangeClass::Material, nullptr, out,
+                        warnings, Span<const ExchangeSettingRow>(structRows),
+                        Span<const StringView>(groups))
+                  .Error() == ErrorCode::InvalidArgument);
+
+        // 묶음 안의 Unsupported(기본값은 조용히, 아닌 값은 경고 — 최상위 경고 뒤)와 묶음 행의
+        // classes 필터(집합 밖 클래스면 경고 없이 버림), Flatten 멤버 EnumMap의 Rocks에 없는
+        // 값(경고 — 그 Flatten 행 번호).
+        constexpr ExchangeSettingRow PointModes[] = {
+            {"P_On", Kind::Same, 0, nullptr, 0, {}, "On", 0},
+            {"P_Gone", Kind::Same, 0, nullptr, 0, {}, {}, 0},
+        };
+        const ExchangeSettingRow pointMembers[] = {
+            {"X", Kind::Same, 0, nullptr, 0, {}, "pointX", 0},
+            {"Mode", Kind::EnumMap, 0, PointModes, 2, {}, "pointMode", 0},
+        };
+        const ExchangeSettingRow groupedRows[] = {
+            {"Old", Kind::Unsupported, 0, nullptr, 0, "0", {}, 1},
+            {"Only2D",
+             Kind::Same,
+             ExchangeClassBit(ExchangeClass::Texture2D),
+             nullptr,
+             0,
+             {},
+             {},
+             2},
+            {"Point", Kind::Flatten, 0, pointMembers, 2, {}, {}, 2},
+            {"Top", Kind::Same, 0, nullptr, 0, {}, {}, 0},
+        };
+        REQUIRE(Translate(allocator,
+                          R"({"Old": 0, "Only2D": 1, "Point": {"X": 1, "Mode": "P_On"}, "Top": 1,
+"Mystery": 2})",
+                          ExchangeClass::Material, nullptr, out, warnings,
+                          Span<const ExchangeSettingRow>(groupedRows),
+                          Span<const StringView>(groups)));
+        CHECK(out.View() ==
+              StringView(R"({"Top":1,"first":{},"second":{"pointX":1,"pointMode":"On"}})"
+                         "\n"));
+        REQUIRE(warnings.Size() == 1);
+        CHECK(warnings[0].detail == ExchangeUnknownSettingDetail);
+        REQUIRE(Translate(allocator, R"({"Point": {"Mode": "P_Gone"}, "Old": 3, "Top": 1})",
+                          ExchangeClass::Texture2D, nullptr, out, warnings,
+                          Span<const ExchangeSettingRow>(groupedRows),
+                          Span<const StringView>(groups)));
+        CHECK(out.View() == StringView(R"({"Top":1,"first":{},"second":{}})"
+                                       "\n"));
+        REQUIRE(warnings.Size() == 2);
+        CHECK(warnings[0].detail == 0 && warnings[1].detail == 2);
+
+        // Flatten 멤버가 값 하나를 쓰는 종류가 아니거나(Ignore) 묶음이 있으면 표의 결함이다.
+        constexpr ExchangeSettingRow IgnoredMember[] = {
+            {"X", Kind::Ignore, 0, nullptr, 0, {}, {}, 0},
+        };
+        constexpr ExchangeSettingRow GroupedMember[] = {
+            {"X", Kind::Same, 0, nullptr, 0, {}, "x", 1},
+        };
+        const ExchangeSettingRow badFlatten[] = {
+            {"A", Kind::Flatten, 0, IgnoredMember, 1, {}, {}, 0},
+            {"B", Kind::Flatten, 0, GroupedMember, 1, {}, {}, 0},
+        };
+        CHECK(Translate(allocator, R"({"A": {"X": 1}})", ExchangeClass::Material, nullptr, out,
+                        warnings, Span<const ExchangeSettingRow>(badFlatten))
+                  .Error() == ErrorCode::InvalidArgument);
+        CHECK(Translate(allocator, R"({"B": {"X": 1}})", ExchangeClass::Material, nullptr, out,
+                        warnings, Span<const ExchangeSettingRow>(badFlatten))
+                  .Error() == ErrorCode::InvalidArgument);
+
+        // 멤버 표의 Flatten도 표의 결함이다.
+        const ExchangeSettingRow NestedFlatten[] = {
+            {"P", Kind::Flatten, 0, PointRows, 2, {}, {}, 0},
+        };
+        const ExchangeSettingRow flattenRows[] = {
+            {"F", Kind::Flatten, 0, NestedFlatten, 1, {}, {}, 0},
+        };
+        CHECK(Translate(allocator, R"({"F": {"P": {"X": 1}}})", ExchangeClass::Material, nullptr,
+                        out, warnings, Span<const ExchangeSettingRow>(flattenRows))
                   .Error() == ErrorCode::InvalidArgument);
     }
 

@@ -19,10 +19,11 @@ public sealed class UnrealExchange : PluginModuleRules
     // ObjectRuntime: the reflected import options struct. ReflectionText: ImportJson for the translated settings (section 10.6 item 8).
     // Texture: the texture output classes and TextureSource (section 4.6). Mesh, MeshTools: the static mesh settings structs, collision
     // and the static mesh import service spec (section 5.5). Animation, AnimationTools: the skeleton and clip types and the skeleton and clip
-    // import service specs (sections 6.4, 7.2). Curves: TangentCurve for clip curves (section 7.2).
+    // import service specs (sections 6.4, 7.2). Curves: TangentCurve for clip curves (section 7.2). MaterialSchema, Material: the material
+    // traits, usage and preview settings the material settings translation fills (section 8.7 item 7).
     protected override string[] PublicDependencies =>
         ["Core", "ObjectRuntime", "ReflectionText", "AssetRuntime", "MeshSource", "AssetDatabase", "AssetCommandlets", "Texture", "Mesh",
-         "MeshTools", "Animation", "AnimationTools", "Curves"];
+         "MeshTools", "Animation", "AnimationTools", "Curves", "MaterialSchema", "Material"];
 
     // ImageCodec: the source size limits shared with file imports (ImageDecodeLimits defaults — section 4.6 item 2).
     protected override string[] PrivateDependencies => ["ImageCodec"];

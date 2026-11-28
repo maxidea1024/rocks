@@ -124,11 +124,12 @@ struct ExchangeMeshContext {
     Result<void> DumpReference(JsonValue value, AssetId& out, bool& present,
                                uint64 detail) noexcept;
 
-    // object를 rows로 번역해 out에 읽어 둔다(경고는 warnings 뒤). 번역의 CorruptData만 덤프
-    // 내용(InvalidSource / CorruptData, detail 0)이고 행 표 결함·writer·다시 읽기 실패는 코드 없이
-    // 그 오류다.
+    // object를 rows로 번역해 out에 읽어 둔다(경고는 warnings 뒤, groups는 행 묶음의 출력 키 —
+    // ExchangeSettingInput::groups). 번역의 CorruptData만 덤프 내용(InvalidSource / CorruptData,
+    // detail 0)이고 행 표 결함·writer·다시 읽기 실패는 코드 없이 그 오류다.
     Result<void> Translate(JsonValue object, Span<const ExchangeSettingRow> rows,
-                           ExchangeClass output, JsonDocument& out) noexcept;
+                           ExchangeClass output, JsonDocument& out,
+                           Span<const StringView> groups = Span<const StringView>()) noexcept;
 
     // 번역한 슬롯 배열(UE FStaticMaterial·FSkeletalMaterial — 5.5절 6번)을 out 뒤에 더한다(이름은
     // 번역 문서를 가리킨다).

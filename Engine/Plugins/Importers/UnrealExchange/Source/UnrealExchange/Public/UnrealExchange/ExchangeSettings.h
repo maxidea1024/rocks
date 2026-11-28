@@ -49,8 +49,14 @@ enum class ExchangeSettingKind : uint8 {
     // 값 struct 배열 — 원소마다 members 표로 재귀한다.
     StructArray,
     // 값 이름이 Rocks와 다른 enum — members 표의 ueKey(UE 값 이름) → rocksKey(Rocks 열거자 이름)로
-    // 바꾼다(UnrealExchange 6.4절 3번). 표에 없는 값·문자열이 아닌 값은 CorruptData다.
+    // 바꾼다(UnrealExchange 6.4절 3번). 표에 없는 값·문자열이 아닌 값은 CorruptData다. rocksKey가
+    // 빈 멤버는 Rocks에 없는 값이다: UnsupportedSetting 경고 뒤 키를 버린다(Rocks 기본값이 남는다 —
+    // UX4b1a).
     EnumMap,
+    // 값 struct의 멤버를 members 표로 형제 키에 쓴다(출력 키는 멤버 행의 rocksKey — UE FIntPoint
+    // `{X, Y}` → userTextureDivisorX·Y, UX4b1a). 멤버 행은 Same·Enum·EnumMap만이다. 멤버 표에 없는
+    // 멤버와 EnumMap 멤버의 Rocks에 없는 값은 UnsupportedSetting(detail = 그 행 번호)이다.
+    Flatten,
     // 설정이 아닌 UE 멤버 — 버린다.
     Ignore,
     // Rocks 필드가 없는 UE 설정 — 값이 defaultValue와 다르면 UnsupportedSetting 경고 뒤 버린다.
@@ -80,6 +86,9 @@ struct ExchangeSettingRow {
     // 출력 키다(UnrealExchange 5.5절 4번). 비면 UE 키에서 bool 접두 b만 뗀 이름이다(대소문자는
     // ImportJson이 무시한다 — 이름이 다른 행만 채운다, 예: BuildScale3D → buildScale).
     StringView rocksKey;
+    // 최상위 표의 행 묶음이다(0 = 최상위 객체, n = ExchangeSettingInput::groups[n - 1] 키의 하위
+    // 객체 — Rocks 필드가 하위 struct에 있을 때, 10.6절 8번). 멤버 표에서는 0이어야 한다.
+    uint8 group = 0;
 };
 
 // 경고 하나다. key는 settings 문서를 가리킨다(문서가 살아 있는 동안 유효).
@@ -99,15 +108,21 @@ struct ExchangeSettingInput {
     ExchangeClass output = ExchangeClass::Unsupported;
     // 참조로 걸 대상이다(objectPath → AssetId — 키만 본다). null이면 참조는 모두 null이다.
     const OrderedMap<String, AssetId>* references = nullptr;
+    // 행 묶음의 출력 키다(ExchangeSettingRow::group n의 키는 groups[n - 1]). 묶음 객체는 최상위 키
+    // 뒤에 이 순서로, 비어 있어도 쓴다.
+    Span<const StringView> groups{};
 };
 
 // input.settings를 번역해 writer에 JSON 객체 하나를 쓰고(Finish는 호출자) 경고를 warnings 뒤에
-// 더한다(설정 순서). 키 순서는 settings 순서다.
+// 더한다(설정 순서 — 묶음 행의 경고는 최상위 경고 뒤 묶음 순서). 키 순서는 settings 순서이고 묶음
+// 행은 최상위 키 뒤 묶음 객체 안에 쓴다.
 //
 // 오류: settings가 객체가 아님·행 종류와 맞지 않는 값(Guid가 int32 넷 객체가 아님, 참조가 null도
-// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음 — 덤프 내용)
-// CorruptData, Unsupported 기본값 텍스트가 JSON이 아님(행 표의 결함) InvalidArgument, writer
-// 오류(중복 키·깊이 등 — writer는 실패 상태), 할당 실패. 실패하면 writer·warnings 결과를 버린다.
+// objectPath 객체도 아님, 배열·객체 종류 불일치, PerPlatformFloat의 Default가 없음, Flatten 값이
+// 객체가 아님 — 덤프 내용) CorruptData, 행 표의 결함(Unsupported 기본값 텍스트가 JSON이 아님,
+// 최상위 행의 group이 groups 수보다 큼, 멤버 표 행의 group이 0이 아님, Flatten 멤버가 Same·Enum·
+// EnumMap이 아니거나 group이 있음) InvalidArgument, writer 오류(중복 키·깊이 등 — writer는 실패
+// 상태), 할당 실패. 실패하면 writer·warnings 결과를 버린다.
 ROCKS_UNREALEXCHANGE_API Result<void>
 TranslateExchangeSettings(const ExchangeSettingInput& input, JsonWriter& writer,
                           Array<ExchangeSettingWarning>& warnings) noexcept;

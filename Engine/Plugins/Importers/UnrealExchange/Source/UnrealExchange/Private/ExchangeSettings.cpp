@@ -281,6 +281,32 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
                              Span<const ExchangeSettingRow> rows, bool top,
                              uint64 parentDetail) noexcept;
 
+// EnumMap 행에서 value(UE 값 이름)의 멤버 행이다(문자열이 아니거나 표에 없으면 null).
+const ExchangeSettingRow* FindEnumValue(const ExchangeSettingRow& row, JsonValue value) noexcept {
+    if (!value.IsString()) {
+        return nullptr;
+    }
+
+    const Span<const ExchangeSettingRow> members(row.members, row.memberCount);
+    for (const ExchangeSettingRow& mapped : members) {
+        if (mapped.ueKey == value.GetString()) {
+            return &mapped;
+        }
+    }
+
+    return nullptr;
+}
+
+// EnumMap 행의 값이 Rocks에 없는 값(빈 rocksKey 멤버)인가.
+bool UnmappedEnum(const ExchangeSettingRow& row, JsonValue value) noexcept {
+    if (row.kind != ExchangeSettingKind::EnumMap) {
+        return false;
+    }
+
+    const ExchangeSettingRow* mapped = FindEnumValue(row, value);
+    return mapped != nullptr && mapped->rocksKey.IsEmpty();
+}
+
 // 행 하나의 값을 쓴다(키는 이미 썼다).
 Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row, JsonValue value,
                            uint64 detail, StringView key) noexcept {
@@ -318,16 +344,20 @@ Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row,
 
         return state.writer.EndArray();
     }
-    case ExchangeSettingKind::EnumMap:
-        if (value.IsString()) {
-            for (const ExchangeSettingRow& mapped : members) {
-                if (mapped.ueKey == value.GetString()) {
-                    return state.writer.String(mapped.rocksKey);
-                }
-            }
+    case ExchangeSettingKind::EnumMap: {
+        // Rocks에 없는 값(빈 rocksKey)은 키를 쓰기 전에 걸렀다(UnmappedEnum).
+        const ExchangeSettingRow* mapped = FindEnumValue(row, value);
+        if (mapped == nullptr) {
+            return Invalid();
         }
 
-        return Invalid();
+        if (mapped->rocksKey.IsEmpty()) {
+            break;
+        }
+
+        return state.writer.String(mapped->rocksKey);
+    }
+    case ExchangeSettingKind::Flatten:
     case ExchangeSettingKind::Ignore:
     case ExchangeSettingKind::Unsupported:
         break;
@@ -337,19 +367,63 @@ Result<void> WriteRowValue(TranslateState& state, const ExchangeSettingRow& row,
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
-// object를 rows로 번역해 객체 하나를 쓴다. top이면 최상위 표(경고 detail = 행 번호)이고, 아니면
-// struct 멤버 표(경고 detail = parentDetail)다.
-Result<void> TranslateObject(TranslateState& state, JsonValue object,
-                             Span<const ExchangeSettingRow> rows, bool top,
-                             uint64 parentDetail) noexcept {
-    if (!object.IsObject()) {
+// value(값 struct)의 멤버를 row의 멤버 표로 형제 키에 쓴다(Flatten — 출력 키는 멤버 행의
+// rocksKey, 비면 UE 멤버 이름에서 b 접두만 뗀 이름).
+Result<void> WriteFlatten(TranslateState& state, const ExchangeSettingRow& row, JsonValue value,
+                          uint64 detail) noexcept {
+    if (!value.IsObject()) {
         return Invalid();
     }
 
-    if (auto begun = state.writer.BeginObject(); !begun) {
-        return begun;
+    const Span<const ExchangeSettingRow> members(row.members, row.memberCount);
+    for (usize member = 0; member < value.Size(); ++member) {
+        const StringView key = value.KeyAt(member);
+        usize index = 0;
+        const ExchangeSettingRow* field = FindRow(members, key, index);
+        if (field == nullptr) {
+            if (auto warned = Warn(state, detail, key); !warned) {
+                return warned;
+            }
+
+            continue;
+        }
+
+        // Flatten 멤버는 값 하나를 쓰는 종류(Same·Enum·EnumMap)이고 묶음이 없어야 한다(행 표의
+        // 결함).
+        if (field->group != 0 ||
+            (field->kind != ExchangeSettingKind::Same && field->kind != ExchangeSettingKind::Enum &&
+             field->kind != ExchangeSettingKind::EnumMap)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (UnmappedEnum(*field, value.ValueAt(member))) {
+            if (auto warned = Warn(state, detail, key); !warned) {
+                return warned;
+            }
+
+            continue;
+        }
+
+        const StringView outputKey = field->rocksKey.IsEmpty() ? RocksKey(key) : field->rocksKey;
+        if (auto keyed = state.writer.Key(outputKey); !keyed) {
+            return keyed;
+        }
+
+        if (auto written = WriteRowValue(state, *field, value.ValueAt(member), detail, key);
+            !written) {
+            return written;
+        }
     }
 
+    return Result<void>::Success();
+}
+
+// object의 멤버 가운데 묶음 group의 행만 rows로 번역해 쓴다(객체 시작·끝은 호출자). top이면 최상위
+// 표(경고 detail = 행 번호)이고, 아니면 struct 멤버 표(경고 detail = parentDetail)다. 표에 없는
+// 키의 경고는 묶음 0 순회에서만 낸다(묶음 순회마다 다시 내지 않는다).
+Result<void> TranslateMembers(TranslateState& state, JsonValue object,
+                              Span<const ExchangeSettingRow> rows, bool top, uint64 parentDetail,
+                              uint8 group) noexcept {
     const uint32 outputBit = ExchangeClassBit(state.input.output);
     for (usize member = 0; member < object.Size(); ++member) {
         const StringView key = object.KeyAt(member);
@@ -358,15 +432,18 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
         const ExchangeSettingRow* row = FindRow(rows, key, index);
         const uint64 detail = top ? static_cast<uint64>(index) : parentDetail;
         if (row == nullptr) {
-            if (auto warned = Warn(state, top ? ExchangeUnknownSettingDetail : parentDetail, key);
-                !warned) {
-                return warned;
+            if (group == 0) {
+                if (auto warned =
+                        Warn(state, top ? ExchangeUnknownSettingDetail : parentDetail, key);
+                    !warned) {
+                    return warned;
+                }
             }
 
             continue;
         }
 
-        if (row->classes != 0 && (row->classes & outputBit) == 0) {
+        if ((row->classes != 0 && (row->classes & outputBit) == 0) || row->group != group) {
             continue;
         }
 
@@ -389,6 +466,23 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
             continue;
         }
 
+        // Rocks에 없는 enum 값은 키를 쓰지 않고 경고로 버린다(Rocks 기본값이 남는다).
+        if (UnmappedEnum(*row, value)) {
+            if (auto warned = Warn(state, detail, key); !warned) {
+                return warned;
+            }
+
+            continue;
+        }
+
+        if (row->kind == ExchangeSettingKind::Flatten) {
+            if (auto flattened = WriteFlatten(state, *row, value, detail); !flattened) {
+                return flattened;
+            }
+
+            continue;
+        }
+
         const StringView outputKey = row->rocksKey.IsEmpty() ? RocksKey(key) : row->rocksKey;
         if (auto keyed = state.writer.Key(outputKey); !keyed) {
             return keyed;
@@ -396,6 +490,54 @@ Result<void> TranslateObject(TranslateState& state, JsonValue object,
 
         if (auto written = WriteRowValue(state, *row, value, detail, key); !written) {
             return written;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// object를 rows로 번역해 객체 하나를 쓴다. top이면 최상위 표(경고 detail = 행 번호 — 묶음 객체를
+// 최상위 키 뒤에 쓴다)이고, 아니면 struct 멤버 표(경고 detail = parentDetail)다.
+Result<void> TranslateObject(TranslateState& state, JsonValue object,
+                             Span<const ExchangeSettingRow> rows, bool top,
+                             uint64 parentDetail) noexcept {
+    if (!object.IsObject()) {
+        return Invalid();
+    }
+
+    const Span<const StringView> groups = top ? state.input.groups : Span<const StringView>();
+    for (const ExchangeSettingRow& row : rows) {
+        // 묶음 번호가 묶음 이름 수를 넘거나 멤버 표에 묶음이 있으면 행 표의 결함이다.
+        if (row.group > groups.Size()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (auto begun = state.writer.BeginObject(); !begun) {
+        return begun;
+    }
+
+    if (auto members = TranslateMembers(state, object, rows, top, parentDetail, 0); !members) {
+        return members;
+    }
+
+    for (usize group = 0; group < groups.Size(); ++group) {
+        if (auto keyed = state.writer.Key(groups[group]); !keyed) {
+            return keyed;
+        }
+
+        if (auto begun = state.writer.BeginObject(); !begun) {
+            return begun;
+        }
+
+        if (auto members = TranslateMembers(state, object, rows, top, parentDetail,
+                                            static_cast<uint8>(group + 1));
+            !members) {
+            return members;
+        }
+
+        if (auto ended = state.writer.EndObject(); !ended) {
+            return ended;
         }
     }
 
