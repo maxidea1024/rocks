@@ -1,4 +1,4 @@
-## 20. 스트리밍 bulk(sidecar)와 범위 읽기 — PR12(2026-11-28, 구현 전 기록, 설계 교차 검증 반영 개정 1)
+## 20. 스트리밍 bulk(sidecar)와 범위 읽기 — PR12(2026-11-28, 설계 교차 검증 반영 개정 1, PR12a 구현 리뷰 반영 개정 2)
 
 오디오 AU6b(AudioSystem 3.12·3.40절)는 3분 곡의 첫 음을 내기 전에 플랫폼 데이터 전체를 읽지 않아야 한다. 그러려면 쿠킹된 압축 청크가 패키지 밖에 있고, 재생 중에 필요한 범위만 비동기로 읽을 수 있어야 한다. 지금 런타임은 쿠킹 패키지를 통째로 읽고 `Prepare`가 모든 bulk를 풀어 `Package`가 갖는다(`PackageBulkMode::Decode` — 5절 10번·11절). 이 절이 그 기반(PR12 — AudioSystem 06-Phases 표의 선행)을 정한다.
 
@@ -18,6 +18,7 @@
 4. **패키지 포맷**(5절 — `formatVersion` 올림, 옛 판은 `UnsupportedVersion`): 
    - BulkIndex 항목 flag `Sidecar`(bit 1). Sidecar 항목의 offset은 sidecar 파일 안 위치(머리 뒤 bulkAlignment 정렬), storedBytes = rawBytes(codec None), crc32·sha256은 지금 뜻 그대로다. offset 증가·정렬 규칙은 두 공간(패키지 Bulk 섹션·sidecar)마다 따로 적용한다.
    - 새 섹션 `Sidecar(10)`(Required — Sidecar 항목이 있으면 필수, 없으면 생략): `{ fileBytes u64, sha256 (32), hashBlockBytes u32, hashCount u32, blockSha256 × hashCount }`. 블록 해시는 sidecar 파일 전체를 hashBlockBytes(64 KiB — UE IoStore 압축 블록과 같은 크기) 단위로 나눈 SHA-256이다(마지막 블록은 짧다). 패키지 SHA(매니페스트)가 이 섹션을 덮으므로 서명 사슬(ContentSigning — 매니페스트 서명이 패키지 byte를 모두 묶는다)이 sidecar byte까지 이어진다.
+   - 섹션 존재: BulkIndex는 Bulk 또는 Sidecar 섹션이 있을 때만 있다(둘 다 없는 BulkIndex는 `CorruptPackage` — 부분 읽기도 표 단계에서 거부), 에디터 패키지는 Sidecar 섹션이 없고 Bulk ⇔ BulkIndex다. rawBytes 0인 bulk는 Sidecar를 골라도 패키지 안에 둔다(읽을 byte가 없다 — sidecar fileBytes > 머리 규칙을 정렬과 무관하게 지킨다, 구현 리뷰 반영).
    - 모든 bulk가 Sidecar면 Bulk 섹션은 없고 BulkIndex만 있다(5절 53행 "Bulk와 함께 생략" 규칙을 고친다). `PackageKnownSectionKinds`는 10이 된다.
    - `bulkRawBytes`(10.1절 28)는 **패키지 안 entry의 rawBytes 합**으로 뜻을 바꾼다. sidecar 크기는 매니페스트 `sidecarBytes`로 따로 센다.
 5. **매니페스트 v3**(10.3절 4의 v2를 대체 — v2 reader는 두지 않는다): 항목에 `sidecarBytes u64 | sidecarSha256 (32)`를 더한다. 0 byte면 SHA도 0이어야 한다(아니면 `CorruptPackage`). 진단 칸 `SidecarBytes`·`SidecarSha256`. 패키지 `Sidecar` 섹션의 fileBytes·sha256이 매니페스트와 다르면 `CorruptPackage`다(`CheckCookedPackageContents`).
@@ -72,6 +73,8 @@
 | PR12a | 패키지 포맷 판 올림(BulkIndex `Sidecar` flag·`Sidecar` 섹션·블록 해시), sidecar 파일 형식·writer·reader·머리, `bulkRawBytes` 뜻 변경·Prepare·`DecodePackageBulk`·예산에서 Sidecar 제외, 매니페스트 v3 reader·검증·`CheckCookedPackageContents`, `CookedPackageRead`의 sidecar Stat, `CookedPackageIo.h` 옛 주석 정정(짧은 읽기 CorruptData), 시험 | AssetRuntime |
 | PR12b | 쿠킹: `Placement`·쿠킹 bulk 원본 배치, `CookContext` sidecar sink, staging·게시 순서, 매니페스트 sidecar 칸 쓰기·병합, 부분 쿠킹 재사용, 정리·패키징 `.rbsc`, `asset-load-cooked --verify-sidecars`, 시험 | AssetCooker·AssetCommandlets |
 | PR12c | 런타임 손잡이: 범위 IO 인터페이스·기본 구현, `OpenStreamedBulk`·`StreamedBulk`·`BulkReadHandle`(제출 큐·우선순위·취소·블록 해시·worker callback·파일 계수), 종료 계약, 시험 | AssetRuntime·EngineAssets |
+
+**진행**: PR12a 구현 완료(2026-11-28 — 대조표 14.1.121). 구현 리뷰에서 블록 수 올림 넘침, 섹션 존재 규칙(BulkIndex ⇔ Bulk 또는 Sidecar), 0 byte Sidecar 배치(패키지 안), 쿠커 bulkRawBytes 합의 Sidecar 제외, `ExpectedSidecarHeader` 입력 계약, Sandbox TestContent 에디터 패키지 20개의 판 올림을 반영했다. 쿠커는 아직 Sidecar를 고르지 않는다(PR12b). 다음은 PR12b다.
 
 단계마다 리뷰어 하나다. PR12a 판 올림 뒤 Sandbox TestContent 재쿠킹·14.1 golden 재생성을 같이 한다. PR12c가 끝나면 오디오 세션에 알린다(AU6b 착수 가능 — 배치·두 번째 bulk ref·Subsystem 순서·3.11.5·3.12.4·06-Phases 수정). 렌더 세션에는 텍스처 스트리밍이 같은 API를 쓸 수 있음을 알린다.
 

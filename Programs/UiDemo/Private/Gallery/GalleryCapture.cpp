@@ -8,6 +8,7 @@
 #include <UiCore/ManualClock.h>
 #include <UiCore/Rendering/SurfaceRecorder.h>
 #include <UiFramework/Application/Application.h>
+#include <UiFramework/Layout/Overlay.h>
 
 namespace rocks::ui::gallery {
 
@@ -24,7 +25,7 @@ constexpr double CaptureFrameSeconds = 1.0 / 60.0;
 
 // 지금 앞에 있는 탭을 그려 RGBA를 읽는다.
 Result<void> Render(Allocator& allocator, UiRenderer& renderer, UiTextureId target,
-                    Application& app, const SharedPtr<DockManager>& area, VectorImageAtlas& icons,
+                    Application& app, const SharedPtr<Element>& root, VectorImageAtlas& icons,
                     uint32 width, uint32 height, uint64 frame, Array<uint8>& rgba) noexcept {
     const Vec2 size(static_cast<float>(width), static_cast<float>(height));
     if (auto arranged = app.PrepareLayout(Geometry::Root(size, {}), 1); !arranged) {
@@ -35,7 +36,7 @@ Result<void> Render(Allocator& allocator, UiRenderer& renderer, UiTextureId targ
     SurfaceRecorder surfaces(allocator, renderer);
     surfaces.SetVectorImages(&icons);
     UiDrawBuffer buffer(allocator);
-    auto prepared = surfaces.Record(area, frame, width, height, buffer);
+    auto prepared = surfaces.Record(root, frame, width, height, buffer);
     if (!prepared) {
         return Result<void>::Failure(prepared.Error());
     }
@@ -109,7 +110,17 @@ Result<void> CaptureGallery(Allocator& allocator, UiRenderer& renderer,
     ManualClock clock;
     Application app(allocator);
     app.SetClock(clock.Function());
-    app.SetRoot(area);
+    // 실제 창처럼 Overlay(팝업 호스트)로 감싼다 — 오류 팝업이 찍힌다(22.6절).
+    auto host = SharedPtr<Overlay>::TryMake(allocator, allocator);
+    if (!host) {
+        return Result<void>::Failure(host.Error());
+    }
+
+    if (auto added = host.Value()->TryAddChild(area); !added) {
+        return added;
+    }
+
+    app.SetRoot(host.Value());
     app.SetVectorImageResolver(&icons);
     uint64 frame = 0;
     Array<uint8> rgba(allocator);
@@ -121,8 +132,8 @@ Result<void> CaptureGallery(Allocator& allocator, UiRenderer& renderer,
 
         clock.Advance(CaptureFrameSeconds);
         app.BeginFrame();
-        auto rendered = Render(allocator, renderer, target.Value(), app, area, icons, width, height,
-                               frame++, rgba);
+        auto rendered = Render(allocator, renderer, target.Value(), app, host.Value(), icons, width,
+                               height, frame++, rgba);
         if (!rendered) {
             return rendered;
         }

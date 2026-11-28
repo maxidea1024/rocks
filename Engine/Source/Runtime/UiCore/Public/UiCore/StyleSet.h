@@ -8,6 +8,7 @@
 #include <UiCore/Styles/MenuBarStyle.h>
 #include <UiCore/Styles/MenuStyle.h>
 #include <UiCore/Styles/ProgressBarStyle.h>
+#include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
 #include <UiCore/Styles/TextStyle.h>
@@ -65,6 +66,11 @@ public:
     const CheckBoxStyle* FindValue(StringView name, const CheckBoxStyle*) const noexcept;
     Result<void> SetValue(StringView name, const DockTabStyle& value) noexcept;
     const DockTabStyle* FindValue(StringView name, const DockTabStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const EditableTextStyle& value) noexcept;
+    const EditableTextStyle* FindValue(StringView name, const EditableTextStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const EditableTextBoxStyle& value) noexcept;
+    const EditableTextBoxStyle* FindValue(StringView name,
+                                          const EditableTextBoxStyle*) const noexcept;
     Result<void> SetValue(StringView name, const MenuBarStyle& value) noexcept;
     const MenuBarStyle* FindValue(StringView name, const MenuBarStyle*) const noexcept;
     Result<void> SetValue(StringView name, const MenuStyle& value) noexcept;
@@ -108,6 +114,8 @@ private:
     Array<Entry<ButtonStyle>> buttons_;
     Array<Entry<CheckBoxStyle>> checkBoxes_;
     Array<Entry<DockTabStyle>> dockTabs_;
+    Array<Entry<EditableTextStyle>> editableTexts_;
+    Array<Entry<EditableTextBoxStyle>> editableTextBoxes_;
     Array<Entry<MenuBarStyle>> menuBars_;
     Array<Entry<MenuStyle>> menus_;
     Array<Entry<ProgressBarStyle>> progressBars_;

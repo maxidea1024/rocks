@@ -115,6 +115,11 @@ private:
 // 않은 대상·다른 allocator 같은 계약 위반은 Fatal이다(실패를 돌려주지 않는다 — 실패할 수 있는
 // 검사는 BeginBatchPublish가 끝냈다). 아무것도 게시하지 않고 닫으면 관찰자 기록·표지 증가 없이
 // 나온다.
+//
+// 변경 통지: 구간 안의 게시는 Notify 필드를 알리지 않는다(그 구간의 통지는 Busy다 —
+// Docs/Design/ChangeNotification.ko.md CN-D10·CN-D11). 게시한 호출자가 End 뒤에 게시한 최상위
+// 필드를 ObjectRegistry::NotifyIfTarget으로 알린다(여러 자리면 NotifyGroup으로 한 번씩 — 경로
+// 진입점과 ReflectionText 대입 묶음이 그렇게 한다). 알리지 않으면 구독자는 그 변경을 놓친다.
 class ROCKS_OBJECTRUNTIME_API ObjectBatchPublish {
 public:
     ObjectBatchPublish() noexcept = default;

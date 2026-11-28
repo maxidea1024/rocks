@@ -876,6 +876,36 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         for (usize index = 0; index < state.elements.Size(); ++index) {
             state.elements[index]->stage.ReleaseRemoved();
         }
+
+        // 묶음 게시 안의 게시는 통지하지 않으므로 게시한 최상위 필드를 알린다(Docs/Design/
+        // ChangeNotification.ko.md CN-D10 — 비교 없이). 통지 묶음이 같은 필드의 여러 단위를 한
+        // 번으로 합친다(열지 못하면 — 접근·종료는 위 게시가 먼저 보았다 — 단위마다 바로 알린다).
+        // 게시는 이미 끝났으므로 통지의 실패는 결과를 바꾸지 않는다.
+        {
+            auto group = registry.BeginNotifyGroup(access);
+            const ObjectHandle owner = state.target.Handle();
+            auto notify = [&](PropertyPath path) noexcept {
+                if (!path.steps.IsEmpty()) {
+                    (void)registry.NotifyIfTarget(access, owner, path.steps[0].fieldId);
+                }
+            };
+
+            for (usize index = 0; index < state.units.Size(); ++index) {
+                notify(state.units[index]->Path());
+            }
+
+            for (usize index = 0; index < state.references.Size(); ++index) {
+                notify(state.references[index]->Path());
+            }
+
+            for (usize index = 0; index < state.containers.Size(); ++index) {
+                notify(state.containers[index]->Path());
+            }
+
+            for (usize index = 0; index < state.elements.Size(); ++index) {
+                notify(state.elements[index]->Path());
+            }
+        }
     } else {
         for (usize index = 0; index < state.units.Size(); ++index) {
             if (auto published = state.units[index]->prepared.Publish(); !published) {

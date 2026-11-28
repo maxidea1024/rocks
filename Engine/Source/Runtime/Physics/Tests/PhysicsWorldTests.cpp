@@ -181,6 +181,9 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
                                 BodySettingsChange) noexcept override {
         }
 
+        void SetBodyAwake(PhysicsBodyHandle, bool) noexcept override {
+        }
+
         double DefaultMaxAngularVelocityDegrees() const noexcept override {
             return 0.0;
         }

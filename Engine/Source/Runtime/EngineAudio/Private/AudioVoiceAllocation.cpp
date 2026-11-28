@@ -65,8 +65,59 @@ bool AudioDeviceContext::IsAudible(const Record& record, bool shortSound) const 
                                 shortSound ? 1.0f : record.focus.distance);
 }
 
-void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexcept {
+void AudioDeviceContext::AdvanceCursor(Record& record, uint64 now, bool voiced) noexcept {
+    // 논리 커서: 실효 pitch × rate 비로 진행하고 loop 구간에서 감는다(UE PlaybackTime). voice가
+    // 있으면 mix 시계에서 믹서가 읽지 않은 누적을 빼고(일시정지 fade 동안 더 읽은 만큼도 맞다),
+    // 없으면 record 시계로 진행한다(3.44.6절).
+    const uint64 until = voiced ? now : RecordNow(record, now);
+    if (until <= record.cursorMixFrame) {
+        return;
+    }
+
+    uint64 elapsed = until - record.cursorMixFrame;
+    if (voiced && record.voicePaused) {
+        const uint64 unread = VoiceUnreadAt(record.voice, now);
+        const uint64 skipped = unread > record.cursorUnread ? unread - record.cursorUnread : 0;
+        record.cursorUnread = unread > record.cursorUnread ? unread : record.cursorUnread;
+        elapsed = skipped < elapsed ? elapsed - skipped : 0;
+    }
+
+    const SoundPlayable& playable = *record.sound.Get();
     const double mixRate = static_cast<double>(mixer_.Config().sampleRate);
+    const double pitch = static_cast<double>(EffectivePitch(record, RecordNow(record, now)));
+    record.cursor +=
+        static_cast<double>(elapsed) * pitch * static_cast<double>(playable.SampleRate()) / mixRate;
+    record.cursorMixFrame = until;
+    if (playable.looping) {
+        uint32 loopBegin = 0;
+        uint32 loopEnd = 0;
+        EffectiveLoop(playable, loopBegin, loopEnd);
+        if (record.cursor >= static_cast<double>(loopEnd)) {
+            const double length = static_cast<double>(loopEnd - loopBegin);
+            record.cursor = static_cast<double>(loopBegin) +
+                            math::Fmod(record.cursor - static_cast<double>(loopEnd), length);
+        }
+    }
+}
+
+uint64 AudioDeviceContext::VoiceUnreadAt(audio::AudioVoiceHandle voice, uint64 now) const noexcept {
+    auto queried = mixer_.QueryVoice(voice);
+    if (!queried || queried.Value().unreadAsOfFrame == audio::UnsetMixFrame) {
+        return 0;
+    }
+
+    // 게시값은 블록 끝 기준이다. now가 그 뒤면 Paused 동안의 frame을 더하고, Thread 렌더가 앞서
+    // 게시했으면 그만큼 뺀다(3.44.6절).
+    const audio::AudioVoiceStatus& status = queried.Value();
+    if (status.unreadAsOfFrame <= now) {
+        return status.unreadFrames + (status.pausedAtAsOf ? now - status.unreadAsOfFrame : 0);
+    }
+
+    const uint64 ahead = status.pausedAtAsOf ? status.unreadAsOfFrame - now : 0;
+    return status.unreadFrames > ahead ? status.unreadFrames - ahead : 0;
+}
+
+void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexcept {
     for (uint32 slot = 0; slot < records_.Size(); ++slot) {
         Record& record = records_[slot];
         if (record.state == RecordState::Inactive) {
@@ -74,25 +125,10 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
         }
 
         const SoundPlayable& playable = *record.sound.Get();
-        // 논리 커서: 실효 pitch × rate 비로 진행하고 loop 구간에서 감는다(UE PlaybackTime).
         if (!record.cursorRunning) {
             record.cursorMixFrame = now;
-        } else if (now > record.cursorMixFrame) {
-            const double pitch = static_cast<double>(EffectivePitch(record, now));
-            const double elapsed = static_cast<double>(now - record.cursorMixFrame);
-            record.cursor += elapsed * pitch * static_cast<double>(playable.SampleRate()) / mixRate;
-            record.cursorMixFrame = now;
-            if (playable.looping) {
-                uint32 loopBegin = 0;
-                uint32 loopEnd = 0;
-                EffectiveLoop(playable, loopBegin, loopEnd);
-                if (record.cursor >= static_cast<double>(loopEnd)) {
-                    const double length = static_cast<double>(loopEnd - loopBegin);
-                    record.cursor =
-                        static_cast<double>(loopBegin) +
-                        math::Fmod(record.cursor - static_cast<double>(loopEnd), length);
-                }
-            }
+        } else {
+            AdvanceCursor(record, now, record.state == RecordState::Submitted && record.started);
         }
 
         // voice 없이 남은 one-shot(remainActive)이 논리 커서로 끝까지 갔다(시작한 적이 없으면 끝
@@ -104,16 +140,17 @@ void AudioDeviceContext::UpdateEstimates(ControlBatch& batch, uint64 now) noexce
         }
 
         // 재생 시간(UE PlaybackTime — 감기지 않는 pitch 보정 경과, StopOldest)은 모든 상태에서
-        // 진행한다.
-        if (now > record.playbackMixFrame) {
-            const double pitch = static_cast<double>(EffectivePitch(record, now));
-            const double elapsed = static_cast<double>(now - record.playbackMixFrame) * pitch;
+        // 진행한다. record 시계다(일시정지 중 멈춤 — 3.44.3절).
+        const uint64 at = RecordNow(record, now);
+        if (at > record.playbackMixFrame) {
+            const double pitch = static_cast<double>(EffectivePitch(record, at));
+            const double elapsed = static_cast<double>(at - record.playbackMixFrame) * pitch;
             record.playbackTime += elapsed;
             if (record.state == RecordState::Submitted && record.started) {
                 record.voicedTime += elapsed;
             }
 
-            record.playbackMixFrame = now;
+            record.playbackMixFrame = at;
         }
 
         record.unscaledEstimate = UnscaledEstimate(record, now);
@@ -126,8 +163,9 @@ float AudioDeviceContext::UnscaledEstimate(const Record& record, uint64 now) con
     const SoundPlayable& playable = *record.sound.Get();
     const float stereo =
         playable.normalizeStereo && playable.ChannelCount() == 2 ? StereoNormalizationGain : 1.0f;
-    return record.volume.At(now) * playable.volume * stereo * record.categoryValues.volume *
-           record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(now);
+    const uint64 at = RecordNow(record, now);
+    return record.volume.At(at) * playable.volume * stereo * record.categoryValues.volume *
+           record.spatial.attenuationGain * record.focus.volume * record.occlusionVolume.At(at);
 }
 
 float AudioDeviceContext::EffectivePitch(const Record& record, uint64 frame) const noexcept {
@@ -190,7 +228,7 @@ void AudioDeviceContext::AssignVoices(ControlBatch& batch, uint64 now) noexcept 
 
         const SoundPlayable& playable = *record.sound.Get();
         const bool exempt =
-            record.volume.IsRising(now) ||
+            record.volume.IsRising(RecordNow(record, now)) ||
             (playable.virtualizationMode == SoundVirtualizationMode::PlayWhenSilent &&
              virtual_.allowPlayWhenSilent);
         if (record.estimate <= SilentVolumeThreshold && !exempt) {
@@ -221,7 +259,8 @@ void AudioDeviceContext::AssignVoices(ControlBatch& batch, uint64 now) noexcept 
     for (usize rank = 0; rank < inside; ++rank) {
         const uint32 slot = candidates_[rank].slot;
         // 자리를 받았는데 voice가 없으면 시작한다. 실패한 자리를 다음 순위가 받지 않는다(UE).
-        if (records_[slot].state == RecordState::Voiceless) {
+        // 일시정지된 재생은 자리를 차지하되 시작하지 않는다(UE AD 4570 — 3.44.4절).
+        if (records_[slot].state == RecordState::Voiceless && !records_[slot].paused) {
             const StartOutcome outcome = StartVoice(slot, now);
             if (outcome != StartOutcome::Started) {
                 OnStartFailure(slot, outcome, batch);
@@ -362,10 +401,12 @@ AudioDeviceContext::StartOutcome AudioDeviceContext::StartVoice(uint32 slot, uin
     record.cursor = static_cast<double>(start);
     record.cursorMixFrame = now;
     record.cursorRunning = false;
+    record.cursorUnread = 0;
+    record.voicePaused = false;
     record.pendingStopFade = NoPendingStop;
     // 공간 재생과 ramp 중 재생은 묶음마다 다시 게시한다(PublishParams).
-    record.paramsDirty =
-        record.spatialized || record.volume.IsRamping(now) || record.pitch.IsRamping(now);
+    record.paramsDirty = record.spatialized || record.volume.IsRamping(RecordNow(record, now)) ||
+                         record.pitch.IsRamping(RecordNow(record, now));
     voiceOwners_[record.voice.index] = slot + 1;
     // 앞에 미룬 Play가 있으면 순서를 지키려고 뒤에 붙인다.
     if (!deferred_.IsEmpty() || !TrySubmitPlay(slot)) {
@@ -426,8 +467,14 @@ void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 no
 
             record.cursor = static_cast<double>(record.voiceStartFrame);
             record.cursorMixFrame = status.Value().startMixFrame;
+            record.cursorUnread = 0;
             record.cursorRunning = true;
         }
+    }
+
+    // 시작한 voice가 읽은 만큼 커서를 지금까지 진행한다(뒤는 record 시계 — 3.44.6절).
+    if (voiceStarted && record.cursorRunning) {
+        AdvanceCursor(record, now, true);
     }
 
     ROCKS_ASSERT(detached_.Size() < detached_.Capacity());
@@ -438,12 +485,13 @@ void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 no
     detached.sequence = record.sequence;
     detached.scene = record.scene;
     detached.sceneEpoch = record.sceneEpoch;
+    detached.uiSound = record.isUiSound;
+    detached.params = ParamsFor(record, now);
     // 시작하지 않은 voice는 fade 없이 바로 멈춘다: 늦게 시작해 steal fade 동안 소리를 내면 Started
     // 없는 소리가 된다(3.41.2절).
     if (stealFadeFrames != 0 && voiceStarted) {
         // 동시 발음 steal fade를 떼어 낸 voice가 마저 한다(재생은 가상이 된다 — 3.41.2절).
         detached.fading = true;
-        detached.params = ParamsFor(record, now);
         detached.fader.Set(1.0f, StealFadeFloorDb);
         detached.fader.StartTo(0.0f, now, stealFadeFrames);
         detached.fadeEnd = now + stealFadeFrames;
@@ -461,12 +509,15 @@ void AudioDeviceContext::DetachVoice(uint32 slot, ControlBatch& batch, uint64 no
     record.resume.Set(1.0f);
     record.resumePending = false;
     record.state = RecordState::Voiceless;
-    // 시작하기 전에 떼었으면 그 voice의 시작 위치에서 커서를 돌린다. 시작했으면 지금까지 진행한다.
+    record.voicePaused = false;
+    // 시작하기 전에 떼었으면 그 voice의 시작 위치에서 커서를 돌린다. 시작했으면 위에서 지금까지
+    // 진행했다. 이 뒤는 record 시계다.
     if (!record.cursorRunning) {
         record.cursor = static_cast<double>(record.voiceStartFrame);
         record.cursorRunning = true;
-        record.cursorMixFrame = now;
     }
+
+    record.cursorMixFrame = RecordNow(record, now);
 }
 
 void AudioDeviceContext::ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept {
@@ -488,9 +539,10 @@ void AudioDeviceContext::ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept 
     record.resume.Set(1.0f);
     record.resumePending = false;
     record.state = RecordState::Voiceless;
+    record.voicePaused = false;
     record.cursor = static_cast<double>(record.voiceStartFrame);
     record.cursorRunning = true;
-    record.cursorMixFrame = now;
+    record.cursorMixFrame = RecordNow(record, now);
 }
 
 bool AudioDeviceContext::CutStoppingVoice(bool streamOnly) noexcept {

@@ -8,10 +8,10 @@ namespace rocks::ui {
 
 StyleSet::StyleSet(Allocator& allocator) noexcept
     : allocator_(allocator), parent_(allocator), buttons_(allocator), checkBoxes_(allocator),
-      dockTabs_(allocator), menuBars_(allocator), menus_(allocator), progressBars_(allocator),
-      scrollBars_(allocator), sliders_(allocator), texts_(allocator), toolTips_(allocator),
-      windows_(allocator), brushes_(allocator), colors_(allocator), floats_(allocator),
-      margins_(allocator) {
+      dockTabs_(allocator), editableTexts_(allocator), editableTextBoxes_(allocator),
+      menuBars_(allocator), menus_(allocator), progressBars_(allocator), scrollBars_(allocator),
+      sliders_(allocator), texts_(allocator), toolTips_(allocator), windows_(allocator),
+      brushes_(allocator), colors_(allocator), floats_(allocator), margins_(allocator) {
 }
 
 template <typename T>
@@ -98,6 +98,24 @@ Result<void> StyleSet::SetValue(StringView name, const MenuStyle& value) noexcep
 
 const MenuStyle* StyleSet::FindValue(StringView name, const MenuStyle*) const noexcept {
     return Lookup(menus_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const EditableTextStyle& value) noexcept {
+    return Store(editableTexts_, name, value);
+}
+
+const EditableTextStyle* StyleSet::FindValue(StringView name,
+                                             const EditableTextStyle*) const noexcept {
+    return Lookup(editableTexts_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const EditableTextBoxStyle& value) noexcept {
+    return Store(editableTextBoxes_, name, value);
+}
+
+const EditableTextBoxStyle* StyleSet::FindValue(StringView name,
+                                                const EditableTextBoxStyle*) const noexcept {
+    return Lookup(editableTextBoxes_, name);
 }
 
 Result<void> StyleSet::SetValue(StringView name, const ProgressBarStyle& value) noexcept {
@@ -237,6 +255,15 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
 
     if (added) {
         added = styles.Set<ScrollBarStyle>("Scrollbar", DefaultScrollBarStyle());
+    }
+
+    if (added) {
+        added = styles.Set<EditableTextStyle>("NormalEditableText", DefaultEditableTextStyle());
+    }
+
+    if (added) {
+        added = styles.Set<EditableTextBoxStyle>("NormalEditableTextBox",
+                                                 DefaultEditableTextBoxStyle());
     }
 
     if (added) {

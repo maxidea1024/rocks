@@ -33,6 +33,8 @@
 
 graph v2에는 "이미 만들어진 객체를 노드로 쓰는" 개념이 없다(OF 5.1절). 모듈 경계도 정해져 있다: World는 ObjectRuntime·CoreTypeBindings·Config·Collision만 보고(`World.Build.cs:19`) graph v2(ObjectSerialization)는 World를 부를 수 없다.
 
+구현 명세는 [10절](07-Pf1ClassSubobjects.ko.md)이고, 이 절과 다르면 10절이 정본이다(10.9절).
+
 **설계: subobject를 선언으로 옮기고, 선언을 해석해 만드는 규칙은 ObjectRuntime에 둔다**(UE SCS가 선언 트리인 것과 같은 꼴 — 2.4절, 4절 D13). 아래는 PF0(2026-11-28)에 확정한 PF1 결정이다.
 
 - **선언(C++)**: 지정자 `Subobject`를 `ObjectRef<T>` 필드에 붙인다 — `ROCKS_PROPERTY(Subobject, Root) ObjectRef<SceneComponent> sceneRoot;`, `ROCKS_PROPERTY(Subobject, AttachParent = "sceneRoot") ObjectRef<StaticMeshComponent> mesh;`.

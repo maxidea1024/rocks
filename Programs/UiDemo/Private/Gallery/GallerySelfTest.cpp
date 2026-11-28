@@ -4,6 +4,10 @@
 #include <UiCore/Styles/CoreStyles.h>
 
 #include <UiFramework/Application/Application.h>
+#include <UiFramework/Layout/Overlay.h>
+#include <UiFramework/Popups/MenuAnchor.h>
+#include <UiFramework/Scrolling/ScrollView.h>
+#include <UiFramework/Scrolling/ScrollBar.h>
 
 namespace rocks::ui::gallery {
 
@@ -28,7 +32,14 @@ enum Failure : int {
     FocusOutlineNotCleared = 50,
     ToolTipMissing = 51,
     TabHeaderMissing = 52,
-    TabClickIgnored = 53
+    TabClickIgnored = 53,
+    TextInputMissing = 54,
+    ErrorPopupMissing = 55,
+    TextScrollBarMissing = 56,
+    TextBoxNotFocused = 57,
+    TextBoxFocusMissing = 58,
+    TextTypingFailed = 59,
+    TextCommitFailed = 60
 };
 
 Optional<Vec2> Center(const Element* element) noexcept {
@@ -110,6 +121,43 @@ bool HasBox(const CacheRoot& cache, const Element& within, LinearColor color) no
     return false;
 }
 
+// target을 감싼 스크롤 영역을 target이 보이게 옮기고 다시 배치한다(행이 많아 창 아래로 밀린 견본을
+// 누르기 전에).
+bool Reveal(Application& app, const Element& target, const Geometry& viewport) noexcept {
+    for (Element* node = target.Parent(); node; node = node->Parent()) {
+        if (auto* scroll = ElementCast<ScrollView>(node)) {
+            if (!scroll->ScrollIntoView(target, ScrollIntoViewAlignment::Nearest)) {
+                return false;
+            }
+
+            break;
+        }
+    }
+
+    return static_cast<bool>(app.UpdatePaintCache(viewport, 1));
+}
+
+// within 안에 outline 색 외곽선을 가진 둥근 상자가 있는지 본다(채움과 무관 — 편집 상자 초점 바탕).
+bool HasOutline(const CacheRoot& cache, const Element& within, LinearColor outline) noexcept {
+    auto bounds = within.GetGeometry().WindowBounds();
+    if (!bounds) {
+        return false;
+    }
+
+    for (const PaintBox& box : cache.List().Boxes()) {
+        auto boxBounds = box.geometry.WindowBounds();
+        if (box.roundedBox && box.outlineColor == outline && boxBounds &&
+            boxBounds.Value().min.x >= bounds.Value().min.x &&
+            boxBounds.Value().max.x <= bounds.Value().max.x &&
+            boxBounds.Value().min.y >= bounds.Value().min.y &&
+            boxBounds.Value().max.y <= bounds.Value().max.y) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 } // namespace
 
 int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
@@ -118,7 +166,13 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     ManualClock clock;
     Application app(allocator);
     app.SetClock(clock.Function());
-    app.SetRoot(area);
+    // 실제 창처럼 Overlay(팝업 호스트)로 감싼다 — 오류 팝업·메뉴가 열린다(22.6절).
+    auto host = SharedPtr<Overlay>::TryMake(allocator, allocator);
+    if (!host || !host.Value()->TryAddChild(area)) {
+        return LayoutFailed;
+    }
+
+    app.SetRoot(host.Value());
     if (!app.SetCommands({}, gallery.Commands())) {
         return LayoutFailed;
     }
@@ -195,6 +249,10 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
         tipOwner = first && first->HasToolTip() ? first : nullptr;
     }
 
+    if (tipOwner && !Reveal(app, *tipOwner, viewport)) {
+        return ToolTipMissing;
+    }
+
     const auto tipPoint = Center(tipOwner);
     // 툴팁 예약은 프레임 시각을 본다 — 지금 시각으로 프레임을 연다.
     app.BeginFrame();
@@ -232,6 +290,56 @@ int VerifyGallery(Allocator& allocator, GalleryWindow& gallery,
     // 툴팁 층을 닫으면 Application이 감싸개를 풀고 캐시를 비우므로 다시 배치한다.
     if (!app.UpdatePaintCache(viewport, 1)) {
         return LayoutFailed;
+    }
+
+    // Text Input 묶음(Docs/Design/UiToolkit 22.9절). 오류 상자는 트리에 붙은 뒤 프레임 시작에
+    // 팝업을 연다(22.6절) — 오류 바탕(Error)이 팝업 안에 그려진다.
+    const TextInputSamples& samples = gallery.TextInput();
+    if (!samples.box || !samples.value || !samples.error || !samples.multiLine) {
+        return TextInputMissing;
+    }
+
+    app.BeginFrame();
+    cache = app.UpdatePaintCache(viewport, 1);
+    const MenuAnchor* marker = samples.error->ErrorMarker();
+    if (!cache || !marker || !marker->IsOpen() || !marker->MenuContent() ||
+        !HasBox(*cache.Value(), *marker->MenuContent(), theme.Get(ThemeSlot::Error))) {
+        return ErrorPopupMissing;
+    }
+
+    // 긴 글 여러 줄 상자는 세로 스크롤 막대가 보인다(22.7절).
+    const ScrollBar* bar = samples.multiLine->VerticalScrollBar();
+    if (!bar || bar->GetVisibility() != Visibility::Visible) {
+        return TextScrollBarMissing;
+    }
+
+    // 상자를 누르면 안쪽 편집기가 초점을 받고(22.2절), 초점 바탕(Primary 외곽선)과 흰 caret이
+    // 보인다(caret은 누른 직후라 깜박임 0.1초 안 — 22.5절).
+    if (!Reveal(app, *samples.box, viewport)) {
+        return TextBoxNotFocused;
+    }
+
+    const auto boxPoint = Center(samples.box.Get());
+    if (!boxPoint || !Click(app, *boxPoint) || app.GetFocus(0).Get() != &samples.box->Editor()) {
+        return TextBoxNotFocused;
+    }
+
+    cache = app.UpdatePaintCache(viewport, 1);
+    if (!cache || !HasOutline(*cache.Value(), *samples.box, theme.Get(ThemeSlot::Primary)) ||
+        !HasBox(*cache.Value(), samples.box->Editor(), theme.Get(ThemeSlot::White))) {
+        return TextBoxFocusMissing;
+    }
+
+    // 타자는 값 레이블에 바뀐 값으로, Enter는 확정 사유로 보인다.
+    if (!app.RouteKey(0, input::InputEvent::Text('H')) ||
+        !app.RouteKey(0, input::InputEvent::Text('i')) || samples.box->Editor().GetText() != "Hi" ||
+        samples.value->GetText() != "Changed: Hi") {
+        return TextTypingFailed;
+    }
+
+    if (!app.RouteKey(0, input::InputEvent::KeyDown(input::Key::Enter)) ||
+        samples.value->GetText() != "Committed (Enter): Hi") {
+        return TextCommitFailed;
     }
 
     // 탭 머리를 실제 위치로 눌러 배치 탭으로 간다.

@@ -294,6 +294,9 @@ Result<void> Component::RecreateSystemStateNow(SystemStateKind kind) noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    bool destroyed = false;
+    bool created = false;
+
     // hook 범위에서 부른다(Create·Destroy 안에서 World 진입점 Initialize·Tick 등은 Busy — 갱신
     // 지점과 같다).
     World::HookScope hooks(*world_);
@@ -303,6 +306,7 @@ Result<void> Component::RecreateSystemStateNow(SystemStateKind kind) noexcept {
     if (HasSystemState(kind)) {
         DestroySystemState(kind);
         systemStates_ = static_cast<uint8>(systemStates_ & ~bit);
+        destroyed = true;
     }
 
     Result<void> result = Result<void>::Success();
@@ -310,6 +314,7 @@ Result<void> Component::RecreateSystemStateNow(SystemStateKind kind) noexcept {
         result = CreateSystemState(kind);
         if (result) {
             systemStates_ = static_cast<uint8>(systemStates_ | bit);
+            created = true;
         } else {
             LogContextScope context("World", world_->Name());
             Log::Warning(LogWorld,
@@ -320,6 +325,15 @@ Result<void> Component::RecreateSystemStateNow(SystemStateKind kind) noexcept {
     }
 
     recreatingSystemStates_ = static_cast<uint8>(recreatingSystemStates_ & ~bit);
+    // 진행 표지를 푼 뒤 통지한다(통지 안의 다시 만들기가 Busy가 되지 않게 — 7.1.19절).
+    if (destroyed) {
+        OnSystemStateChanged(kind, false);
+    }
+
+    if (created) {
+        OnSystemStateChanged(kind, true);
+    }
+
     return result;
 }
 
@@ -356,11 +370,20 @@ Result<void> World::RegisterComponentNow(ObjectHandle component) noexcept {
         }
 
         value.registered_ = true;
+        // 상태 bit·등록 표지를 확정한 뒤 만든 순서로 통지한다(7.1.19절).
+        for (uint32 index = 0; index < SystemStateKindCount; ++index) {
+            const auto kind = static_cast<SystemStateKind>(index);
+            if (value.HasSystemState(kind)) {
+                value.OnSystemStateChanged(kind, true);
+            }
+        }
+
         return Result<void>::Success();
     });
 }
 
 void World::DestroySystemStates(Component& component) noexcept {
+    const uint8 existed = component.systemStates_;
     for (uint32 index = SystemStateKindCount; index > 0; --index) {
         const auto kind = static_cast<SystemStateKind>(index - 1);
         if (component.HasSystemState(kind)) {
@@ -369,6 +392,12 @@ void World::DestroySystemStates(Component& component) noexcept {
     }
 
     component.systemStates_ = 0;
+    // bit를 비운 뒤 지운 순서로 통지한다(7.1.19절).
+    for (uint32 index = SystemStateKindCount; index > 0; --index) {
+        if ((existed & (1u << (index - 1))) != 0) {
+            component.OnSystemStateChanged(static_cast<SystemStateKind>(index - 1), false);
+        }
+    }
 }
 
 void World::FlushSystemStateUpdates() noexcept {
@@ -411,8 +440,11 @@ void World::FlushSystemStateUpdates() noexcept {
                 auto created = value.CreateSystemState(kind);
                 value.recreatingSystemStates_ =
                     static_cast<uint8>(value.recreatingSystemStates_ & ~bit);
+                // 진행 표지를 푼 뒤 Destroyed → Created 순으로 통지한다(7.1.19절).
+                value.OnSystemStateChanged(kind, false);
                 if (created) {
                     value.systemStates_ = static_cast<uint8>(value.systemStates_ | bit);
+                    value.OnSystemStateChanged(kind, true);
                 } else {
                     LogContextScope context("World", Name());
                     Log::Warning(LogWorld,

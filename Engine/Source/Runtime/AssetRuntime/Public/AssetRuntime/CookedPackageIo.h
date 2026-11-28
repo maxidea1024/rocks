@@ -15,9 +15,13 @@ namespace rocks {
 
 // 요청 하나의 결과다. error가 None이면 파일 크기가 fileBytes이고, fileBytes가 요청의
 // expectedBytes와 같을 때만 destination에 파일 전체가 있다(다르면 읽지 않아도 된다).
+// sidecarError·sidecarFileBytes는 요청에 sidecar 경로가 있고 패키지를 다 읽었을 때만 뜻이 있다:
+// sidecar 파일을 Stat한 결과(없으면 NotFound, 있으면 None과 그 크기 — 내용은 읽지 않는다)다.
 struct CookedPackageReadResult {
     ErrorCode error = ErrorCode::None;
     uint64 fileBytes = 0;
+    ErrorCode sidecarError = ErrorCode::None;
+    uint64 sidecarFileBytes = 0;
 };
 
 // 파일 하나를 읽는 요청이다. 로더가 채우고 완료(complete 호출)와 Release까지 살려 둔다.
@@ -28,6 +32,11 @@ struct CookedPackageRead {
     // 매니페스트 packageBytes다. 파일 크기가 이 값과 같으면 destination[0, expectedBytes)에 읽는다.
     uint64 expectedBytes = 0;
     uint8* destination = nullptr;
+    // 패키지의 sidecar 파일 경로(NUL로 끝나는 UTF-8)와 byte 수다(AS 20.1 7 — sidecar가 없으면
+    // nullptr). 구현은 패키지를 다 읽은 뒤 IO 스레드에서 이 파일을 Stat해 결과에 크기를 싣는다(Game
+    // 스레드 동기 IO 없음 — 크기 대조는 로더가 한다).
+    const char* sidecarPath = nullptr;
+    usize sidecarPathBytes = 0;
     // 완료 통지다. 아무 스레드에서 요청마다 정확히 한 번 부른다(Begin이 성공한 요청만). Begin이
     // 반환하기 전에 불러도 된다. 할당하지 않고 막히지 않아야 한다(로더는 큐에 넣기만 한다).
     void (*complete)(CookedPackageRead& read,
@@ -55,7 +64,9 @@ protected:
 
 // PlatformBase AsyncReadFile로 읽는 기본 구현이다: 열기 → 크기 → 크기가 expectedBytes와 같으면
 // 전체를 한 요청으로 읽는다(다르면 읽지 않고 그 크기를 결과로). 열기 실패는 FileErrorCode 대응
-// 오류다(없음은 NotFound). 짧게 읽힘(파일이 그 사이 줄어듦)은 InvalidArgument다.
+// 오류다(없음은 NotFound). 짧게 읽힘(파일이 그 사이 줄어듦)은 CorruptData다(AS 19절 — 읽은 byte가
+// 약속과 다르다). sidecar 경로가 있으면 마지막 조각의 완료 callback(IO 스레드)에서
+// PhysicalFileSystem().Stat으로 크기를 잰다.
 //
 // 사용 예:
 //   platform::AsyncIoContext io;

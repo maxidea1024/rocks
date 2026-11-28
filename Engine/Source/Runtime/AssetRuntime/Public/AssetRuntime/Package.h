@@ -66,7 +66,8 @@ public:
     // 저장소에 묻는다(지연 읽기).
     //
     // 오류: 빈 ref(bulkId 0)는 InvalidArgument, 이 패키지에 없는 bulkId는 NotFound,
-    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값)다. 저장소가 있으면 그
+    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값)다. 스트리밍 bulk(sidecar — AS
+    // 20.1 7)는 메모리에 없으므로 Unsupported다(범위 읽기 손잡이로 읽는다). 저장소가 있으면 그
     // 지연 읽기의 오류(PackageBulkStore::Read — 손상 CorruptPackage, 외부 변경
     // ExternalModification, IO 오류)도 failure에 진단과 함께 온다.
     Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref,

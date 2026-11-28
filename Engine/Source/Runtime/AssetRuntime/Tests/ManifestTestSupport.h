@@ -5,7 +5,7 @@
 #include <AssetRuntime/CookedManifest.h>
 #include <Serialization/Archive.h>
 
-// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem 10.1절·10.3절 4항 v2): 모델 만들기, 검증하지
+// 쿠킹 매니페스트 시험 도구다(Docs/Design/AssetSystem 10.1절·10.3절 4항 v3): 모델 만들기, 검증하지
 // 않는 시험 인코더(규칙을 어긴 모델을 reader에 넣는다 — writer와 같은 배치), CRC 다시 맞추기.
 namespace rocks::asset_test {
 
@@ -144,7 +144,7 @@ struct ManifestRaw {
     usize trailing = 0;
 };
 
-// 검증하지 않고 manifest를 AS 10.3절 4항 v2 배치로 쓴다(끝에 CRC32).
+// 검증하지 않고 manifest를 AS 10.3절 4항 v3 배치(항목 sidecar 칸 — 20.1 5)로 쓴다(끝에 CRC32).
 inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& manifest,
                                    const ManifestRaw& raw = {}) noexcept {
     ArchiveLimits limits;
@@ -200,6 +200,8 @@ inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& m
              out.WriteString(entry.pathHint.View()).IsOk() &&
              out.WriteRaw(Span<const uint8>(entry.packageSha256.bytes, 32)).IsOk() &&
              out.WriteU64(entry.packageBytes).IsOk() && out.WriteU64(entry.bulkRawBytes).IsOk() &&
+             out.WriteU64(entry.sidecarBytes).IsOk() &&
+             out.WriteRaw(Span<const uint8>(entry.sidecarSha256.bytes, 32)).IsOk() &&
              out.WriteRaw(Span<const uint8>(entry.cookKey.bytes, 32)).IsOk() &&
              out.WriteU32(entry.flags).IsOk();
         ok = ok && out.WriteU32(first && raw.overrideBundleCount

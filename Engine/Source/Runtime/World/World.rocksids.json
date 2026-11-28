@@ -1858,6 +1858,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentPhysicsStateChanged",
+      "id": "3611dbaabd2f44e793f1c552708d9183",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentSleep",
+      "id": "164391ddb66e446788dcd6921ecad667",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PrimitiveComponent::componentWake",
+      "id": "75d9e30e5de04a699540ebbdbc624204",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PrimitiveComponent::customDepthStencilValue_",
       "id": "b60114d1b64b4747800443869a8c447e",
       "aliases": [],
@@ -3022,6 +3043,13 @@
       "kind": "type",
       "name": "rocks::ComponentMobility",
       "id": "0a5cbc1ea18e46acaf7eab49af171151",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ComponentPhysicsStateChange",
+      "id": "21e446dff9d1418b9416c8e98f1cc0b8",
       "aliases": [],
       "retired": false
     },

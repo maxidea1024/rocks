@@ -3,7 +3,7 @@
 namespace rocks::ui {
 
 UiHostServices::UiHostServices(Allocator& allocator) noexcept
-    : appStyle_(allocator), teardown_(allocator) {
+    : appStyle_(allocator), teardown_(allocator), frameActions_(allocator) {
 }
 
 Result<void> UiHostServices::DeferTeardown(Delegate<void()>&& teardown) noexcept {
@@ -43,6 +43,55 @@ usize UiHostServices::DiscardDeferredTeardown() noexcept {
     const usize count = teardown_.Size();
     teardown_.Clear();
     return count;
+}
+
+Result<void> UiHostServices::DeferFrameAction(Delegate<void()>&& action) noexcept {
+    if (!action.IsBound()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return frameActions_.TryPushBack(Move(action));
+}
+
+usize UiHostServices::RunFrameActions() noexcept {
+    if (runningFrameActions_) {
+        return 0;
+    }
+
+    runningFrameActions_ = true;
+    // 도는 중 넣은 항목은 다음 프레임 몫이다 — 이번 목록을 떼어 돌린다(옮긴 뒤 frameActions_은 같은
+    // allocator의 빈 배열이다).
+    Array<Delegate<void()>> batch = Move(frameActions_);
+    for (auto& item : batch) {
+        item.ExecuteIfBound();
+    }
+
+    runningFrameActions_ = false;
+    return batch.Size();
+}
+
+usize UiHostServices::PendingFrameActionCount() const noexcept {
+    return frameActions_.Size();
+}
+
+usize UiHostServices::DiscardFrameActions() noexcept {
+    const usize count = frameActions_.Size();
+    frameActions_.Clear();
+    ++frameActionEpoch_;
+    return count;
+}
+
+uint64 UiHostServices::FrameActionEpoch() const noexcept {
+    return frameActionEpoch_;
+}
+
+void UiHostServices::SetOwner(const void* kind, void* owner) noexcept {
+    ownerKind_ = owner ? kind : nullptr;
+    owner_ = kind ? owner : nullptr;
+}
+
+void* UiHostServices::FindOwner(const void* kind) const noexcept {
+    return kind && kind == ownerKind_ ? owner_ : nullptr;
 }
 
 void UiHostServices::SetPopupWorkArea(PopupWorkArea&& provider) noexcept {
