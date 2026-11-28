@@ -22,7 +22,7 @@
 ### 9.2 식별
 
 `ParameterKey = { ownerAssetId, ParameterId, scope }`.
-- **ownerAssetId** = 파라미터 노드가 있는 에셋(머티리얼 또는 함수)이다. 계획 14.7절의 "MaterialAssetId·ParameterId·layer instance 경로·function call-site NodeId 경로"와 같다.
+- **ownerAssetId** = 파라미터 노드가 있는 에셋(머티리얼 또는 함수 — 함수 인스턴스를 거쳐 부른 함수면 호출된 인스턴스, MaterialSample로 펼친 머티리얼이면 그 머티리얼, 12.8절 MS3d1)이다. 계획 14.7절의 "MaterialAssetId·ParameterId·layer instance 경로·function call-site NodeId 경로"와 같다.
 - **scope** = 전역 | 함수 호출 경로(호출 위치 NodeId 목록) | 레이어(레이어 Guid, 그 안의 호출 경로) | 혼합(혼합 Guid, 그 안의 호출 경로).
 - 계획 14.7절대로 함수 안 파라미터는 **호출 위치마다 독립**이다. 같은 함수를 두 번 부르면 두 파라미터다. 여러 호출이 공유해야 하는 파라미터는 파라미터 노드의 "공유" 표시로 전역 scope에 둔다. 이것은 UE와 다르다(9.1절: UE는 같은 이름이면 합쳐진다).
 - **이름**은 표시·검색용이다. 인스턴스 에디터는 이름과 그룹으로 보여 주고, 저장은 키로 한다. 같은 scope의 같은 이름은 V8 오류다.
@@ -53,7 +53,7 @@
 - **상수 식 프로그램**(`MaterialConstants::steps`): 모든 `Uniform` 빈도 출력을 함께 계산하는 명령열 하나다. 명령은 모듈 번호 순 IR 값이고 피연산자는 앞 명령 번호이며 형식 버전을 가진다(6.10절 MS2c2 — 스택 기계는 버렸다).
   - 명령: 상수, 파라미터 읽기(모듈 파라미터 표 번호), 그리고 UE가 uniform 식으로 접는 연산과 같은 목록(사칙·Min·Max·Abs·Floor·Ceil·Round·Truncate·Frac·Saturate·Sign·Sqrt·Reciprocal·Length·Normalize·Dot·Cross·삼각·역삼각·Exp·Log 계열·Fmod·Modulo·Negate·Clamp·swizzle·구성·Float↔Double). Lerp·Pow·비교·선택은 UE처럼 접지 않는다(셰이더가 계산하고 피연산자가 출력이 된다). 컬렉션 값은 World마다 실행 중에 바뀌므로 명령이 아니라 컬렉션 cbuffer 읽기다.
   - UE preshader opcode(`RE/Public/Shader/Preshader.h:19–75`)와 같은 연산 집합이다.
-  - 텍스처 크기는 명령이 아니라 텍스처 slot의 논리 크기 상수다(7.4절, TextureStreaming 5.3절).
+  - 텍스처 크기는 텍스처 slot의 논리 크기를 읽는 프로그램 명령(TextureSize)이다 — 셰이더는 그 결과 상수를 읽는다(7.4절, TextureStreaming 5.3절).
   - 실행은 float32이고 Double 값만 double이다(LWC 파라미터 — UE도 double 두 칸이다). 실행 결과는 쿠킹 바이트가 아니므로 결정성 규칙(AssetSystem 10절) 대상이 아니다. 다만 같은 실행 파일에서는 같은 입력에 같은 결과를 낸다(멀티스레드 평가도 순서 무관).
 - **상수 블록 layout**(`MaterialConstants`): 머티리얼 컴파일러가 7.4절 5항 규칙으로 정한다.
   - 순서: float 계열 slot(상수 식 출력을 크기 큰 것부터, 같은 크기는 값 번호 순으로 채움, Double은 tile·offset 두 칸) → int·uint slot → bool 비트 slot. MS2c2는 float 계열만 낸다(프로그램 값이 Float·Double뿐이다). int·uint·bool slot은 Dynamic Bool 파라미터(MAT2)가 생길 때 더한다.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AudioAssets/MixBusData.h>
 #include <AudioAssets/MixSnapshotData.h>
 #include <AudioAssets/AttenuationTypes.h>
 #include <AudioAssets/SoundCategoryTypes.h>
@@ -38,6 +39,8 @@ struct SoundCategoryLink {
     SoundCategoryProperties properties;
     uint32 passiveCount = 0;
     SoundCategoryPassiveMixValue passive[MaxCategoryPassiveMixes];
+    // 기본 출력 버스다(UE DefaultSubmix — 재생 분류인 links[0]의 값만 쓴다, 3.45.7절).
+    MixBusRef defaultBus;
 };
 
 // links[0]이 재생 분류(잎), links[depth − 1]이 루트다.

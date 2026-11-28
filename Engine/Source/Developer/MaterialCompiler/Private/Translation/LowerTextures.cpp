@@ -230,18 +230,25 @@ Result<IrValueId> ParameterTexture(LoweringContext& context, Guid parameter, Gui
         return AssetTexture(context, asset, samplerType);
     }
 
-    for (const IrTexture& existing : context.Builder().Textures()) {
-        if (existing.source == IrTextureSource::Parameter && existing.id == parameter &&
-            existing.kind != facts->kind) {
-            if (auto reported =
-                    context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(),
-                                  "Parameter is used with another parameter type");
-                !reported) {
-                return Result<IrValueId>::Failure(reported.Error());
-            }
+    MaterialParameterMetadata metadata;
+    auto read = context.ParameterMetadata(metadata);
+    if (!read || !read.Value()) {
+        return read ? Result<IrValueId>::Success(NoIrValue)
+                    : Result<IrValueId>::Failure(read.Error());
+    }
 
-            return Result<IrValueId>::Success(NoIrValue);
-        }
+    // 같은 정체가 다른 종류(수 파라미터 포함)·이름·기본 텍스처로 이미 쓰였으면 충돌이다(12.8절
+    // MS3d1 — 수 파라미터와 같은 규칙).
+    const double noDefaults[MaxIrComponents] = {};
+    auto conflict = ParameterConflicts(context, parameter, metadata, false, IrParameterKind::Scalar,
+                                       noDefaults, facts->kind, asset);
+    if (!conflict || conflict.Value()) {
+        return conflict ? Result<IrValueId>::Success(NoIrValue)
+                        : Result<IrValueId>::Failure(conflict.Error());
+    }
+
+    if (auto recorded = context.RecordParameterOrigin(parameter, metadata); !recorded) {
+        return Result<IrValueId>::Failure(recorded.Error());
     }
 
     IrTexture texture;
@@ -1579,23 +1586,10 @@ Result<void> LowerCurveAtlasRowParameter(LoweringContext& context) noexcept {
 
         row = data.Value();
     } else {
-        // 첫 행이다(UE GetCurveIndex — TArray::Find).
-        usize index = snapshot->curves.Size();
-        for (usize at = 0; at < snapshot->curves.Size(); ++at) {
-            if (snapshot->curves[at] == curve) {
-                index = at;
-                break;
-            }
-        }
-
-        if (index == snapshot->curves.Size()) {
-            return context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
-                                 "The curve is not contained within the atlas.");
-        }
-
-        const double defaults[MaxIrComponents] = {static_cast<double>(static_cast<float>(index)),
-                                                  0.0, 0.0, 0.0};
-        auto parameter = NumericParameter(context, IrParameterKind::Scalar, defaults);
+        // 첫 행을 기본값으로 하는 scalar 파라미터다(행 해석은 ResolveParameterDefaults — 커브가
+        // atlas에 없으면 NumericParameter가 "The curve is not contained within the atlas."를
+        // 진단한다).
+        auto parameter = NumericParameter(context, IrParameterKind::Scalar, snapshot);
         if (!parameter || parameter.Value() == NoIrValue) {
             return parameter ? Result<void>::Success() : Result<void>::Failure(parameter.Error());
         }

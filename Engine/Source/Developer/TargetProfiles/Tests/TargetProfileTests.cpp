@@ -117,10 +117,16 @@ TEST(TargetProfile_ShaderFieldsReplaceAndLodMerge) {
                         "{\"D3D12\": {\"formats\": [\"D3D12_SM6\"]}, "
                         "\"Vulkan\": {\"formats\": [\"VULKAN_SM5\", \"VULKAN_SM6\"]}}, "
                         "\"textureLodGroups\": {\"World\": {\"maxLodSize\": 16384}, "
-                        "\"UI\": {\"mipGenSettings\": \"NoMipmaps\"}}}"));
+                        "\"UI\": {\"mipGenSettings\": \"NoMipmaps\"}, "
+                        "\"Character\": {\"mipGenSettings\": \"Sharpen5\"}, "
+                        "\"Effects\": {\"mipGenSettings\": \"Blur3\"}, "
+                        "\"Skybox\": {\"mipGenSettings\": \"Angular\"}}}"));
     TargetProfile profile(scene.allocator);
     TargetProfileFailure failure;
+    // 그룹의 Sharpen·Blur·Angular는 받는다(12.18 TP1).
     REQUIRE(scene.Read("Windows", profile, failure));
+    CHECK(profile.textureLodGroups.Find(TextureGroup::Character)->mipGenSettings ==
+          TextureMipGenSettings::Sharpen5);
     CHECK(profile.graphicsBackends.Size() == 2 && profile.shaderFormats.Count() == 2);
     const ShaderFormatList* vulkan = profile.shaderFormats.Find(StringView("Vulkan"));
     CHECK(vulkan != nullptr && vulkan->formats.Size() == 2);

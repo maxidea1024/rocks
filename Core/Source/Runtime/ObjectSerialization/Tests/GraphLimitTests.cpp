@@ -457,9 +457,9 @@ TEST(GraphLimit_FileBytesBoundaryWithinDefaultWork) {
         ObjectRegistry source(allocator, types, {0x474c31, 1});
         ObjectRegistry target(allocator, types, {0x474c31, 2});
         {
-            // header 24 + NodeTable 항목 28 + Record 길이 8 + Record header 44 + TLV header 28 +
-            // 문자열 길이 8 = 140 byte가 문자열 밖이다.
-            constexpr usize Overhead = 140;
+            // header 24 + NodeTable 항목 29(종류 byte 포함 — graph 형식 3) + Record 길이 8 + Record
+            // header 44 + TLV header 28 + 문자열 길이 8 = 141 byte가 문자열 밖이다.
+            constexpr usize Overhead = 141;
             auto exact = NewText(source, 64 * MiB - Overhead, allocator);
             REQUIRE(exact);
             {

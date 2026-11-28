@@ -47,3 +47,4 @@
 - [3.43 AU7e — 분류·믹스 스냅숏(개정 43)](03.43-Au7eCategoriesAndMixes.ko.md)
 - [3.44 AU7e2 — 장면 일시정지(개정 45)](03.44-Au7e2Pause.ko.md)
 - [3.45 AU7f — 믹서 버스 graph·send·plan 교체(개정 48–49)](03.45-Au7fBuses.ko.md)
+- [3.46 AU6b — sidecar 스트리밍·청크 캐시·준비 티켓(개정 54–55)](03.46-Au6bSidecarStreaming.ko.md)

@@ -126,14 +126,21 @@ CollisionEnabled LayerCollisionEnabled(JPH::ObjectLayer layer) noexcept {
 // 원소 잎 형상(user data 표지)의 실효 충돌 켬이다. 잎이 아니면 거짓이다.
 bool ElementEffective(const JPH::Body& body, JPH::uint64 shapeUserData,
                       CollisionEnabled& effective) noexcept {
-    uint32 index = 0;
-    CollisionEnabled element = CollisionEnabled::NoCollision;
-    if (!UnpackElementUserData(shapeUserData, index, element)) {
+    ElementTag tag;
+    if (!UnpackElementUserData(shapeUserData, tag)) {
         return false;
     }
 
-    effective = CollisionEnabledIntersection(LayerCollisionEnabled(body.GetObjectLayer()), element);
+    effective =
+        CollisionEnabledIntersection(LayerCollisionEnabled(body.GetObjectLayer()), tag.enabled);
     return true;
+}
+
+// 접촉한 하위 형상의 부분 번호다(표지가 없으면 루트 0).
+uint32 ContactPart(const JPH::Body& body, const JPH::SubShapeID& subShape) noexcept {
+    ElementTag tag;
+    return UnpackElementUserData(body.GetShape()->GetSubShapeUserData(subShape), tag) ? tag.part
+                                                                                      : 0;
 }
 
 // 접촉한 원소의 실효 값이 probe인지다.
@@ -171,6 +178,16 @@ bool ContactNoticeBefore(const Notice& a, const Notice& b) noexcept {
     const uint32 bHigh = b1 < b2 ? b2 : b1;
     if (aHigh != bHigh) {
         return aHigh < bHigh;
+    }
+
+    // 같은 body 쌍 안에서는 부분 쌍 순이다(결정적 — 묶음의 첫 통지가 hit 컴포넌트를 정한다,
+    // 7.1.22절).
+    if (a.part1 != b.part1) {
+        return a.part1 < b.part1;
+    }
+
+    if (a.part2 != b.part2) {
+        return a.part2 < b.part2;
     }
 
     if (a.subShape1.GetValue() != b.subShape1.GetValue()) {
@@ -290,9 +307,11 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         return Result<PhysicsBodyHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 형상과 칸에 둘 원소 값·잎 형상을 먼저 만든다(Jolt body를 만든 뒤 할당이 실패하지 않게).
+    // 형상과 칸에 둘 원소 값·부분 표·잎 형상을 먼저 만든다(Jolt body를 만든 뒤 할당이 실패하지
+    // 않게). 부분은 루트 자신 하나다(7.1.22절).
     Array<BodyShapeElement> geometry(slots_.GetAllocator());
     Array<ElementShape> elementShapes(slots_.GetAllocator());
+    Array<BodyPart> parts(slots_.GetAllocator());
     if (auto reserved = geometry.TryReserve(desc.geometry.Size()); !reserved) {
         return Result<PhysicsBodyHandle>::Failure(reserved.Error());
     }
@@ -301,8 +320,17 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         (void)geometry.TryPushBack(element);
     }
 
-    auto shape = MakeBodyShape(desc.geometry, desc.worldTransform.scale, shapeOptions_, mass,
-                               &elementShapes);
+    BodyPart root;
+    root.component = desc.component;
+    root.actor = desc.actor;
+    root.count = desc.geometry.Size();
+    root.mass = mass;
+    if (auto pushed = parts.TryPushBack(root); !pushed) {
+        return Result<PhysicsBodyHandle>::Failure(pushed.Error());
+    }
+
+    auto shape = MakeBodyShape(desc.geometry, parts.View(), desc.worldTransform.scale,
+                               shapeOptions_, &elementShapes);
     if (!shape) {
         return Result<PhysicsBodyHandle>::Failure(shape.Error());
     }
@@ -343,8 +371,10 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
         return Result<PhysicsBodyHandle>::Failure(responseSet.Error());
     }
 
+    const BodyMass bodyMass = ComputeBodyMass(shape.Value().inner, elementShapes.View(),
+                                              parts.View(), desc.worldTransform.scale);
     JPH::BodyCreationSettings settings(
-        shape.Value().shape, ToJoltPosition(desc.worldTransform.translation, origin_),
+        bodyMass.shape, ToJoltPosition(desc.worldTransform.translation, origin_),
         ToJoltRotation(desc.worldTransform.rotation), ToJoltMotion(desc.motion),
         ObjectLayerFor(desc.collision, desc.motion, responseSet.Value()));
     // body 값(PH2b 몫 — 7.1.3절). Jolt 기본 감쇠 0.05에 맡기지 않는다. settings가 없으면
@@ -362,8 +392,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
 
     // 질량·관성은 UE 규칙으로 계산해 넣는다(7.1.15절 — Jolt 형상 기본 계산 대신).
     settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
-    settings.mMassPropertiesOverride =
-        ComputeBodyMass(*shape.Value().inner, mass, desc.worldTransform.scale);
+    settings.mMassPropertiesOverride = bodyMass.properties;
     // 기본 물리 재질(6.6절 — 재질 에셋 전).
     settings.mFriction = DefaultPhysicalMaterialFriction;
     settings.mRestitution = DefaultPhysicalMaterialRestitution;
@@ -399,7 +428,7 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
 
     settings.mUserData = PackUserData(index, slots_[index].generation);
     // 원소 충돌 켬이 섞이면 manifold reduction을 끈다(원소별 probe — 7.1.21절).
-    settings.mUseManifoldReduction = !MixesElementCollision(desc.geometry);
+    settings.mUseManifoldReduction = !shape.Value().mixedCollision;
 
     JPH::BodyInterface& bodies = system_.GetBodyInterface();
     // 생성의 활성은 깨움 이벤트가 아니다(UE 생성 상태 — 7.1.19절).
@@ -424,7 +453,9 @@ Result<PhysicsBodyHandle> JoltPhysicsScene::CreateBody(const BodyCreateDesc& des
     slot.responseSet = responseSet.Value();
     slot.geometry = Move(geometry);
     slot.elementShapes = Move(elementShapes);
+    slot.parts = Move(parts);
     slot.inner = shape.Value().inner;
+    slot.massShift = bodyMass.shift;
     slot.scale = desc.worldTransform.scale;
     slot.updateMassOnShapeChange =
         desc.settings == nullptr || desc.settings->updateMassWhenScaleChanges;
@@ -479,6 +510,7 @@ void JoltPhysicsScene::DestroyBody(PhysicsBodyHandle body) noexcept {
     slot.inner = nullptr;
     slot.elementShapes.Clear();
     slot.geometry.Clear();
+    slot.parts.Clear();
     slot.hasTarget = false;
     slot.movedLastStep = false;
     slot.wakeEvent = WakeTransition::None;
@@ -504,8 +536,8 @@ void JoltPhysicsScene::SetBodyTransform(PhysicsBodyHandle body, const Transform&
     const double tolerance = math::KindaSmallNumber<double>;
     if (math::Abs(scaleChange.x) > tolerance || math::Abs(scaleChange.y) > tolerance ||
         math::Abs(scaleChange.z) > tolerance) {
-        if (auto replaced = ReplaceShape(slot, slot.geometry.View(), worldTransform.scale);
-            !replaced) {
+        const Span<const BodyShapeElement> rootGeometry(slot.geometry.Data(), slot.parts[0].count);
+        if (auto replaced = ReplaceShape(slot, rootGeometry, worldTransform.scale); !replaced) {
             Log::Warning(LogPhysics,
                          "Physics body #{Slot} kept its previous shape; rebuilding it for the new "
                          "scale failed: {Error} ({Code})",
@@ -747,42 +779,96 @@ Result<void> JoltPhysicsScene::SetBodyGeometry(PhysicsBodyHandle body,
     return ReplaceShape(slot, geometry, slot.scale);
 }
 
-Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, Span<const BodyShapeElement> geometry,
-                                            const Vec3d& scale) noexcept {
-    // 새 값을 다 만든 뒤 바꾼다(실패하면 이전 형상·값을 둔다). geometry가 slot.geometry 자신일 수
-    // 있어 사본을 먼저 만든다.
-    Array<BodyShapeElement> values(slots_.GetAllocator());
-    Array<ElementShape> elementShapes(slots_.GetAllocator());
-    if (auto reserved = values.TryReserve(geometry.Size()); !reserved) {
+Result<void> JoltPhysicsScene::CopyParts(const BodySlot& slot, usize skip,
+                                         const Span<const BodyShapeElement>* replaceRoot,
+                                         Array<BodyShapeElement>& values,
+                                         Array<BodyPart>& parts) const noexcept {
+    usize total = 0;
+    for (usize index = 0; index < slot.parts.Size(); ++index) {
+        if (index != skip) {
+            total += index == 0 && replaceRoot != nullptr ? replaceRoot->Size()
+                                                          : slot.parts[index].count;
+        }
+    }
+
+    if (auto reserved = values.TryEnsureCapacity(values.Size() + total); !reserved) {
         return reserved;
     }
 
-    for (const BodyShapeElement& element : geometry) {
-        (void)values.TryPushBack(element);
+    if (auto reserved = parts.TryEnsureCapacity(parts.Size() + slot.parts.Size()); !reserved) {
+        return reserved;
     }
 
-    auto shape = MakeBodyShape(values.View(), scale, shapeOptions_, slot.mass, &elementShapes);
+    for (usize index = 0; index < slot.parts.Size(); ++index) {
+        if (index == skip) {
+            continue;
+        }
+
+        BodyPart part = slot.parts[index];
+        const Span<const BodyShapeElement> source =
+            index == 0 && replaceRoot != nullptr
+                ? *replaceRoot
+                : Span<const BodyShapeElement>(slot.geometry.Data() + part.first, part.count);
+        part.first = values.Size();
+        part.count = source.Size();
+        for (const BodyShapeElement& element : source) {
+            (void)values.TryPushBack(element);
+        }
+
+        (void)parts.TryPushBack(part);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, Span<const BodyShapeElement> geometry,
+                                            const Vec3d& scale) noexcept {
+    // 새 값을 다 만든 뒤 바꾼다(실패하면 이전 형상·값을 둔다). geometry가 slot.geometry 자신일 수
+    // 있어 사본을 먼저 만든다. weld 부분은 그대로 잇는다.
+    Array<BodyShapeElement> values(slots_.GetAllocator());
+    Array<BodyPart> parts(slots_.GetAllocator());
+    if (auto copied = CopyParts(slot, IndexNone, &geometry, values, parts); !copied) {
+        return copied;
+    }
+
+    return ApplyShape(slot, Move(values), Move(parts), scale, ShapeChange::Resize);
+}
+
+Result<void> JoltPhysicsScene::ApplyShape(BodySlot& slot, Array<BodyShapeElement>&& values,
+                                          Array<BodyPart>&& parts, const Vec3d& scale,
+                                          ShapeChange change) noexcept {
+    Array<ElementShape> elementShapes(slots_.GetAllocator());
+    parts[0].mass = slot.mass;
+    auto shape = MakeBodyShape(values.View(), parts.View(), scale, shapeOptions_, &elementShapes);
     if (!shape) {
         return Result<void>::Failure(shape.Error());
     }
 
-    // UE UpdateBodyScale: 형상을 바꾸고 깨우며, updateMassWhenScaleChanges면 질량을 다시 계산한다
-    // (BodyInstance.cpp:2545-2575). 질량은 Jolt 기본 계산 대신 UE 규칙으로 넣는다(7.1.15절). Jolt는
-    // Static을 깨우지 않는다.
-    // 형상 변경의 깨움은 이벤트가 아니고 쌓인 이벤트를 지운다(UE UpdateBodyScale →
-    // WakeUp_AssumesLocked — 7.1.19절).
-    WithoutWakeEvents(slot, true, [&]() noexcept {
-        system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
-                                            JPH::EActivation::Activate);
-    });
+    const BodyMass bodyMass =
+        ComputeBodyMass(shape.Value().inner, elementShapes.View(), parts.View(), scale);
+    JPH::BodyInterface& bodies = system_.GetBodyInterface();
+    if (change == ShapeChange::Resize) {
+        // UE UpdateBodyScale: 형상을 바꾸고 깨운다(BodyInstance.cpp:2545-2575). Jolt는 Static을
+        // 깨우지 않는다. 형상 변경의 깨움은 이벤트가 아니고 쌓인 이벤트를 지운다(UE UpdateBodyScale
+        // → WakeUp_AssumesLocked — 7.1.19절).
+        WithoutWakeEvents(slot, true, [&]() noexcept {
+            bodies.SetShape(slot.body, bodyMass.shape.GetPtr(), false, JPH::EActivation::Activate);
+        });
+    } else {
+        // UE Weld·UnWeld는 깨우지 않는다(형상 교체와 PostShapeChange뿐 — 7.1.22절).
+        bodies.SetShape(slot.body, bodyMass.shape.GetPtr(), false, JPH::EActivation::DontActivate);
+    }
+
     // 원소 충돌 켬이 섞이면 manifold reduction을 끈다(원소별 probe — 7.1.21절, 접촉 cache를
     // 새로 한다).
-    system_.GetBodyInterface().SetUseManifoldReduction(slot.body,
-                                                       !MixesElementCollision(values.View()));
-    if (slot.updateMassOnShapeChange && slot.motion != BodyMotion::Static) {
+    bodies.SetUseManifoldReduction(slot.body, !shape.Value().mixedCollision);
+    // 질량은 Jolt 기본 계산 대신 UE 규칙으로 넣는다(7.1.15절): 크기 변경은
+    // updateMassWhenScaleChanges일 때, weld·unweld는 늘(UE PostShapeChange → UpdateMassProperties).
+    const bool updateMass = change == ShapeChange::Weld || slot.updateMassOnShapeChange;
+    if (updateMass && slot.motion != BodyMotion::Static) {
         JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
         if (lock.Succeeded()) {
-            slot.massProperties = ComputeBodyMass(*shape.Value().inner, slot.mass, scale);
+            slot.massProperties = bodyMass.properties;
             lock.GetBody().GetMotionProperties()->SetMassProperties(
                 slot.motion == BodyMotion::Dynamic ? slot.dof.allowed : JPH::EAllowedDOFs::All,
                 slot.massProperties);
@@ -797,10 +883,106 @@ Result<void> JoltPhysicsScene::ReplaceShape(BodySlot& slot, Span<const BodyShape
     }
 
     slot.geometry = Move(values);
+    slot.parts = Move(parts);
     slot.elementShapes = Move(elementShapes);
     slot.inner = shape.Value().inner;
+    slot.massShift = bodyMass.shift;
     slot.scale = scale;
     return Result<void>::Success();
+}
+
+Result<void> JoltPhysicsScene::WeldBody(PhysicsBodyHandle root,
+                                        const BodyWeldDesc& child) noexcept {
+    AssertNotStepping();
+    if (FindSlot(root) == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    BodySlot& slot = slots_[root.index];
+    if (child.component.IsNull() || child.component == slot.parts[0].component ||
+        child.geometry.IsEmpty() || !child.relative.IsValid() ||
+        !AreMassValuesValid(MassValuesOf(child.settings))) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 같은 컴포넌트가 이미 부분이면 그 부분을 새 값으로 바꾼다(UE SetWeldedBodyTransform =
+    // UnWeld + Weld — 맨 뒤로 간다).
+    usize existing = IndexNone;
+    for (usize index = 1; index < slot.parts.Size(); ++index) {
+        if (slot.parts[index].component == child.component) {
+            existing = index;
+        }
+    }
+
+    Array<BodyShapeElement> values(slots_.GetAllocator());
+    Array<BodyPart> parts(slots_.GetAllocator());
+    if (auto copied = CopyParts(slot, existing, nullptr, values, parts); !copied) {
+        return copied;
+    }
+
+    if (parts.Size() >= BodyWeldMaxParts ||
+        values.Size() + child.geometry.Size() > BodyGeometryMaxElements) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    BodyPart part;
+    part.component = child.component;
+    part.actor = child.actor;
+    part.mass = MassValuesOf(child.settings);
+    part.first = values.Size();
+    part.count = child.geometry.Size();
+    part.relative = child.relative;
+    part.welded = true;
+    part.collisionEnabled = child.collisionEnabled;
+    if (auto reserved = values.TryEnsureCapacity(values.Size() + child.geometry.Size());
+        !reserved) {
+        return reserved;
+    }
+
+    for (const BodyShapeElement& element : child.geometry) {
+        (void)values.TryPushBack(element);
+    }
+
+    if (auto pushed = parts.TryPushBack(part); !pushed) {
+        return pushed;
+    }
+
+    return ApplyShape(slot, Move(values), Move(parts), slot.scale, ShapeChange::Weld);
+}
+
+void JoltPhysicsScene::UnweldBody(PhysicsBodyHandle root, ObjectHandle child) noexcept {
+    AssertNotStepping();
+    if (FindSlot(root) == nullptr || child.IsNull()) {
+        return;
+    }
+
+    BodySlot& slot = slots_[root.index];
+    for (usize index = 1; index < slot.parts.Size(); ++index) {
+        if (slot.parts[index].component != child) {
+            continue;
+        }
+
+        Array<BodyShapeElement> values(slots_.GetAllocator());
+        Array<BodyPart> parts(slots_.GetAllocator());
+        auto applied = CopyParts(slot, index, nullptr, values, parts);
+        if (applied) {
+            applied = ApplyShape(slot, Move(values), Move(parts), slot.scale, ShapeChange::Weld);
+        }
+
+        if (!applied) {
+            Log::Warning(LogPhysics,
+                         "Physics body #{Slot} kept a welded part; rebuilding its shape without "
+                         "the part failed: {Error} ({Code})",
+                         root.index, ErrorCodeName(applied.Error()), DiagBodyShapeRebuildFailed);
+        }
+
+        return;
+    }
+}
+
+const JoltPhysicsScene::BodyPart& JoltPhysicsScene::PartOf(const BodySlot& slot,
+                                                           uint32 part) noexcept {
+    return part < slot.parts.Size() ? slot.parts[part] : slot.parts[0];
 }
 
 void JoltPhysicsScene::SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept {
@@ -933,10 +1115,23 @@ uint64 JoltPhysicsScene::ActivationListener::TakeInto(Array<JPH::uint64>& out) n
 bool JoltPhysicsScene::ElementQueryFilter::ShouldCollide(const JPH::Shape* shape2,
                                                          const JPH::SubShapeID&) const {
     // body 값의 질의 켬은 층 필터가 이미 봤다 — 원소 값만 본다(교집합의 질의 = 둘 다 질의).
-    uint32 index = 0;
-    CollisionEnabled element = CollisionEnabled::NoCollision;
-    return !UnpackElementUserData(shape2->GetUserData(), index, element) ||
-           CollisionEnabledHasQuery(element);
+    ElementTag tag;
+    if (!UnpackElementUserData(shape2->GetUserData(), tag)) {
+        return true;
+    }
+
+    if (!CollisionEnabledHasQuery(tag.enabled)) {
+        return false;
+    }
+
+    // 부분이 둘 이상인 body는 무시 목록·제외를 부분마다 본다(body 필터가 미룬다 — 7.1.22절).
+    const JPH::uint64 userData = scene_.system_.GetBodyInterfaceNoLock().GetUserData(mBodyID2);
+    const BodySlot* slot = scene_.FindSlot({UserDataIndex(userData), UserDataGeneration(userData)});
+    if (slot == nullptr || slot->parts.Size() <= 1) {
+        return true;
+    }
+
+    return !scene_.IsExcludedPart(PartOf(*slot, tag.part), params_, exclusion_);
 }
 
 bool JoltPhysicsScene::ElementQueryFilter::ShouldCollide(const JPH::Shape*, const JPH::SubShapeID&,
@@ -994,6 +1189,8 @@ void JoltPhysicsScene::ContactCollector::Record(const JPH::Body& body1, const JP
     notice.userData2 = body2.GetUserData();
     notice.subShape1 = manifold.mSubShapeID1;
     notice.subShape2 = manifold.mSubShapeID2;
+    notice.part1 = ContactPart(body1, manifold.mSubShapeID1);
+    notice.part2 = ContactPart(body2, manifold.mSubShapeID2);
     // 두 표면의 첫 점 가운데다(UE Chaos 접촉 위치 — 두 형상 접촉점의 평균).
     notice.point = manifold.mBaseOffset + 0.5f * (manifold.mRelativeContactPointsOn1[0] +
                                                   manifold.mRelativeContactPointsOn2[0]);
@@ -1149,9 +1346,14 @@ void JoltPhysicsScene::EmitContactPair(Span<const ContactNotice> group) noexcept
         return;
     }
 
-    // sign은 Jolt 법선·충격량(body 2 기준)을 받는 쪽 기준으로 바꾼다(body 1이면 −1).
-    auto emit = [&](const BodySlot& me, const BodySlot& other, float sign) noexcept {
-        if (!me.notifyContacts) {
+    // sign은 Jolt 법선·충격량(body 2 기준)을 받는 쪽 기준으로 바꾼다(body 1이면 −1). hit는 body
+    // 쌍마다 하나이고 컴포넌트는 첫 접촉 원소의 부분 것이다(UE GetPendingCollisionForContactPair·
+    // GetBodyInstanceFromProxyAndShape — PhysScene_Chaos.cpp:1065·1110-1114, 7.1.22절).
+    const BodyPart& part1 = PartOf(*slot1, first.part1);
+    const BodyPart& part2 = PartOf(*slot2, first.part2);
+    auto emit = [&](const BodySlot& meSlot, const BodyPart& me, const BodyPart& other,
+                    float sign) noexcept {
+        if (!meSlot.notifyContacts) {
             return;
         }
 
@@ -1176,11 +1378,11 @@ void JoltPhysicsScene::EmitContactPair(Span<const ContactNotice> group) noexcept
 
     // 칸 번호가 작은 쪽 먼저다.
     if (handle1.index < handle2.index) {
-        emit(*slot1, *slot2, -1.0f);
-        emit(*slot2, *slot1, 1.0f);
+        emit(*slot1, part1, part2, -1.0f);
+        emit(*slot2, part2, part1, 1.0f);
     } else {
-        emit(*slot2, *slot1, 1.0f);
-        emit(*slot1, *slot2, -1.0f);
+        emit(*slot2, part2, part1, 1.0f);
+        emit(*slot1, part1, part2, -1.0f);
     }
 }
 

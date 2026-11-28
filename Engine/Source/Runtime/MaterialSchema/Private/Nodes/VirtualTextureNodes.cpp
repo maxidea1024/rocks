@@ -1,4 +1,5 @@
 #include "MaterialBuiltinNodes.h"
+#include "MaterialParameterValues.h"
 
 #include "MaterialDynamicPins.h"
 #include <MaterialSchema/Nodes/VirtualTexture/RuntimeVirtualTextureSampleParameterProperties.generated.h>
@@ -59,6 +60,7 @@ constexpr MaterialNodeDefinition VirtualTextureDefinitions[] = {
               "Material expression for sampling from a runtime virtual texture.")
         .Missing(MaterialPrerequisite::VirtualTexture),
     MaterialNode("Material.RuntimeVirtualTextureSampleParameter")
+        .ParameterValue(&RuntimeVirtualTextureParameterValue)
         .Properties(&GeneratedType<RuntimeVirtualTextureSampleParameterProperties>::Schema,
                     RuntimeVirtualTextureSampleParameterNonSemantic)
         .Pins(RuntimeVirtualTextureSampleParameterPins)

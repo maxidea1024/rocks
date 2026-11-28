@@ -1,6 +1,9 @@
 #include "ShaderSourceTestSupport.h"
 
+#include <Base/InitializerList.h>
 #include <Core/Hash/Sha256.h>
+#include <Platform/Thread.h>
+#include <ShaderCompiler/ShaderSourceCache.h>
 #include <TestSupport/Test.h>
 
 using namespace rocks;
@@ -589,6 +592,136 @@ TEST(ShaderPreprocessor_GeneratedIncludeReadsMemoryContents) {
     const ShaderSourceStatus rejected =
         PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), test.shader, {}, both);
     CHECK(rejected.code == ShaderSourceError::InvalidArgument && rejected.line == 1);
+}
+
+namespace {
+
+// 두 전처리 결과가 원문·include 폐포(경로·SHA-256)까지 같은가다.
+bool SamePreprocessed(const PreprocessedShader& left, const PreprocessedShader& right) noexcept {
+    if (!(left.text.View() == right.text.View()) || left.includes.Size() != right.includes.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.includes.Size(); ++index) {
+        if (!(left.includes[index].virtualPath.View() ==
+              right.includes[index].virtualPath.View()) ||
+            !(left.includes[index].sha256 == right.includes[index].sha256)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 두 결과 상태가 같은가다(코드·줄·경로·문구).
+bool SameStatus(const ShaderSourceStatus& left, const ShaderSourceStatus& right) noexcept {
+    return left.code == right.code && left.line == right.line &&
+           strcmp(left.path, right.path) == 0 && strcmp(left.message, right.message) == 0;
+}
+
+// 캐시 하나를 여러 스레드가 함께 쓰는 시험의 스레드 수다.
+constexpr usize CacheThreadCount = 4;
+
+struct CacheThread {
+    ShaderSourceTree* tree = nullptr;
+    ShaderSourceCache* cache = nullptr;
+    PreprocessedShader* out = nullptr;
+    ShaderSourceStatus status;
+
+    static void Run(void* context) noexcept {
+        auto& self = *static_cast<CacheThread*>(context);
+        self.status = PreprocessShader(*self.tree, Entry, Span<const ShaderDefine>(), *self.out, {},
+                                       {}, self.cache);
+    }
+};
+
+} // namespace
+
+// 원문 캐시(ShaderSystem 16.6절 SSD98): 캐시로 읽은 전처리 결과·오류가 캐시 없이와 같고, 같은
+// 파일은 한 번만 읽으며, 여러 스레드가 함께 써도 결과가 같다.
+TEST(ShaderPreprocessor_SourceCacheMatchesUncached) {
+    Case test;
+    REQUIRE(test.Make("sourcecache"));
+    REQUIRE(test.File("Main.rsf", "#include \"Lib/Common.rsh\"\n"
+                                  "#include \"Lib/Common.rsh\"\n"
+                                  "#include \"Lib/Crlf.rsh\"\n"
+                                  "int main_;\n"));
+    REQUIRE(test.File("Other.rsf", "#include \"Lib/Common.rsh\"\nint other;\n"));
+    REQUIRE(
+        test.File("Lib/Common.rsh", "#pragma once\nint common;\n#include \"../Shared/Types.h\"\n"));
+    REQUIRE(test.File("Shared/Types.h", "int types;\n"));
+    REQUIRE(test.File("Lib/Crlf.rsh", "\xEF\xBB\xBFint crlf;\r\nint second;\r\n"));
+    REQUIRE(test.File("Missing.rsf", "int before;\n#include \"Lib/Absent.rsh\"\n"));
+    REQUIRE(test.File("Lib/ZeroByte.rsh", StringView("int a;\0int b;\n", 14)));
+    REQUIRE(test.File("Encoding.rsf", "#include \"Lib/ZeroByte.rsh\"\n"));
+
+    // 캐시 없이와 캐시로 같은 엔트리를 전처리한다.
+    REQUIRE(test.Run());
+    ShaderSourceCache cache(test.tree, TestAllocator());
+    PreprocessedShader cached(TestAllocator());
+    const ShaderSourceStatus first =
+        PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), cached, {}, {}, &cache);
+    PrintStatus("cached", first);
+    REQUIRE(first);
+    CHECK(SamePreprocessed(test.shader, cached));
+    // 읽은 파일: Platform.rsh, Main.rsf, Common.rsh, Types.h, Crlf.rsh(Common.rsh는 한 번).
+    const usize afterMain = cache.EntryCount();
+    CHECK(afterMain == 5);
+
+    // 다른 엔트리는 새 파일만 더 읽는다.
+    PreprocessedShader other(TestAllocator());
+    PreprocessedShader otherCached(TestAllocator());
+    REQUIRE(
+        PreprocessShader(test.tree, "/Plugin/Test/Other.rsf", Span<const ShaderDefine>(), other));
+    REQUIRE(PreprocessShader(test.tree, "/Plugin/Test/Other.rsf", Span<const ShaderDefine>(),
+                             otherCached, {}, {}, &cache));
+    CHECK(SamePreprocessed(other, otherCached) && cache.EntryCount() == afterMain + 1);
+
+    // 오류도 같다: 없는 include(두 번째는 캐시한 실패), 정규화 실패(NUL).
+    for (const char* entry : {"/Plugin/Test/Missing.rsf", "/Plugin/Test/Encoding.rsf"}) {
+        PreprocessedShader plain(TestAllocator());
+        const ShaderSourceStatus expected =
+            PreprocessShader(test.tree, entry, Span<const ShaderDefine>(), plain);
+        CHECK(!expected);
+        for (int round = 0; round < 2; ++round) {
+            PreprocessedShader viaCache(TestAllocator());
+            const ShaderSourceStatus actual = PreprocessShader(
+                test.tree, entry, Span<const ShaderDefine>(), viaCache, {}, {}, &cache);
+            CHECK(SameStatus(expected, actual) && viaCache.text.IsEmpty());
+        }
+    }
+
+    // 파일 한도가 다르거나 다른 트리의 캐시는 거부한다.
+    ShaderSourceCache small(test.tree, TestAllocator(), 1024);
+    PreprocessedShader rejected(TestAllocator());
+    CHECK(PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), rejected, {}, {}, &small)
+              .code == ShaderSourceError::InvalidArgument);
+    ShaderSourceTree otherTree(TestAllocator());
+    ShaderSourceCache foreign(otherTree, TestAllocator());
+    CHECK(PreprocessShader(test.tree, Entry, Span<const ShaderDefine>(), rejected, {}, {}, &foreign)
+              .code == ShaderSourceError::InvalidArgument);
+
+    // 새 캐시 하나를 여러 스레드가 함께 쓴다(같은 파일을 동시에 처음 읽는 경로).
+    ShaderSourceCache shared(test.tree, TestAllocator());
+    PreprocessedShader outputs[CacheThreadCount] = {
+        PreprocessedShader(TestAllocator()), PreprocessedShader(TestAllocator()),
+        PreprocessedShader(TestAllocator()), PreprocessedShader(TestAllocator())};
+    CacheThread contexts[CacheThreadCount];
+    platform::Thread threads[CacheThreadCount];
+    for (usize index = 0; index < CacheThreadCount; ++index) {
+        contexts[index].tree = &test.tree;
+        contexts[index].cache = &shared;
+        contexts[index].out = &outputs[index];
+        REQUIRE(threads[index].Start(&CacheThread::Run, &contexts[index]) ==
+                platform::ThreadStatus::Success);
+    }
+
+    for (usize index = 0; index < CacheThreadCount; ++index) {
+        REQUIRE(threads[index].Join() == platform::ThreadStatus::Success);
+        CHECK(contexts[index].status && SamePreprocessed(test.shader, outputs[index]));
+    }
+
+    CHECK(shared.EntryCount() == afterMain);
 }
 
 } // namespace shader_preprocessor_tests_file

@@ -140,6 +140,16 @@ Result<void> AudioWorldSubsystem::SetParameter(PlaybackHandle handle, PlaybackPa
     return engine_->SetParameter(handle, parameter, value, rampFrames);
 }
 
+Result<void> AudioWorldSubsystem::SetBusSend(PlaybackHandle handle, const MixBusRef& bus,
+                                             float level) noexcept {
+    if (engine_ == nullptr || !engine_->IsPlaybackInScene(handle, scene_)) {
+        return handle.IsValid() ? Result<void>::Success()
+                                : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return engine_->SetBusSend(handle, bus, level);
+}
+
 PlaybackStatus AudioWorldSubsystem::Status(PlaybackHandle handle) const noexcept {
     if (engine_ == nullptr || !engine_->IsPlaybackInScene(handle, scene_)) {
         return PlaybackStatus::Finished;

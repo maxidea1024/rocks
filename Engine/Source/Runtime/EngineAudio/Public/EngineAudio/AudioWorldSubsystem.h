@@ -72,6 +72,8 @@ public:
                       uint32 fadeFrames = audio::DefaultStopFadeFrames) noexcept;
     Result<void> SetParameter(PlaybackHandle handle, PlaybackParameter parameter, float value,
                               uint32 rampFrames = audio::DefaultParamRampFrames) noexcept;
+    // 이 World 재생의 버스 send다(AudioEngineSubsystem::SetBusSend — 3.45.9절).
+    Result<void> SetBusSend(PlaybackHandle handle, const MixBusRef& bus, float level) noexcept;
     PlaybackStatus Status(PlaybackHandle handle) const noexcept;
 
     // 주 리스너다(플레이어 카메라 — 게임·호스트가 프레임마다 넣는다). 넣지 않으면 원점·항등

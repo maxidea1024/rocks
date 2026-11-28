@@ -7,8 +7,10 @@ namespace rocks::graph_detail {
 // 편의 복원의 도달 검사다(Docs/Design/ObjectFoundations.ko.md 5.5절): 노드 1에서 영속 강한
 // 참조(weak 참조 제외), inner → outer(노드 표의 outer), 패키지 정책 Registry면 outer → inner와 기준
 // Outer 아래 보존(기준 Outer가 있으면 outer 0 노드는 기준 Outer가 붙잡는다 — 1.7절)으로 닿지 않는
-// 노드가 있으면 InvalidArgument다(공개 뒤 다음 GC가 조용히 지우지 않게 — 생성 전에 판정한다).
-// 패키지 정책이고 기준 Outer가 없으면 노드 1이 아닌 outer 0 노드(다른 패키지)도 InvalidArgument다.
+// 노드가 있으면 InvalidArgument다. 선언 subobject 노드(종류 1 — Docs/Design/Prefab 10.4절)는 소유
+// 노드에서 닿는다(소유 객체가 instancing으로 소유한다 — 소유 필드·목록 참조가 없어도).(공개 뒤 다음
+// GC가 조용히 지우지 않게 — 생성 전에 판정한다). 패키지 정책이고 기준 Outer가 없으면 노드 1이 아닌
+// outer 0 노드(다른 패키지)도 InvalidArgument다.
 Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, bool packagePolicy,
                             bool hasBase, Budget& budget) noexcept {
     const usize count = nodes.Size();
@@ -22,8 +24,27 @@ Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, 
     Array<uint32> queue(allocator);
     Array<uint32> firstChild(allocator);
     Array<uint32> nextSibling(allocator);
+    // 선언 subobject 노드 목록(소유 노드별 첫 노드·다음 노드 — 노드 번호 + 1, 0 = 없음)이다.
+    Array<uint32> firstDeclared(allocator);
+    Array<uint32> nextDeclared(allocator);
     if (auto resized = visited.TryResize(count); !resized) {
         return resized;
+    }
+
+    if (auto resized = firstDeclared.TryResize(count); !resized) {
+        return resized;
+    }
+
+    if (auto resized = nextDeclared.TryResize(count); !resized) {
+        return resized;
+    }
+
+    for (usize index = count; index > 0; --index) {
+        const LoadNode& declared = nodes[index - 1];
+        if (declared.kind == NodeKindDeclaredSubobject && declared.outer != 0) {
+            nextDeclared[index - 1] = firstDeclared[declared.outer - 1];
+            firstDeclared[declared.outer - 1] = static_cast<uint32>(index);
+        }
     }
 
     if (auto reserved = queue.TryReserve(count); !reserved) {
@@ -93,6 +114,16 @@ Result<void> CheckReachable(Allocator& allocator, const Array<LoadNode>& nodes, 
 
         if (node.outer != 0) {
             visit(node.outer - 1);
+        }
+
+        for (uint32 declared = firstDeclared[queue[position]]; declared != 0;
+             declared = nextDeclared[declared - 1]) {
+            spent = budget.Spend(1);
+            if (!spent) {
+                return spent;
+            }
+
+            visit(declared - 1);
         }
 
         for (uint32 child = packagePolicy ? firstChild[queue[position]] : 0; child != 0;
