@@ -2,6 +2,7 @@
 
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <MaterialCompiler/MaterialCurveAtlasSnapshot.h>
 #include <MaterialCompiler/MaterialIrParameter.h>
 #include <MaterialCompiler/MaterialIrType.h>
 #include <MaterialCompiler/MaterialIrValue.h>
@@ -15,10 +16,13 @@ class LoweringContext;
 // 스칼라 custom primitive data 문맥 값 이름이다(UE CustomPrimitiveData(…, MCT_Float)).
 inline constexpr StringView CustomPrimitiveDataScalar = "CustomPrimitiveData1";
 
-// 노드 속성 parameterId의 수 파라미터 읽기 값이다(kind·defaults — 6.10절). 같은 ParameterId가 다른
-// 종류로 이미 쓰였으면 V8을 진단하고 NoIrValue다.
+// 노드 속성 parameterId의 수 파라미터 읽기 값이다(6.10절). 기본값은 노드 값 hook과
+// ResolveParameterDefaults로 정한다(12.8절 MS3d1 — 쿠킹 처리기와 같은 길). atlas는 커브 atlas 행
+// 파라미터의 snapshot이다. 같은 정체가 다른 종류나 다른 기본값으로 이미 쓰였으면
+// ParameterConflict를 진단하고 NoIrValue다(UE r.Material.PedanticErrorChecksEnabled 검사 —
+// Rocks는 늘 켠다). 출처를 함께 기록한다.
 Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kind,
-                                   const double (&defaults)[MaxIrComponents]) noexcept;
+                                   const MaterialCurveAtlasSnapshot* atlas = nullptr) noexcept;
 
 // custom primitive data 읽기다(UE CustomPrimitiveData — 노드 속성 useCustomPrimitiveData·
 // primitiveDataIndex, UI 영역은 오류, 번호는 0–35). name은 문맥 값

@@ -1,4 +1,5 @@
 #include <Core/Text/StringBuilder.h>
+#include <MaterialCompiler/MaterialParameterDefaults.h>
 #include <MaterialSchema/Nodes/Parameters/ParametersNodeEnums.h>
 
 #include "LoweringContext.h"
@@ -75,28 +76,61 @@ Result<void> NamedParameterError(LoweringContext& context, StringView prefix,
 
 } // namespace
 
-// 수 파라미터 읽기 값이다(parameterId·기본값 — 6.10절).
+// 수 파라미터 읽기 값이다(값 hook·기본값 해석·정체·충돌·출처 — 6.10절, 12.8절 MS3d1).
 Result<IrValueId> NumericParameter(LoweringContext& context, IrParameterKind kind,
-                                   const double (&defaults)[MaxIrComponents]) noexcept {
-    Guid id;
-    auto read = context.ReadGuid("parameterId", id);
+                                   const MaterialCurveAtlasSnapshot* atlas) noexcept {
+    MaterialParameterMetadata metadata;
+    auto read = context.ParameterMetadata(metadata);
     if (!read || !read.Value()) {
         return read ? Result<IrValueId>::Success(NoIrValue)
                     : Result<IrValueId>::Failure(read.Error());
     }
 
-    // 같은 ParameterId가 다른 종류로 이미 쓰였으면 V8이다(6.10절 — 표가 첫 항목의 타입을 쓰므로).
+    double defaults[MaxIrComponents] = {};
+    if (!ResolveParameterDefaults(metadata, atlas, defaults)) {
+        if (auto reported = context.Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                          "The curve is not contained within the atlas.");
+            !reported) {
+            return Result<IrValueId>::Failure(reported.Error());
+        }
+
+        return Result<IrValueId>::Success(NoIrValue);
+    }
+
+    Guid id;
+    auto idRead = context.ReadGuid("parameterId", id);
+    if (!idRead || !idRead.Value()) {
+        return idRead ? Result<IrValueId>::Success(NoIrValue)
+                      : Result<IrValueId>::Failure(idRead.Error());
+    }
+
+    // 같은 정체가 다른 종류(V8 — 표가 첫 항목의 타입을 쓴다)나 다른 기본값으로 이미 쓰였으면
+    // 충돌이다(어느 노드를 골라도 쿠킹 파라미터 표가 같은 값이게 — 12.8절 MS3d1).
     for (const IrParameter& existing : context.Builder().Parameters()) {
-        if (existing.id == id && existing.kind != kind) {
-            if (auto reported =
-                    context.Error(MaterialDiagnosticCode::ParameterConflict, StringView(),
-                                  "Parameter is used with another parameter type");
+        if (!(existing.id == id)) {
+            continue;
+        }
+
+        bool same = existing.kind == kind;
+        for (usize index = 0; same && index < MaxIrComponents; ++index) {
+            same = existing.defaults[index] == defaults[index];
+        }
+
+        if (!same) {
+            if (auto reported = context.Error(
+                    MaterialDiagnosticCode::ParameterConflict, StringView(),
+                    existing.kind != kind ? "Parameter is used with another parameter type"
+                                          : "Parameter is defined with different values");
                 !reported) {
                 return Result<IrValueId>::Failure(reported.Error());
             }
 
             return Result<IrValueId>::Success(NoIrValue);
         }
+    }
+
+    if (auto recorded = context.RecordParameterOrigin(id, metadata); !recorded) {
+        return Result<IrValueId>::Failure(recorded.Error());
     }
 
     IrParameter parameter;
@@ -178,15 +212,7 @@ Result<void> LowerScalarParameter(LoweringContext& context) noexcept {
         return data ? context.Output("Result", data.Value()) : Result<void>::Failure(data.Error());
     }
 
-    float value = 0.0f;
-    auto read = context.ReadFloat("defaultValue", 0.0f, value);
-    if (!read || !read.Value()) {
-        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
-    }
-
-    const double defaults[MaxIrComponents] = {value, 0.0, 0.0, 0.0};
-    return EmitParameter(context, "Result",
-                         NumericParameter(context, IrParameterKind::Scalar, defaults));
+    return EmitParameter(context, "Result", NumericParameter(context, IrParameterKind::Scalar));
 }
 
 // RGB·R·G·B·A·RGBA 출력(UE VectorParameter 출력 마스크)을 낸다.
@@ -220,14 +246,7 @@ Result<void> LowerVectorParameter(LoweringContext& context) noexcept {
         return data ? EmitColorOutputs(context, data.Value()) : Result<void>::Failure(data.Error());
     }
 
-    float color[MaxIrComponents] = {};
-    auto read = context.ReadColor("defaultValue", color);
-    if (!read || !read.Value()) {
-        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
-    }
-
-    const double defaults[MaxIrComponents] = {color[0], color[1], color[2], color[3]};
-    auto parameter = NumericParameter(context, IrParameterKind::Vector, defaults);
+    auto parameter = NumericParameter(context, IrParameterKind::Vector);
     if (!parameter) {
         return Result<void>::Failure(parameter.Error());
     }
@@ -237,13 +256,7 @@ Result<void> LowerVectorParameter(LoweringContext& context) noexcept {
 
 // UE DoubleVectorParameter(MaterialExpressions.cpp:8200–8203): Double4, XYZ·X·Y·Z·W.
 Result<void> LowerDoubleVectorParameter(LoweringContext& context) noexcept {
-    double defaults[MaxIrComponents] = {};
-    auto read = context.ReadDoubleVector("defaultValue", defaults);
-    if (!read || !read.Value()) {
-        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
-    }
-
-    auto parameter = NumericParameter(context, IrParameterKind::DoubleVector, defaults);
+    auto parameter = NumericParameter(context, IrParameterKind::DoubleVector);
     if (!parameter || parameter.Value() == NoIrValue) {
         return parameter ? Result<void>::Success() : Result<void>::Failure(parameter.Error());
     }
@@ -322,14 +335,7 @@ Result<void> LowerChannelMaskParameter(LoweringContext& context) noexcept {
         return vector ? Result<void>::Success() : Result<void>::Failure(vector.Error());
     }
 
-    float color[MaxIrComponents] = {};
-    auto read = context.ReadColor("defaultValue", color);
-    if (!read || !read.Value()) {
-        return read ? Result<void>::Success() : Result<void>::Failure(read.Error());
-    }
-
-    const double defaults[MaxIrComponents] = {color[0], color[1], color[2], color[3]};
-    auto parameter = NumericParameter(context, IrParameterKind::Vector, defaults);
+    auto parameter = NumericParameter(context, IrParameterKind::Vector);
     if (!parameter || parameter.Value() == NoIrValue) {
         return parameter ? Result<void>::Success() : Result<void>::Failure(parameter.Error());
     }

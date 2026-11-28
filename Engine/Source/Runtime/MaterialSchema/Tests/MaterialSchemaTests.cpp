@@ -86,6 +86,12 @@ TypeSchema MakeParamSchema() noexcept {
 }
 
 constexpr StringView ParamNonSemantic[] = {"defaultValue"};
+
+// 시험 파라미터 노드의 값 hook이다(파라미터 노드는 hook이 있어야 등록된다 — 12.8절 MS3d1).
+Result<bool> TestParamValue(NodePropertyReader&, MaterialParameterMetadata& out) noexcept {
+    out = MaterialParameterMetadata{};
+    return Result<bool>::Success(true);
+}
 constexpr StringView ParamUnknownField[] = {"missing"};
 
 constexpr MaterialPinDefinition ParamPins[] = {
@@ -101,6 +107,7 @@ constexpr MaterialNodeDefinition TestDefinitions[] = {
     MaterialNode("Material.TestParam")
         .Properties(&ParamSchema, ParamNonSemantic)
         .Pins(ParamPins)
+        .ParameterValue(&TestParamValue)
         .Flags(MaterialNodeFlags::Parameter),
 };
 
@@ -336,6 +343,16 @@ TEST(MaterialSchema_CatalogRejectsInvalidDefinitions) {
         MaterialNode("Material.NoSchema").Properties(nullptr, ParamNonSemantic),
         MaterialNode("Material.UnknownField").Properties(&ParamSchema, ParamUnknownField),
         MaterialNode("Material.Flags").Flags(static_cast<MaterialNodeFlags>(0x80)),
+        // 파라미터 노드는 값 hook이 있어야 하고, hook은 속성이 있는 파라미터 노드만 가진다.
+        MaterialNode("Material.ParamNoHook")
+            .Properties(&ParamSchema, ParamNonSemantic)
+            .Flags(MaterialNodeFlags::Parameter),
+        MaterialNode("Material.HookNoParam")
+            .Properties(&ParamSchema, ParamNonSemantic)
+            .ParameterValue(&TestParamValue),
+        MaterialNode("Material.HookNoSchema")
+            .ParameterValue(&TestParamValue)
+            .Flags(MaterialNodeFlags::Parameter),
     };
 
     for (const MaterialNodeDefinition& definition : invalid) {

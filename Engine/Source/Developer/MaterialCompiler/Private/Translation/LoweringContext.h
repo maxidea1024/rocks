@@ -178,6 +178,14 @@ public:
     // field가 "parameterId"이고 노드 속성에 shared가 있으면(파라미터 노드) IR 정체 Guid로
     // 바꾼다(6.12절 MS2e2 파라미터 scope — 주 그래프 노드는 그대로).
     Result<bool> ReadGuid(StringView field, Guid& out) noexcept;
+    // 파라미터 노드의 값 hook 결과다(12.8절 MS3d1 — 정의의 ParameterValue). 읽지 못하면
+    // InvalidProperty를 진단하고 false다. 오류: hook이 없는 노드 InvalidArgument(lowering의 잘못),
+    // 할당 실패.
+    Result<bool> ParameterMetadata(MaterialParameterMetadata& out) noexcept;
+    // 이 파라미터 노드의 출처를 기록한다(identity는 ReadGuid("parameterId")가 준 정체 — 공유
+    // 여부는 속성 shared). 오류: 할당 실패.
+    Result<void> RecordParameterOrigin(Guid identity,
+                                       const MaterialParameterMetadata& metadata) noexcept;
     // LinearColor 칸(r·g·b·a)이다.
     Result<bool> ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept;
     // Vec4d 칸(x·y·z·w)이다.

@@ -57,7 +57,7 @@ class ROCKS_MATERIALCOMPILER_API IrModule {
 public:
     explicit IrModule(Allocator& allocator) noexcept
         : values_(allocator), results_(allocator), parameters_(allocator), textures_(allocator),
-          collections_(allocator), defines_(allocator), customs_(allocator) {
+          collections_(allocator), origins_(allocator), defines_(allocator), customs_(allocator) {
     }
 
     IrModule(const IrModule&) = delete;
@@ -92,6 +92,22 @@ public:
     // MaterialTexture<k>, 6.10절 MS2c3).
     Span<const IrTexture> Textures() const noexcept {
         return textures_.View();
+    }
+
+    // 닿는 수 파라미터·파라미터 텍스처의 출처다(정체 Guid 순 — 12.8절 MS3d1).
+    Span<const IrParameterOrigin> ParameterOrigins() const noexcept {
+        return origins_.View();
+    }
+
+    // identity의 출처다(없으면 null).
+    const IrParameterOrigin* FindParameterOrigin(Guid identity) const noexcept {
+        for (const IrParameterOrigin& origin : origins_) {
+            if (origin.identity == identity) {
+                return &origin;
+            }
+        }
+
+        return nullptr;
     }
 
     // 진입점에서 닿는 파라미터 컬렉션이다(asset id 순 — 생성 원문의 MaterialCollection<k>).
@@ -152,6 +168,7 @@ public:
         parameters_.Clear();
         textures_.Clear();
         collections_.Clear();
+        origins_.Clear();
         defines_.Clear();
         customs_.Clear();
         hash_ = Sha256Digest{};
@@ -173,6 +190,7 @@ private:
     Array<IrParameter> parameters_;
     Array<IrTexture> textures_;
     Array<IrCollection> collections_;
+    Array<IrParameterOrigin> origins_;
     Array<IrDefine> defines_;
     IrCustomTable customs_;
     Sha256Digest hash_{};

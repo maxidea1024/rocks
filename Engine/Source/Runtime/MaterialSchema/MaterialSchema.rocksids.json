@@ -5421,6 +5421,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialParameterType",
+      "id": "da2c1b6a08da4a39b91f9dce5a6b91cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialPinValue",
       "id": "7dfc433c722543908d38250d802c283b",
       "aliases": [],

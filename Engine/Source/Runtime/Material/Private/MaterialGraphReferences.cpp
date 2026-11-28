@@ -16,12 +16,12 @@ namespace {
 using material::MaterialAssetReferenceRole;
 
 Result<void> Add(Array<MaterialGraphReference>& out, MaterialAssetReferenceRole role, Guid id,
-                 Guid node, StringView field) noexcept {
+                 Guid node, StringView field, bool defaultValue = false) noexcept {
     if (id == Guid{}) {
         return Result<void>::Success();
     }
 
-    return out.TryPushBack(MaterialGraphReference{role, AssetId{id}, node, field});
+    return out.TryPushBack(MaterialGraphReference{role, AssetId{id}, node, field, defaultValue});
 }
 
 // 그래프 노드 하나가 참조하는 에셋 id다(field는 MaterialAssetReference 칸 — 읽지 못하면 null,
@@ -176,8 +176,13 @@ Result<void> CollectMaterialGraphReferences(const NamePool& names,
                         return Result<void>::Failure(asset.Error());
                     }
 
-                    if (auto added =
-                            Add(out, field.role, asset.Value().value, node.id, field.field);
+                    bool defaultValue = false;
+                    for (StringView nonSemantic : definition.nonSemanticFields) {
+                        defaultValue = defaultValue || nonSemantic == field.field;
+                    }
+
+                    if (auto added = Add(out, field.role, asset.Value().value, node.id, field.field,
+                                         defaultValue);
                         !added) {
                         return added;
                     }

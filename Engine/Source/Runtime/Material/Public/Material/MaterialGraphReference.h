@@ -16,6 +16,9 @@ struct MaterialGraphReference {
     // field는 정적 문자열이다(노드 정의 선언 또는 리터럴).
     Guid node{};
     StringView field;
+    // 필드가 파라미터 기본값(노드 정의의 비의미 필드 — semantic hash 밖, 5.5절)인가. 번역 키는 이런
+    // 텍스처 위치만 AssetId 없이 사실로 쓴다(12.8절 MS3d1).
+    bool defaultValue = false;
 };
 
 } // namespace rocks

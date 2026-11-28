@@ -410,8 +410,8 @@ uint64 IrBuilder::KeyHash::operator()(const Key& key) const noexcept {
 }
 
 IrBuilder::IrBuilder(Allocator& allocator) noexcept
-    : values_(allocator), parameters_(allocator), textures_(allocator), customs_(allocator),
-      lookup_(allocator) {
+    : values_(allocator), parameters_(allocator), textures_(allocator), origins_(allocator),
+      customs_(allocator), lookup_(allocator) {
 }
 
 const IrValue& IrBuilder::Value(IrValueId id) const noexcept {
@@ -1150,6 +1150,16 @@ Result<IrValueId> IrBuilder::Pending(IrType type, IrPendingKind kind, uint8 prer
     value.immediate[2] = node.high;
     value.immediate[3] = node.low;
     return Intern(value);
+}
+
+Result<void> IrBuilder::AddParameterOrigin(IrParameterOrigin&& origin) noexcept {
+    for (const IrParameterOrigin& existing : origins_) {
+        if (existing.identity == origin.identity) {
+            return Result<void>::Success();
+        }
+    }
+
+    return origins_.TryPushBack(Move(origin));
 }
 
 Result<IrValueId> IrBuilder::Parameter(const IrParameter& parameter) noexcept {

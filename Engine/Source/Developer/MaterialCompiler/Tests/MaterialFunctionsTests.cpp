@@ -356,6 +356,29 @@ TEST(MaterialFunctions_ParameterScopes) {
             CHECK(!(item.id == FunctionParameterId));
         }
 
+        // 출처(12.8절 MS3d1): 소유는 함수 에셋, 공유면 Global·빈 경로, 아니면 FunctionCall·호출
+        // 노드 하나(두 호출이 서로 다르다).
+        Guid seenCalls[2] = {};
+        usize seen = 0;
+        for (const IrParameter& item : out.module.Parameters()) {
+            const IrParameterOrigin* origin = out.module.FindParameterOrigin(item.id);
+            REQUIRE(origin != nullptr);
+            CHECK(origin->owner == FunctionAssetF);
+            CHECK(origin->parameterId == FunctionParameterId);
+            CHECK(origin->name.View() == StringView("P"));
+            if (shared) {
+                CHECK(origin->scope == ParameterScopeKind::Global);
+                CHECK(origin->callPath.IsEmpty());
+            } else {
+                CHECK(origin->scope == ParameterScopeKind::FunctionCall);
+                REQUIRE(origin->callPath.Size() == 1);
+                CHECK((origin->callPath[0] == first || origin->callPath[0] == second));
+                seenCalls[seen++] = origin->callPath[0];
+            }
+        }
+
+        CHECK((shared || !(seenCalls[0] == seenCalls[1])));
+
         // 같은 함수의 정체는 번역마다 같다(쿠킹 키·인스턴스 override).
         MaterialTranslation again(env.allocator);
         REQUIRE(TranslateWithSources(main, &sources, again));

@@ -41,7 +41,7 @@
 // 필드를 채우고 두 번째는 바꾸지 않는지, 대조가 빠진 텍스처를 찾는지 본다. 경계: opener 없음은
 // InvalidArgument, 함수 순환(F1 ↔ F2)은 끝나고, 텍스처 역할이 머티리얼을 가리키면 object null이다.
 // 실제 원천 키: 함수 그래프·커브·텍스처 사실·컬렉션 layout이 바뀌면 키가 바뀌고, 텍스처 파라미터
-// 기본값을 사실이 같은 다른 텍스처로 바꾸면 같다.
+// 기본값을 사실이 같은 다른 텍스처로 바꾸면 같고, 파라미터가 아닌 텍스처 참조는 바뀐다(AssetId).
 using namespace rocks;
 namespace material_cook_sources_tests_file {
 
@@ -555,6 +555,23 @@ TEST(MaterialCook_GatherEdgesAndSourceKey) {
     Sha256Digest cubeDefault;
     REQUIRE(keyNow(cubeDefault));
     CHECK(!(cubeDefault == twinDefault));
+
+    // 파라미터가 아닌 텍스처 참조는 AssetId가 키에 든다(12.8절 MS3d1 — 모듈 텍스처 표가 AssetId로
+    // slot을 합친다): 사실이 같은 쌍둥이로 바꿔도 키가 다르다.
+    const auto sampleOf = [&](uint64 texture) noexcept {
+        return asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+            material::TextureSampleProperties sample(source.ObjectAllocator());
+            sample.texture.assetId = asset_test::FixedId(texture);
+            return SetNode(env, value.graph, Guid{0x40, 2}, sample);
+        });
+    };
+    REQUIRE(sampleOf(BrickIdValue));
+    Sha256Digest brickSample;
+    REQUIRE(keyNow(brickSample));
+    REQUIRE(sampleOf(BrickTwinIdValue));
+    Sha256Digest twinSample;
+    REQUIRE(keyNow(twinSample));
+    CHECK(!(twinSample == brickSample));
 }
 #endif
 

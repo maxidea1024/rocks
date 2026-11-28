@@ -773,6 +773,62 @@ Result<IrValueId> LoweringContext::CallerInput(Guid call, Name pin, bool& connec
     return value;
 }
 
+Result<bool> LoweringContext::ParameterMetadata(MaterialParameterMetadata& out) noexcept {
+    out = MaterialParameterMetadata{};
+    if (definition_.parameterValue == nullptr) {
+        return Result<bool>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto properties = Properties();
+    if (!properties) {
+        return Result<bool>::Failure(properties.Error());
+    }
+
+    if (properties.Value() == nullptr) {
+        return Result<bool>::Success(false);
+    }
+
+    auto read = definition_.parameterValue(*properties.Value(), out);
+    if (!read) {
+        if (read.Error() == ErrorCode::OutOfMemory) {
+            return read;
+        }
+
+        if (auto reported = Error(MaterialDiagnosticCode::InvalidProperty, StringView(),
+                                  "Node property cannot be read");
+            !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        return Result<bool>::Success(false);
+    }
+
+    return read;
+}
+
+Result<void>
+LoweringContext::RecordParameterOrigin(Guid identity,
+                                       const MaterialParameterMetadata& metadata) noexcept {
+    bool shared = false;
+    auto properties = Properties();
+    if (!properties) {
+        return Result<void>::Failure(properties.Error());
+    }
+
+    if (properties.Value() != nullptr) {
+        auto read = properties.Value()->ReadBool("shared", false);
+        if (!read && read.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(read.Error());
+        }
+
+        // shared가 없는 노드(정체를 바꾸지 않는 노드)는 공유가 아니다(ReadGuid와 같다).
+        shared = read && read.Value();
+    }
+
+    return translator_.RecordParameterOrigin(node_.id, identity, metadata.parameterId,
+                                             metadata.name, shared);
+}
+
 Result<bool> LoweringContext::ReadColor(StringView field, float (&out)[MaxIrComponents]) noexcept {
     for (float& component : out) {
         component = 0.0f;

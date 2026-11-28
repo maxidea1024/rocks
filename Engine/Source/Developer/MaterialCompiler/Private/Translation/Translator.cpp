@@ -137,15 +137,15 @@ Translator::Translator(Allocator& allocator, const MaterialTranslationInput& inp
                        MaterialTranslation& out) noexcept
     : allocator_(allocator), input_(input), out_(out), builder_(allocator), expanded_(allocator),
       origins_(allocator), calls_(allocator), callOutputs_(allocator), functionInputs_(allocator),
-      snapshots_(allocator), syntheticOwners_(allocator), layers_(allocator),
-      layerDiagnostics_(allocator), nodes_(allocator), edges_(allocator), outputsVertex_(allocator),
-      outputsPrevious_(allocator), outputsPixel_(allocator), statesVertex_(allocator),
-      statesPrevious_(allocator), statesPixel_(allocator), outputsVirtualTexture_(allocator),
-      statesVirtualTexture_(allocator), lowerings_(allocator), lazyNodes_(allocator),
-      incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator), results_(allocator),
-      collections_(allocator), samplers_(allocator), deferred_(allocator), surfaces_(allocator),
-      attributeEntries_(allocator), attributeRanges_(allocator), attributeOutputs_(allocator),
-      defines_(allocator) {
+      snapshots_(allocator), syntheticOwners_(allocator), syntheticLayers_(allocator),
+      layers_(allocator), layerDiagnostics_(allocator), nodes_(allocator), edges_(allocator),
+      outputsVertex_(allocator), outputsPrevious_(allocator), outputsPixel_(allocator),
+      statesVertex_(allocator), statesPrevious_(allocator), statesPixel_(allocator),
+      outputsVirtualTexture_(allocator), statesVirtualTexture_(allocator), lowerings_(allocator),
+      lazyNodes_(allocator), incomingStart_(allocator), incoming_(allocator), cutInputs_(allocator),
+      results_(allocator), collections_(allocator), samplers_(allocator), deferred_(allocator),
+      surfaces_(allocator), attributeEntries_(allocator), attributeRanges_(allocator),
+      attributeOutputs_(allocator), defines_(allocator) {
 }
 
 const nodegraph::GraphNode* Translator::FindNode(Guid id) const noexcept {

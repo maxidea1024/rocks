@@ -1,4 +1,5 @@
 #include "MaterialBuiltinNodes.h"
+#include "MaterialParameterValues.h"
 
 #include <MaterialSchema/Nodes/Font/FontSampleParameterProperties.generated.h>
 #include <MaterialSchema/Nodes/Font/FontSampleParameterProperties.h>
@@ -49,6 +50,7 @@ constexpr MaterialNodeDefinition FontDefinitions[] = {
         .Menu("Font Sample", "Font", "Font Texture", "Font Sample.")
         .Missing(MaterialPrerequisite::Font),
     MaterialNode("Material.FontSampleParameter")
+        .ParameterValue(&FontParameterValue)
         .Properties(&GeneratedType<FontSampleParameterProperties>::Schema,
                     FontSampleParameterNonSemantic)
         .Pins(FontSampleParameterPins)
