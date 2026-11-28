@@ -352,6 +352,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         ColdOf(*freeSlot).storage = memory.Value();
         ColdOf(*freeSlot).transaction = transaction;
         ColdOf(*freeSlot).stableType = type;
+        ColdOf(*freeSlot).origin = ObjectOrigin::Default;
         freeSlot->type = Move(typeLease.Value());
         ColdOf(*freeSlot).outer = outerKey;
         // hot 레코드와 잎 비트(GC-S3·M2). object는 생성자 실행 뒤 채운다.

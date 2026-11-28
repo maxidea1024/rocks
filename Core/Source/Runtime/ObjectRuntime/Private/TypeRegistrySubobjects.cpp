@@ -98,6 +98,14 @@ Result<SubobjectBlockLayout> ValidateSubobjectList(const TypeSchema& schema,
         }
     }
 
+    // 지정자 필드 접근자는 지정자가 있는 타입에만 있다(선언 클래스가 싣는다 — 상속한 지정자면
+    // 없다).
+    if ((ops.subobjectListAccess != nullptr && schema.subobjectListField == Guid{}) ||
+        (ops.subobjectRootAccess != nullptr && schema.subobjectRootField == Guid{}) ||
+        (ops.subobjectAttachAccess != nullptr && schema.subobjectAttachField == Guid{})) {
+        return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (layout.count != 0 && list == nullptr) {
         return Result<SubobjectBlockLayout>::Failure(ErrorCode::InvalidArgument);
     }

@@ -11,6 +11,7 @@
 #include <Object/FieldNotifications.h>
 #include <Object/ObjectDiagnostics.h>
 #include <Object/ObjectIdentity.h>
+#include <Object/ObjectOrigin.h>
 #include <Object/ObjectRegistryOptions.h>
 #include <Object/ReferenceObserver.h>
 #include <Object/StructRefArray.h>
@@ -160,6 +161,14 @@ public:
 
     // handle의 Outer 사슬 끝(소속 패키지)이다. Outer가 없으면 handle 자신이다.
     Result<ObjectHandle> GetOutermost(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
+    // handle의 생성 출처다(Object/ObjectOrigin.h — Docs/Design/Prefab 10.5절). 생성 때 정해져
+    // 바뀌지 않는다. 오류는 GetOuter와 같다.
+    //
+    // 사용 예:
+    //   auto origin = registry.GetOrigin(access, component);
+    //   if (origin && origin.Value() == ObjectOrigin::ClassSubobject) { /* 선언 subobject */ }
+    Result<ObjectOrigin> GetOrigin(const ObjectAccessContext&, ObjectHandle) const noexcept;
 
     // handle의 이름을 out 뒤에 붙인다(Outer 없는 이름 없는 객체와 대표 자식은 빈 문자열). 잠금
     // 안에서 64 byte 스택 버퍼로 복사한 뒤 잠금 밖에서 out의 allocator로 붙이므로, 그 할당 콜백이
@@ -1237,6 +1246,10 @@ private:
     void ResetReclaimedLocked(ReclaimWork&) noexcept;
     // 잠금 보유: 떼어 냈지만 소멸하지 않은 work를 Retired(풀린 목록)로 되돌린다(시간 한도).
     void ReturnUnreclaimedLocked(ReclaimWork&) noexcept;
+
+    // transaction의 공개 전 객체 handle에 생성 출처를 표시한다(ConstructionContext 전용 — 생성
+    // 직후 한 번). 그 트랜잭션의 공개 전 객체가 아니면 StaleHandle이다.
+    Result<void> SetPendingOrigin(ObjectHandle, uint64 transaction, ObjectOrigin) noexcept;
 
     // ---- Outer·이름(잠금 보유 상태에서 부른다) ----
     ObjectHandle HandleOf(const Slot&) const noexcept;

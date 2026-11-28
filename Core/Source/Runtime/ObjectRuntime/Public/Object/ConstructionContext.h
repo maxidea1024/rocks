@@ -65,6 +65,30 @@ public:
         return CreateImpl(type, NativeTypeKey<T>(), outer, name);
     }
 
+    // owner(이 트랜잭션의 공개 전 객체 — 방금 Create한 소유 객체)의 클래스 선언 subobject를 만들고
+    // 배선한다(UE CreateDefaultSubobject 대응 — Docs/Design/Prefab 10.3절). SpawnActor·graph 복원·
+    // prefab spawn이 모두 이 한 경로를 쓴다. 펼친 subobject 표 순서로:
+    //   1. Create(표 타입, Outer = owner, 이름 = 소유 필드 도구 이름) — 생성 출처 ClassSubobject,
+    //   2. 소유 필드 ← subobject, 소유 목록(SubobjectList) ← 표 순서로, Root 필드 ← Root subobject,
+    //      subobject의 부착 부모(SubobjectAttach) ← 표의 부착 부모,
+    //   3. owner 타입 base 사슬의 InitSubobjectDefaults를 가장 먼 base부터 부른다.
+    // out(표 크기 이상)에 만든 handle을 표 순서로 쓰고 그 수(표가 없으면 0 — 아무것도 하지
+    // 않는다)를 돌려준다. 클러스터 가입과 World 장부는 호출자가 한다.
+    //
+    // 오류(트랜잭션을 그 오류로 고정한다 — Commit 전이라 전부 되돌려진다): 트랜잭션 상태, owner가
+    // 이 트랜잭션의 객체가 아님(StaleHandle 등 AcquireType 규칙), out이 모자람·소유 목록이 비어
+    // 있지 않음·지정자 접근자가 없음(InvalidArgument), Create 오류(이름 충돌 AlreadyExists 등),
+    // 참조 쓰기 오류, InitSubobjectDefaults가 돌려준 오류.
+    //
+    // 사용 예:
+    //   auto actor = transaction.Create<Actor>(type);
+    //   ObjectHandle parts[MaxClassSubobjects];
+    //   auto made = transaction.CreateDeclaredSubobjects(actor.Value(), parts);
+    //   if (!made) {
+    //       return Result<void>::Failure(made.Error());
+    //   }
+    Result<usize> CreateDeclaredSubobjects(ObjectHandle owner, Span<ObjectHandle> out) noexcept;
+
     // outer를 Outer로 쓸 때의 요약이다(ObjectRegistry::DescribeOuter와 같고 이 트랜잭션의 공개 전
     // 객체도 받는다). 트랜잭션 상태(클래스 주석의 규칙) → outer가 null이면 InvalidArgument →
     // 생존·이 트랜잭션의 공개 전 객체가 아니면 StaleHandle이다.
