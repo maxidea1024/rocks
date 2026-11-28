@@ -32,7 +32,8 @@ TEST(MaterialShaderTraits_DerivedFromMathGraph) {
     CHECK(traits.castsShadow);
     // 불투명 계열은 WPO가 있으면 velocity를 쓴다.
     CHECK(traits.writesVelocity);
-    CHECK(traits.quality == MaterialQualityLevel::High);
+    // Math 그래프는 품질 칸을 읽지 않으므로 품질은 None이다(8.3절 — 수준 공유).
+    CHECK(traits.quality == MaterialQualityLevel::None);
     CHECK(traits.shadingModels == out.shadingModels);
 
     // 기본 표면(출력만)은 WPO·PDO가 없다(결과가 없거나 상수 0).

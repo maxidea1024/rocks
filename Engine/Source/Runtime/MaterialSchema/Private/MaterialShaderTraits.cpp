@@ -15,6 +15,8 @@ constexpr uint8 LastBlendMode = static_cast<uint8>(BlendMode::TranslucentColored
 constexpr uint8 LastTranslucencyPass = static_cast<uint8>(TranslucencyPass::AfterMotionBlur);
 constexpr uint8 LastQuality = static_cast<uint8>(MaterialQualityLevel::None);
 constexpr uint8 LastTier = static_cast<uint8>(MaterialCapabilityTier::Sm6);
+// 이름 하나의 최소 byte(길이 u32)다(원소 수 상한 — 손상된 수가 큰 할당을 일으키지 않게).
+constexpr usize NameLengthBytes = sizeof(uint32);
 
 } // namespace
 
@@ -82,7 +84,7 @@ Result<void> ReadMaterialShaderTraits(Span<const uint8> bytes, MaterialShaderTra
     const uint32 outputs = reader.ReadLittleEndian<uint32>();
     if (reader.Failed() || version != MaterialShaderTraitsVersion || domain > LastDomain ||
         blend > LastBlendMode || pass > LastTranslucencyPass || quality > LastQuality ||
-        tier > LastTier || outputs > reader.Remaining()) {
+        tier > LastTier || static_cast<usize>(outputs) * NameLengthBytes > reader.Remaining()) {
         return Result<void>::Failure(ErrorCode::CorruptData);
     }
 

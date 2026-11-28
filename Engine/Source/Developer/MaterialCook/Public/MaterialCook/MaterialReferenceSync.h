@@ -16,9 +16,10 @@
 //   if (changed) { packages.MarkDirty(id); }
 namespace rocks {
 
-// material의 두 필드를 모은 참조(AssetId 순, 중복 없음 — 열지 못한 참조는 뺀다)로 바꾼다. changed는
-// 필드가 바뀌었는가다. 오류: material이 Material이 아니면 TypeMismatch, 모으기 오류, Registry 참조
-// 변경 오류, 할당 실패. 에디터 데이터 없는 빌드에서는 Unsupported다(그래프가 없다).
+// material의 두 필드를 모은 참조((역할, AssetId) 순 — 텍스처 다음 atlas, 중복 없음 — 열지 못한
+// 참조는 뺀다)로 바꾼다. changed는 필드가 바뀌었는가다. 오류: material이 Material이 아니면
+// TypeMismatch, 모으기 오류, Registry 참조 변경 오류, 할당 실패. 에디터 데이터 없는 빌드에서는
+// Unsupported다(그래프가 없다).
 ROCKS_MATERIALCOOK_API Result<void> SyncMaterialReferences(const MaterialCookGatherContext& context,
                                                            ObjectHandle material,
                                                            bool& changed) noexcept;

@@ -44,12 +44,20 @@ Result<void> WriteText(ByteWriter& writer, StringView text) noexcept {
     return Result<void>::Success();
 }
 
-bool ReadText(ByteReader& reader, String& out) noexcept {
+// 길이 앞붙인 문자열이다. 할당 실패면 outOfMemory를 켠다.
+bool ReadText(ByteReader& reader, String& out, bool& outOfMemory) noexcept {
     const uint32 length = reader.ReadLittleEndian<uint32>();
     const Span<const uint8> bytes = reader.Take(length);
-    return !reader.Failed() &&
-           out.TryAssign(StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()))
-               .IsOk();
+    if (reader.Failed()) {
+        return false;
+    }
+
+    if (!out.TryAssign(StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()))) {
+        outOfMemory = true;
+        return false;
+    }
+
+    return true;
 }
 
 Result<void> WriteCount(ByteWriter& writer, usize count) noexcept {
@@ -80,7 +88,8 @@ bool ReadType(ByteReader& reader, material::IrType& type) noexcept {
     type.components = reader.ReadU8();
     type.rows = reader.ReadU8();
     const uint8 texture = reader.ReadU8();
-    if (reader.Failed() || scalar > LastScalar || texture > LastTextureKind) {
+    if (reader.Failed() || scalar > LastScalar || texture > LastTextureKind ||
+        type.components > material::MaxIrComponents || type.rows > material::MaxIrComponents) {
         return false;
     }
 
@@ -231,15 +240,15 @@ Result<void> WriteParts(const MaterialTranslationValue& value, uint32 index,
     return writer.Status();
 }
 
-// part index를 해석한다(diagnostics는 part 0의 수만큼).
+// part index를 해석한다(diagnostics는 part 0의 수만큼). 할당 실패면 outOfMemory를 켜고 false다.
 bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
-              MaterialTranslationValue& out) noexcept {
+              MaterialTranslationValue& out, bool& outOfMemory) noexcept {
     ByteReader reader(bytes);
     switch (index) {
     case 1:
-        if (!out.source
-                 .TryAssign(StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()))
-                 .IsOk()) {
+        if (!out.source.TryAssign(
+                StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()))) {
+            outOfMemory = true;
             return false;
         }
 
@@ -261,7 +270,12 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             member.vector = reader.ReadLittleEndian<uint32>();
             member.firstComponent = reader.ReadU8();
             member.components = reader.ReadU8();
-            if (reader.Failed() || kind > LastSlotKind || !out.members.TryPushBack(member)) {
+            if (reader.Failed() || kind > LastSlotKind) {
+                return false;
+            }
+
+            if (!out.members.TryPushBack(member)) {
+                outOfMemory = true;
                 return false;
             }
 
@@ -300,6 +314,7 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             step.op = static_cast<material::IrOp>(op);
             step.frequency = static_cast<material::IrFrequency>(frequency);
             if (!out.steps.TryPushBack(step)) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -319,6 +334,7 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
 
             parameter.kind = static_cast<material::IrParameterKind>(kind);
             if (!out.parameters.TryPushBack(parameter)) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -350,6 +366,7 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             texture.defaultAsset =
                 texture.source == material::IrTextureSource::Asset ? texture.id : Guid{};
             if (!out.textures.TryPushBack(texture)) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -382,7 +399,12 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             material::MaterialSourceLocation location;
             location.line = reader.ReadLittleEndian<uint32>();
             location.node = ReadGuid(reader);
-            if (reader.Failed() || !out.locations.TryPushBack(location)) {
+            if (reader.Failed()) {
+                return false;
+            }
+
+            if (!out.locations.TryPushBack(location)) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -406,13 +428,15 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
             diagnostic.node = ReadGuid(reader);
             const uint8 severity = reader.ReadU8();
             diagnostic.code = reader.ReadLittleEndian<uint32>();
-            if (reader.Failed() || severity > LastSeverity || !ReadText(reader, diagnostic.pin) ||
-                !ReadText(reader, diagnostic.message)) {
+            if (reader.Failed() || severity > LastSeverity ||
+                !ReadText(reader, diagnostic.pin, outOfMemory) ||
+                !ReadText(reader, diagnostic.message, outOfMemory)) {
                 return false;
             }
 
             diagnostic.severity = static_cast<nodegraph::GraphDiagnosticSeverity>(severity);
             if (!out.diagnostics.TryPushBack(Move(diagnostic))) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -427,7 +451,12 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
 
         for (uint32 at = 0; at < count; ++at) {
             String name(out.userSceneTextures.GetAllocator());
-            if (!ReadText(reader, name) || !out.userSceneTextures.TryPushBack(Move(name))) {
+            if (!ReadText(reader, name, outOfMemory)) {
+                return false;
+            }
+
+            if (!out.userSceneTextures.TryPushBack(Move(name))) {
+                outOfMemory = true;
                 return false;
             }
         }
@@ -443,6 +472,53 @@ bool ReadPart(Span<const uint8> bytes, uint32 index, uint32 diagnostics,
 
     // part는 정확히 다 읽어야 한다(남은 byte는 손상).
     return !reader.Failed() && reader.Remaining() == 0;
+}
+
+// 해석한 값의 의미 검사다(12.8절 — 손상된 값이 상수 평가에서 범위 밖을 읽지 않게).
+bool Consistent(const MaterialTranslationValue& value) noexcept {
+    for (usize index = 0; index < value.steps.Size(); ++index) {
+        const IrValue& step = value.steps[index];
+        for (uint8 operand = 0; operand < step.operandCount; ++operand) {
+            if (step.operands[operand] >= index) {
+                return false;
+            }
+        }
+
+        if ((step.op == material::IrOp::Texture && step.immediate[3] >= value.textures.Size()) ||
+            (step.op == material::IrOp::Parameter &&
+             step.immediate[3] >= value.parameters.Size())) {
+            return false;
+        }
+    }
+
+    for (const material::MaterialConstantMember& member : value.members) {
+        if (member.step >= value.steps.Size() || member.vector >= value.floatVectors ||
+            member.firstComponent + member.components > material::MaxIrComponents) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// layout 서명 byte다(셰이더가 보는 모양만 — float4 수와 멤버의 칸 종류·float4 번호·첫 성분·성분 수,
+// IR 값·명령 번호 제외, 8.6절).
+Result<void> WriteLayoutSignature(const MaterialTranslationValue& value,
+                                  Array<uint8>& out) noexcept {
+    ByteWriter writer(out);
+    writer.WriteLittleEndian<uint32>(value.floatVectors);
+    if (auto counted = WriteCount(writer, value.members.Size()); !counted) {
+        return counted;
+    }
+
+    for (const material::MaterialConstantMember& member : value.members) {
+        writer.WriteU8(static_cast<uint8>(member.kind));
+        writer.WriteLittleEndian<uint32>(member.vector);
+        writer.WriteU8(member.firstComponent);
+        writer.WriteU8(member.components);
+    }
+
+    return writer.Status();
 }
 
 } // namespace
@@ -581,6 +657,10 @@ Result<void> ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
         return Result<void>::Failure(ErrorCode::CorruptData);
     }
 
+    if (parts[0].id != 0) {
+        return Result<void>::Failure(ErrorCode::CorruptData);
+    }
+
     ByteReader head(parts[0].bytes.View());
     const uint32 version = head.ReadLittleEndian<uint32>();
     const uint32 count = head.ReadLittleEndian<uint32>();
@@ -598,19 +678,33 @@ Result<void> ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
     out.diagnostics.Clear();
     out.userSceneTextures.Clear();
     for (uint32 index = 1; index < MaterialTranslationValueParts; ++index) {
+        bool outOfMemory = false;
         if (parts[index].id != index ||
-            !ReadPart(parts[index].bytes.View(), index, diagnostics, out)) {
-            return Result<void>::Failure(ErrorCode::CorruptData);
+            !ReadPart(parts[index].bytes.View(), index, diagnostics, out, outOfMemory)) {
+            return Result<void>::Failure(outOfMemory ? ErrorCode::OutOfMemory
+                                                     : ErrorCode::CorruptData);
         }
     }
 
-    return Result<void>::Success();
+    return Consistent(out) ? Result<void>::Success()
+                           : Result<void>::Failure(ErrorCode::CorruptData);
 }
 
 Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) noexcept {
     Array<uint8> layout(value.members.GetAllocator());
-    if (auto written = WriteParts(value, 2, layout); !written) {
+    if (auto written = WriteLayoutSignature(value, layout); !written) {
         return Result<Sha256Digest>::Failure(written.Error());
+    }
+
+    Array<uint8> head(value.members.GetAllocator());
+    {
+        // 형식 버전과 생성 원문 길이(앞붙임 — 경계를 모호하지 않게)다.
+        ByteWriter writer(head);
+        writer.WriteLittleEndian<uint32>(MaterialShaderSetFormatVersion);
+        writer.WriteLittleEndian<uint64>(static_cast<uint64>(value.source.ByteCount()));
+        if (auto status = writer.Status(); !status) {
+            return Result<Sha256Digest>::Failure(status.Error());
+        }
     }
 
     Array<uint8> traits(value.members.GetAllocator());
@@ -620,12 +714,7 @@ Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) 
 
     const Sha256Digest layoutSignature = Sha256::Hash(layout.View());
     Sha256 hasher;
-    uint8 version[sizeof(uint32)] = {};
-    for (usize at = 0; at < sizeof(uint32); ++at) {
-        version[at] = static_cast<uint8>(MaterialShaderSetFormatVersion >> (at * 8));
-    }
-
-    hasher.Update(Span<const uint8>(version, sizeof(version)));
+    hasher.Update(head.View());
     hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>(value.source.Data()),
                                     value.source.ByteCount()));
     hasher.Update(Span<const uint8>(layoutSignature.bytes, Sha256Digest::Bytes));

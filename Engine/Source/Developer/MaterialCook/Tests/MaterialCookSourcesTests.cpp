@@ -13,8 +13,10 @@
 #include <Material/MaterialModule.h>
 #include <Material/ParameterCollection.generated.h>
 #include <Material/ParameterCollection.h>
+#include <MaterialCook/MaterialCookCatalog.h>
 #include <MaterialCook/MaterialCookSources.h>
 #include <MaterialCook/MaterialReferenceSync.h>
+#include <MaterialCook/MaterialTranslationKey.h>
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.generated.h>
 #include <MaterialSchema/Nodes/Color/ColorRampProperties.h>
 #include <MaterialSchema/Nodes/Functions/FunctionCallProperties.generated.h>
@@ -24,6 +26,8 @@
 #include <MaterialSchema/Nodes/Parameters/ParameterCollectionValueProperties.generated.h>
 #include <MaterialSchema/Nodes/Parameters/ParameterCollectionValueProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.generated.h>
+#include <MaterialSchema/Nodes/Texture/TextureObjectParameterProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureObjectProperties.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.generated.h>
 #include <MaterialSchema/Nodes/Texture/TextureSampleProperties.h>
@@ -34,7 +38,10 @@
 // 번역 입력 모으기·참조 동기화 시험이다(Docs/Design/MaterialSystem 12.8절 MS3c): 머티리얼 그래프 →
 // 함수 그래프의 참조 닫힘을 의존 열기로 열어 함수 snapshot·색 커브·atlas 행·텍스처 사실(종류·주소
 // 모드)·컬렉션 layout(UE base 배치)을 모으고, 참조가 (역할, AssetId) 순인지, 참조 동기화가 Hard
-// 필드를 채우고 두 번째는 바꾸지 않는지, 대조가 빠진 텍스처를 찾는지 본다.
+// 필드를 채우고 두 번째는 바꾸지 않는지, 대조가 빠진 텍스처를 찾는지 본다. 경계: opener 없음은
+// InvalidArgument, 함수 순환(F1 ↔ F2)은 끝나고, 텍스처 역할이 머티리얼을 가리키면 object null이다.
+// 실제 원천 키: 함수 그래프·커브·텍스처 사실·컬렉션 layout이 바뀌면 키가 바뀌고, 텍스처 파라미터
+// 기본값을 사실이 같은 다른 텍스처로 바꾸면 같다.
 using namespace rocks;
 namespace material_cook_sources_tests_file {
 
@@ -52,6 +59,13 @@ constexpr uint64 CollectionIdValue = 0x9a7;
 constexpr usize ChildScalars = 5;
 // 큐브 텍스처의 패키지 없는 id다(열기가 실패한다 — 없는 에셋).
 constexpr uint64 MissingIdValue = 0x9af;
+// 경계·키 시험의 에셋 id다.
+constexpr uint64 EdgeMaterialIdValue = 0x9b0;
+constexpr uint64 FirstFunctionIdValue = 0x9b1;
+constexpr uint64 SecondFunctionIdValue = 0x9b2;
+constexpr uint64 BrickTwinIdValue = 0x9b3;
+// 텍스처 파라미터 노드 id다(기본 텍스처를 바꿔 본다).
+constexpr Guid TextureParameterNodeId{0x40, 3};
 
 // 시험용 의존 열기다(AssetId → 패키지 handle — 없으면 NotFound).
 class TestOpener final : public CookDependencyOpener {
@@ -109,8 +123,8 @@ ObjectHandle MakeAsset(asset_test::AssetEnv& env, uint64 id, RootRef<Package>& p
 }
 
 template <typename Properties>
-bool AddNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid id,
-             StringView type, const Properties& properties) noexcept {
+bool SaveProperties(asset_test::AssetEnv& env, const Properties& properties,
+                    Array<uint8>& out) noexcept {
     ObjectRegistry& source = *env.source;
     auto lease = env.types.AcquireValueType(GeneratedType<Properties>::Id(), TypeKind::Struct);
     if (!lease) {
@@ -119,8 +133,17 @@ bool AddNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid
 
     auto saved =
         SaveStructRecord(env.allocator, source, source.OwnerAccess(), lease.Value(), &properties);
+    out.Clear();
+    return saved && out.TryAppend(saved.Value().View()).IsOk();
+}
+
+template <typename Properties>
+bool AddNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid id,
+             StringView type, const Properties& properties) noexcept {
+    ObjectRegistry& source = *env.source;
+    Array<uint8> saved(env.allocator);
     auto name = source.Names()->TryIntern(type);
-    if (!saved || !name) {
+    if (!SaveProperties(env, properties, saved) || !name) {
         return false;
     }
 
@@ -137,8 +160,32 @@ bool AddNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid
     node.id = id;
     node.type = name.Value();
     node.typeSchemaVersion = 1;
-    return node.properties.bytes.TryAppend(saved.Value().View()).IsOk() &&
+    return node.properties.bytes.TryAppend(saved.View()).IsOk() &&
            document.graphs[0].nodes.TryPushBack(Move(node)).IsOk();
+}
+
+// 노드 id의 속성을 바꿔 쓴다.
+template <typename Properties>
+bool SetNode(asset_test::AssetEnv& env, nodegraph::GraphDocument& document, Guid id,
+             const Properties& properties) noexcept {
+    for (nodegraph::GraphNode& node : document.graphs[0].nodes) {
+        if (node.id == id) {
+            return SaveProperties(env, properties, node.properties.bytes);
+        }
+    }
+
+    return false;
+}
+
+// 텍스처 객체 파라미터 속성이다(기본 텍스처만 다르게).
+material::TextureObjectParameterProperties TextureParameter(asset_test::AssetEnv& env,
+                                                            uint64 texture) noexcept {
+    ObjectRegistry& source = *env.source;
+    material::TextureObjectParameterProperties properties(source.ObjectAllocator());
+    properties.texture.assetId = asset_test::FixedId(texture);
+    properties.parameterName = source.Names()->TryIntern("Albedo").Value();
+    properties.parameterId = Guid{0x74, 1};
+    return properties;
 }
 
 } // namespace
@@ -326,6 +373,188 @@ TEST(MaterialCook_GatherAndSyncReferences) {
     REQUIRE(inSync);
     CHECK(!inSync.Value());
     CHECK(missing == asset_test::FixedId(BrickIdValue));
+}
+
+// 모으기 경계(opener 없음·함수 순환·잘못된 형)와 실제 원천 위 번역 키 무효화다.
+TEST(MaterialCook_GatherEdgesAndSourceKey) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    REQUIRE(RegisterMaterialTypes(env.modules));
+    REQUIRE(RegisterCurveAtlasTypes(env.modules));
+    ObjectRegistry& source = *env.source;
+    const ObjectAccessContext access = source.OwnerAccess();
+    TestOpener opener(env.allocator);
+
+    RootRef<Package> packages[8];
+    const ObjectHandle material =
+        MakeAsset<Material>(env, EdgeMaterialIdValue, packages[0], opener);
+    const ObjectHandle first =
+        MakeAsset<MaterialFunction>(env, FirstFunctionIdValue, packages[1], opener);
+    const ObjectHandle second =
+        MakeAsset<MaterialFunction>(env, SecondFunctionIdValue, packages[2], opener);
+    const ObjectHandle brick = MakeAsset<Texture2D>(env, BrickIdValue, packages[3], opener);
+    const ObjectHandle twin = MakeAsset<Texture2D>(env, BrickTwinIdValue, packages[4], opener);
+    const ObjectHandle sky = MakeAsset<TextureCube>(env, SkyIdValue, packages[5], opener);
+    const ObjectHandle curve = MakeAsset<ColorCurveAsset>(env, CurveIdValue, packages[6], opener);
+    const ObjectHandle collection =
+        MakeAsset<ParameterCollection>(env, CollectionIdValue, packages[7], opener);
+    REQUIRE(!material.IsNull() && !first.IsNull() && !second.IsNull() && !brick.IsNull() &&
+            !twin.IsNull() && !sky.IsNull() && !curve.IsNull() && !collection.IsNull());
+
+    REQUIRE(asset_test::WithBorrow<ColorCurveAsset>(
+        source, curve,
+        [&](ColorCurveAsset& value) noexcept { return value.r.TryAddKey(0.0f, 0.25f).IsOk(); }));
+    // F1 → F2 → F1 순환이다. F1은 색 커브도 쓴다.
+    REQUIRE(asset_test::WithBorrow<MaterialFunction>(
+        source, first, [&](MaterialFunction& value) noexcept {
+            material::FunctionCallProperties call(source.ObjectAllocator());
+            call.materialFunction.assetId = asset_test::FixedId(SecondFunctionIdValue);
+            material::ColorRampProperties ramp;
+            ramp.colorCurve.assetId = asset_test::FixedId(CurveIdValue);
+            value.graph.domain = source.Names()->TryIntern("MaterialFunction").Value();
+            return AddNode(env, value.graph, Guid{0x41, 1}, "Material.FunctionCall", call) &&
+                   AddNode(env, value.graph, Guid{0x41, 2}, "Material.ColorRamp", ramp);
+        }));
+    REQUIRE(asset_test::WithBorrow<MaterialFunction>(
+        source, second, [&](MaterialFunction& value) noexcept {
+            material::FunctionCallProperties call(source.ObjectAllocator());
+            call.materialFunction.assetId = asset_test::FixedId(FirstFunctionIdValue);
+            value.graph.domain = source.Names()->TryIntern("MaterialFunction").Value();
+            return AddNode(env, value.graph, Guid{0x42, 1}, "Material.FunctionCall", call);
+        }));
+    // 머티리얼: F1 호출, 텍스처 파라미터(기본 벽돌), 자기 자신을 가리키는 텍스처 샘플, 컬렉션.
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        material::FunctionCallProperties call(source.ObjectAllocator());
+        call.materialFunction.assetId = asset_test::FixedId(FirstFunctionIdValue);
+        material::TextureSampleProperties wrong(source.ObjectAllocator());
+        wrong.texture.assetId = asset_test::FixedId(EdgeMaterialIdValue);
+        material::ParameterCollectionValueProperties fog;
+        fog.collection.assetId = asset_test::FixedId(CollectionIdValue);
+        value.graph.domain = source.Names()->TryIntern("Material").Value();
+        return AddNode(env, value.graph, Guid{0x40, 1}, "Material.FunctionCall", call) &&
+               AddNode(env, value.graph, Guid{0x40, 2}, "Material.TextureSample", wrong) &&
+               AddNode(env, value.graph, TextureParameterNodeId, "Material.TextureObjectParameter",
+                       TextureParameter(env, BrickIdValue)) &&
+               AddNode(env, value.graph, Guid{0x40, 4}, "Material.ParameterCollectionValue", fog);
+    }));
+
+    // opener가 없으면 InvalidArgument다.
+    MaterialCookSources sources(env.allocator);
+    const MaterialCookGatherContext closed{&source, access, nullptr};
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        return sources.Gather(closed, value.graph).Error() == ErrorCode::InvalidArgument;
+    }));
+
+    // 순환은 끝나고 두 함수가 모두 있다. 텍스처 역할의 머티리얼은 object null이고 사실이 없다.
+    const MaterialCookGatherContext gather{&source, access, &opener};
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        return sources.Gather(gather, value.graph).IsOk();
+    }));
+    CHECK(sources.FindFunction(asset_test::FixedId(FirstFunctionIdValue).value) != nullptr);
+    CHECK(sources.FindFunction(asset_test::FixedId(SecondFunctionIdValue).value) != nullptr);
+    bool wrongSeen = false;
+    for (const MaterialCookReference& reference : sources.References()) {
+        if (reference.asset == asset_test::FixedId(EdgeMaterialIdValue)) {
+            wrongSeen = true;
+            CHECK(reference.role == material::MaterialAssetReferenceRole::Texture);
+            CHECK(reference.object.IsNull());
+        }
+    }
+
+    CHECK(wrongSeen);
+    CHECK(sources.FindTexture(asset_test::FixedId(EdgeMaterialIdValue).value) == nullptr);
+
+    // 실제 원천 위 키다(카탈로그는 Registry의 NamePool).
+    MaterialCookCatalog catalog(env.allocator, *source.Names());
+    REQUIRE(catalog.Initialize());
+    const material::MaterialTraitsDesc traits{};
+    auto keyNow = [&](Sha256Digest& out) noexcept {
+        return asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+            MaterialCookSources current(env.allocator);
+            if (!current.Gather(gather, value.graph)) {
+                return false;
+            }
+
+            MaterialTranslationKeyDesc desc;
+            desc.catalog = &catalog;
+            desc.registry = &source;
+            desc.access = access;
+            desc.root = &value.graph;
+            desc.traits = &traits;
+            desc.sources = &current;
+            auto key = ComputeMaterialTranslationKey(desc);
+            if (!key) {
+                return false;
+            }
+
+            out = key.Value();
+            return true;
+        });
+    };
+
+    Sha256Digest base;
+    REQUIRE(keyNow(base));
+    Sha256Digest again;
+    REQUIRE(keyNow(again));
+    CHECK(again == base);
+
+    // 커브 키 값을 바꾸면 다르다.
+    REQUIRE(asset_test::WithBorrow<ColorCurveAsset>(
+        source, curve,
+        [&](ColorCurveAsset& value) noexcept { return value.r.TryAddKey(1.0f, 0.5f).IsOk(); }));
+    Sha256Digest curveChanged;
+    REQUIRE(keyNow(curveChanged));
+    CHECK(!(curveChanged == base));
+
+    // 텍스처 사실(주소 모드)을 바꾸면 다르다.
+    REQUIRE(asset_test::WithBorrow<Texture2D>(source, brick, [&](Texture2D& value) noexcept {
+        value.addressX = TextureAddress::Mirror;
+        return true;
+    }));
+    Sha256Digest factsChanged;
+    REQUIRE(keyNow(factsChanged));
+    CHECK(!(factsChanged == curveChanged));
+
+    // 컬렉션 layout(scalar 하나 더)을 바꾸면 다르다.
+    REQUIRE(asset_test::WithBorrow<ParameterCollection>(
+        source, collection, [&](ParameterCollection& value) noexcept {
+            material::ScalarCollectionParameter scalar;
+            scalar.id = Guid{0x75, 1};
+            return value.scalars.TryPushBack(scalar).IsOk();
+        }));
+    Sha256Digest layoutChanged;
+    REQUIRE(keyNow(layoutChanged));
+    CHECK(!(layoutChanged == factsChanged));
+
+    // 함수 그래프(F2에 노드 하나)를 바꾸면 다르다.
+    REQUIRE(asset_test::WithBorrow<MaterialFunction>(
+        source, second, [&](MaterialFunction& value) noexcept {
+            material::TextureObjectProperties object;
+            object.texture.assetId = asset_test::FixedId(SkyIdValue);
+            return AddNode(env, value.graph, Guid{0x42, 2}, "Material.TextureObject", object);
+        }));
+    Sha256Digest functionChanged;
+    REQUIRE(keyNow(functionChanged));
+    CHECK(!(functionChanged == layoutChanged));
+
+    // 텍스처 파라미터 기본값을 사실이 같은 쌍둥이로 바꾸면 같고, 큐브로 바꾸면 다르다.
+    REQUIRE(asset_test::WithBorrow<Texture2D>(source, twin, [&](Texture2D& value) noexcept {
+        value.addressX = TextureAddress::Mirror;
+        return true;
+    }));
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        return SetNode(env, value.graph, TextureParameterNodeId,
+                       TextureParameter(env, BrickTwinIdValue));
+    }));
+    Sha256Digest twinDefault;
+    REQUIRE(keyNow(twinDefault));
+    CHECK(twinDefault == functionChanged);
+    REQUIRE(asset_test::WithBorrow<Material>(source, material, [&](Material& value) noexcept {
+        return SetNode(env, value.graph, TextureParameterNodeId, TextureParameter(env, SkyIdValue));
+    }));
+    Sha256Digest cubeDefault;
+    REQUIRE(keyNow(cubeDefault));
+    CHECK(!(cubeDefault == twinDefault));
 }
 #endif
 

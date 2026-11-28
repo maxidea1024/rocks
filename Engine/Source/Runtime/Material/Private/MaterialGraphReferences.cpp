@@ -111,6 +111,12 @@ Result<void> LayerReferences(const nodegraph::GraphNode& node, const TypeSchema&
     return Result<void>::Success();
 }
 
+// 참조를 선언한 노드 정의와 그 종류 Name이다.
+struct DeclaredNode {
+    Name type;
+    const material::MaterialNodeDefinition* definition = nullptr;
+};
+
 } // namespace
 
 Result<void> CollectMaterialGraphReferences(const NamePool& names,
@@ -118,6 +124,27 @@ Result<void> CollectMaterialGraphReferences(const NamePool& names,
                                             Array<MaterialGraphReference>& out) noexcept {
     auto layers = names.TryFind("Material.AttributeLayers");
     auto stack = names.TryFind("Material.LayerStack");
+    // 참조를 선언한 엔진 노드 정의와 그 Name이다(풀에 없는 이름은 문서에도 없다).
+    SystemAllocator scratch;
+    Array<DeclaredNode> declaredNodes(scratch);
+    for (const Span<const material::MaterialNodeDefinition> group :
+         material::BuiltinMaterialNodeGroups()) {
+        for (const material::MaterialNodeDefinition& definition : group) {
+            if (definition.assetReferences.IsEmpty() || definition.propertiesSchema == nullptr) {
+                continue;
+            }
+
+            auto type = names.TryFind(definition.type);
+            if (type) {
+                if (auto pushed =
+                        declaredNodes.TryPushBack(DeclaredNode{type.Value(), &definition});
+                    !pushed) {
+                    return pushed;
+                }
+            }
+        }
+    }
+
     for (const nodegraph::Graph& graph : document.graphs) {
         for (const nodegraph::GraphNode& node : graph.nodes) {
             const bool stacked = stack && node.type == stack.Value();
@@ -134,33 +161,25 @@ Result<void> CollectMaterialGraphReferences(const NamePool& names,
                 continue;
             }
 
-            // 엔진 노드 정의의 참조 선언이다(선언한 정의만 이름을 찾는다).
-            for (const Span<const material::MaterialNodeDefinition> group :
-                 material::BuiltinMaterialNodeGroups()) {
-                for (const material::MaterialNodeDefinition& definition : group) {
-                    if (definition.assetReferences.IsEmpty() ||
-                        definition.propertiesSchema == nullptr) {
-                        continue;
+            // 엔진 노드 정의의 참조 선언이다(선언한 정의의 이름은 호출마다 한 번 찾는다).
+            for (const DeclaredNode& declared : declaredNodes) {
+                if (!(node.type == declared.type)) {
+                    continue;
+                }
+
+                const material::MaterialNodeDefinition& definition = *declared.definition;
+                for (const material::MaterialAssetReferenceField& field :
+                     definition.assetReferences) {
+                    auto asset =
+                        NodeAssetReference(node, definition.propertiesSchema(), field.field);
+                    if (!asset) {
+                        return Result<void>::Failure(asset.Error());
                     }
 
-                    auto type = names.TryFind(definition.type);
-                    if (!type || !(node.type == type.Value())) {
-                        continue;
-                    }
-
-                    for (const material::MaterialAssetReferenceField& field :
-                         definition.assetReferences) {
-                        auto asset =
-                            NodeAssetReference(node, definition.propertiesSchema(), field.field);
-                        if (!asset) {
-                            return Result<void>::Failure(asset.Error());
-                        }
-
-                        if (auto added =
-                                Add(out, field.role, asset.Value().value, node.id, field.field);
-                            !added) {
-                            return added;
-                        }
+                    if (auto added =
+                            Add(out, field.role, asset.Value().value, node.id, field.field);
+                        !added) {
+                        return added;
                     }
                 }
             }

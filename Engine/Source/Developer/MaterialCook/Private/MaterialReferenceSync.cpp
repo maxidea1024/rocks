@@ -17,7 +17,7 @@ bool IsTextureRole(MaterialAssetReferenceRole role) noexcept {
            role == MaterialAssetReferenceRole::CurveAtlas;
 }
 
-// sources에서 역할이 맞는 열린 참조의 handle을 out에 모은다(AssetId 순 — sources 순서, 같은
+// sources에서 역할이 맞는 열린 참조의 handle을 out에 모은다((역할, AssetId) 순 — sources 순서, 같은
 // handle은 한 번).
 Result<void> HandlesOf(const MaterialCookSources& sources, bool textures,
                        Array<ObjectHandle>& out) noexcept {

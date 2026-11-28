@@ -6,6 +6,7 @@
 #include <MaterialCompiler/MaterialTranslationTarget.h>
 #include <MaterialCook/MaterialCookCatalog.h>
 #include <MaterialCook/MaterialCookSources.h>
+#include <MaterialSchema/MaterialAttributeTable.h>
 #include <MaterialSchema/MaterialTraitsDesc.h>
 #include <NodeGraph/GraphDocument.h>
 #include <Object/ObjectRegistry.h>
@@ -33,6 +34,8 @@ struct MaterialTranslationKeyDesc {
     Span<const material::MaterialStaticParameterValue> statics{};
     material::MaterialTranslationTarget target{};
     const MaterialCookSources* sources = nullptr;
+    // 번역에 넘기는 custom 속성 표다(null이면 내장 표만 — 번역 입력 attributes와 같은 값).
+    const material::MaterialAttributeTable* attributes = nullptr;
     // 키 공통 머리의 프로젝트 세대다(NuggetCache::ProjectGeneration).
     Guid projectGeneration{};
 };

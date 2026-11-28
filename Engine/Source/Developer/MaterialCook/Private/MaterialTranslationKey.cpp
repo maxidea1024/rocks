@@ -113,69 +113,128 @@ Result<void> WriteGraph(NuggetKeyWriter& writer, const MaterialCookCatalog& cata
     return Result<void>::Success();
 }
 
-// 노드 종류 목록이다(이름 순 — 엔진 노드 정의, 루트와 모은 그래프 전부에 쓰인 것).
-void WriteNodeTypes(NuggetKeyWriter& writer, const MaterialTranslationKeyDesc& desc) noexcept {
-    NamePool& names = desc.catalog->Names();
-    const auto used = [&](const material::MaterialNodeDefinition& definition) noexcept {
-        auto type = names.TryFind(definition.type);
-        if (!type) {
-            return false;
-        }
-
-        const auto inDocument = [&](const nodegraph::GraphDocument& document) noexcept {
-            for (const nodegraph::Graph& graph : document.graphs) {
-                for (const nodegraph::GraphNode& node : graph.nodes) {
-                    if (node.type == type.Value()) {
-                        return true;
-                    }
-                }
+// 문서에 쓰인 노드 종류 Name을 out에 더한다(중복 없음).
+Result<void> CollectUsedTypes(const nodegraph::GraphDocument& document, Array<Name>& out) noexcept {
+    for (const nodegraph::Graph& graph : document.graphs) {
+        for (const nodegraph::GraphNode& node : graph.nodes) {
+            bool seen = false;
+            for (Name existing : out) {
+                seen = seen || existing == node.type;
             }
 
-            return false;
-        };
-
-        if (inDocument(*desc.root)) {
-            return true;
-        }
-
-        for (usize index = 0; index < desc.sources->GraphCount(); ++index) {
-            const material::MaterialGraphSnapshot& snapshot = desc.sources->Graph(index);
-            if (snapshot.document != nullptr && inDocument(*snapshot.document)) {
-                return true;
-            }
-        }
-
-        return false;
-    };
-
-    // 정의 표는 정적이라 이름 순으로 고르며 쓴다(선택 정렬 — 수백 개).
-    StringView previous;
-    bool started = false;
-    for (;;) {
-        const material::MaterialNodeDefinition* next = nullptr;
-        for (const Span<const material::MaterialNodeDefinition> group :
-             material::BuiltinMaterialNodeGroups()) {
-            for (const material::MaterialNodeDefinition& definition : group) {
-                const bool after = !started || TextLess(previous, definition.type);
-                if (after && (next == nullptr || TextLess(definition.type, next->type)) &&
-                    used(definition)) {
-                    next = &definition;
+            if (!seen) {
+                if (auto pushed = out.TryPushBack(node.type); !pushed) {
+                    return pushed;
                 }
             }
         }
-
-        if (next == nullptr) {
-            break;
-        }
-
-        writer.WriteString(next->type);
-        writer.WriteU32(next->schemaVersion);
-        writer.WriteU32(next->loweringVersion);
-        previous = next->type;
-        started = true;
     }
 
-    writer.WriteNone();
+    return Result<void>::Success();
+}
+
+// 노드 종류 목록이다(이름 순 — 엔진 노드 정의, 루트와 모은 그래프 전부에 쓰인 것). 쓰인 Name 집합을
+// 한 번 모으고 정의를 한 번 훑어 고른 뒤 이름 순으로 정렬한다.
+Result<void> WriteNodeTypes(NuggetKeyWriter& writer,
+                            const MaterialTranslationKeyDesc& desc) noexcept {
+    NamePool& names = desc.catalog->Names();
+    SystemAllocator scratch;
+    Array<Name> used(scratch);
+    if (auto collected = CollectUsedTypes(*desc.root, used); !collected) {
+        return collected;
+    }
+
+    for (usize index = 0; index < desc.sources->GraphCount(); ++index) {
+        const material::MaterialGraphSnapshot& snapshot = desc.sources->Graph(index);
+        if (snapshot.document != nullptr) {
+            if (auto collected = CollectUsedTypes(*snapshot.document, used); !collected) {
+                return collected;
+            }
+        }
+    }
+
+    Array<const material::MaterialNodeDefinition*> picked(scratch);
+    for (const Span<const material::MaterialNodeDefinition> group :
+         material::BuiltinMaterialNodeGroups()) {
+        for (const material::MaterialNodeDefinition& definition : group) {
+            auto type = names.TryFind(definition.type);
+            if (!type) {
+                continue;
+            }
+
+            bool inUse = false;
+            for (Name name : used) {
+                inUse = inUse || name == type.Value();
+            }
+
+            if (inUse) {
+                if (auto pushed = picked.TryPushBack(&definition); !pushed) {
+                    return pushed;
+                }
+            }
+        }
+    }
+
+    for (usize index = 1; index < picked.Size(); ++index) {
+        for (usize at = index; at > 0 && TextLess(picked[at]->type, picked[at - 1]->type); --at) {
+            const material::MaterialNodeDefinition* swap = picked[at];
+            picked[at] = picked[at - 1];
+            picked[at - 1] = swap;
+        }
+    }
+
+    writer.WriteList(picked.Size());
+    for (const material::MaterialNodeDefinition* definition : picked) {
+        writer.WriteString(definition->type);
+        writer.WriteU32(definition->schemaVersion);
+        writer.WriteU32(definition->loweringVersion);
+    }
+
+    return Result<void>::Success();
+}
+
+// custom 속성 표 서명이다(null이면 "builtin", 아니면 등록 정의를 id 순으로 — 12.8절 키 세부).
+Result<void> WriteAttributes(NuggetKeyWriter& writer,
+                             const material::MaterialAttributeTable* table) noexcept {
+    if (table == nullptr) {
+        writer.WriteString("builtin");
+        return Result<void>::Success();
+    }
+
+    SystemAllocator scratch;
+    Array<const material::MaterialAttributeDefinition*> order(scratch);
+    for (usize index = 0; index < table->Size(); ++index) {
+        if (auto pushed = order.TryPushBack(&table->At(index)); !pushed) {
+            return pushed;
+        }
+    }
+
+    for (usize index = 1; index < order.Size(); ++index) {
+        for (usize at = index; at > 0 && GuidLess(order[at]->id, order[at - 1]->id); --at) {
+            const material::MaterialAttributeDefinition* swap = order[at];
+            order[at] = order[at - 1];
+            order[at - 1] = swap;
+        }
+    }
+
+    writer.WriteString("registered");
+    writer.WriteList(order.Size());
+    for (const material::MaterialAttributeDefinition* definition : order) {
+        writer.WriteGuid(definition->id);
+        writer.WriteString(definition->name);
+        writer.WriteU32(static_cast<uint32>(definition->type));
+        writer.WriteU32(definition->defaultValue.componentCount);
+        for (float value : definition->defaultValue.values) {
+            writer.WriteF32(value);
+        }
+
+        writer.WriteU32(static_cast<uint32>(definition->frequency));
+        writer.WriteBool(definition->hidden);
+        writer.WriteString(definition->customOutput);
+        writer.WriteU32(definition->customOutputIndex);
+    }
+
+    return Result<void>::Success();
 }
 
 // 텍스처 참조 위치 하나다(그래프 asset·노드 id·필드 순으로 정렬해 쓴다 — 저장 순서와 무관).
@@ -273,8 +332,10 @@ Result<void> WriteTextureSites(NuggetKeyWriter& writer,
 
 Result<Sha256Digest>
 ComputeMaterialTranslationKey(const MaterialTranslationKeyDesc& desc) noexcept {
+    // 키·모으기·hook은 같은 NamePool을 쓴다(다르면 노드 종류·참조 위치가 조용히 빈다).
     if (desc.catalog == nullptr || desc.registry == nullptr || desc.root == nullptr ||
-        desc.traits == nullptr || desc.sources == nullptr) {
+        desc.traits == nullptr || desc.sources == nullptr ||
+        desc.registry->Names() != &desc.catalog->Names()) {
         return Result<Sha256Digest>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -323,20 +384,37 @@ ComputeMaterialTranslationKey(const MaterialTranslationKeyDesc& desc) noexcept {
             }
         }
 
+        // 같은 parameterId가 둘이면 입력 오류다(합친 사슬은 하나여야 한다).
+        for (usize index = 1; index < order.Size(); ++index) {
+            if (order[index]->parameterId == order[index - 1]->parameterId) {
+                return Result<Sha256Digest>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
+        // 정규형: Bool은 값만, ComponentMask는 mask만 쓴다.
         writer.WriteList(order.Size());
         for (const material::MaterialStaticParameterValue* value : order) {
             writer.WriteGuid(value->parameterId);
             writer.WriteU32(static_cast<uint32>(value->kind));
-            writer.WriteBool(value->value);
-            for (bool channel : value->mask) {
-                writer.WriteBool(channel);
+            if (value->kind == material::MaterialStaticParameterKind::Bool) {
+                writer.WriteBool(value->value);
+            } else {
+                for (bool channel : value->mask) {
+                    writer.WriteBool(channel);
+                }
             }
         }
     }
 
     WriteTarget(writer, desc.target);
-    writer.WriteString("builtin");
-    WriteNodeTypes(writer, desc);
+    if (auto attributes = WriteAttributes(writer, desc.attributes); !attributes) {
+        return Result<Sha256Digest>::Failure(attributes.Error());
+    }
+
+    if (auto types = WriteNodeTypes(writer, desc); !types) {
+        return Result<Sha256Digest>::Failure(types.Error());
+    }
+
     writer.WriteU32(MaterialCommonContractVersion);
     writer.WriteU32(material::MaterialConstantProgramVersion);
     writer.WriteU32(material::MaterialShaderTraitsVersion);

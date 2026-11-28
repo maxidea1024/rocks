@@ -13,7 +13,7 @@ namespace rocks {
 struct MaterialCookGatherContext {
     ObjectRegistry* registry = nullptr;
     ObjectAccessContext access{};
-    // 참조 패키지 열기다(null이면 이미 열린 패키지만 쓴다 — 열리지 않은 참조는 없는 것으로 본다).
+    // 참조 패키지 열기다(필수 — 에디터는 열린 패키지 집합 위 opener를 준다, 12.8절).
     CookDependencyOpener* opener = nullptr;
 };
 

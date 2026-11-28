@@ -28,7 +28,7 @@ inline constexpr uint32 MaterialTranslationValueVersion = 1;
 // 값 part 수다(머리 포함).
 inline constexpr uint32 MaterialTranslationValueParts = 13;
 // 셰이더 집합 형식 버전이다(8.6절 — 바꾸면 모든 셰이더 집합 id가 바뀐다).
-inline constexpr uint32 MaterialShaderSetFormatVersion = 1;
+inline constexpr uint32 MaterialShaderSetFormatVersion = 2;
 
 // 성공한 번역·생성 결과에서 값을 만든다(out을 비우고 채운다). traits는 옮긴다. 루트 그래프 진단의
 // asset(rootAsset)은 null로 담는다. 파라미터 기본값과 파라미터 텍스처의 defaultAsset은 담지 않는다.

@@ -18,6 +18,16 @@ bool IsTranslucentBlend(BlendMode mode) noexcept {
     return mode != BlendMode::Opaque && mode != BlendMode::Masked;
 }
 
+// UE IsTranslucentOnlyBlendMode(Translucent·색 투과 — Rocks에 회색 투과 모드는 없다).
+bool IsTranslucentOnlyBlend(BlendMode mode) noexcept {
+    return mode == BlendMode::Translucent || mode == BlendMode::TranslucentColoredTransmittance;
+}
+
+// SingleLayerWater shading model 비트다(Renderer 14.2절 번호 — RenderData ShadingModel).
+constexpr uint32 SingleLayerWaterModels = 1u << static_cast<uint32>(ShadingModel::SingleLayerWater);
+// first person custom 출력 이름이다(6.11절 MS2d3 표 — UE HasFirstPersonOutput).
+constexpr StringView FirstPersonOutputName = "FirstPersonOutput";
+
 } // namespace
 
 Result<void> MakeMaterialShaderTraits(const MaterialTranslation& translation,
@@ -42,10 +52,20 @@ Result<void> MakeMaterialShaderTraits(const MaterialTranslation& translation,
     out.usesPdo = !detail::IsZeroIrResult(
         module, detail::FindIrResult(module, IrEntry::PixelDepthOffset, "PixelDepthOffset"));
     out.usesOpacityMask = desc.blendMode == BlendMode::Masked;
-    // UE 머티리얼 velocity 출력 조건(불투명은 정점 변형·픽셀 애니메이션, 반투명은 명시 표지).
+    // 메시 위치를 바꿀 수 있는가다(UE MaterialMayModifyMeshPosition — WPO·PDO·first person 출력,
+    // displacement는 아직 lowering하지 않는다).
+    bool firstPerson = false;
+    for (StringView name : translation.customOutputs) {
+        firstPerson = firstPerson || name == FirstPersonOutputName;
+    }
+
+    const bool movesMesh = out.usesWpo || out.usesPdo || firstPerson;
     out.writesVelocity =
-        translucent ? desc.outputTranslucentVelocity : out.usesWpo || desc.hasPixelAnimation;
-    out.castsShadow = !translucent || desc.castDynamicShadowAsMasked;
+        translucent ? desc.outputTranslucentVelocity : movesMesh || desc.hasPixelAnimation;
+    // UE ShouldCastDynamicShadows다.
+    out.castsShadow = translation.shadingModels != SingleLayerWaterModels &&
+                      (!translucent ||
+                       (IsTranslucentOnlyBlend(desc.blendMode) && desc.castDynamicShadowAsMasked));
     out.vertexFeatures = NoMaterialContextFeatures;
     out.pixelFeatures = NoMaterialContextFeatures;
     for (uint32 entry = 0; entry < IrEntryCount; ++entry) {
@@ -57,7 +77,10 @@ Result<void> MakeMaterialShaderTraits(const MaterialTranslation& translation,
 
     out.minimumTier = module.RequiredTier();
     out.engineDefaultMaterial = desc.engineDefaultMaterial;
-    out.quality = quality;
+    // 품질 칸을 읽지 않은 번역은 수준마다 같은 결과다(8.3절 — 셰이더 집합 id 공유).
+    out.quality = (translation.consultedTarget & ToMask(MaterialTargetField::Quality)) != 0
+                      ? quality
+                      : MaterialQualityLevel::None;
     out.customOutputs.Clear();
     for (StringView name : translation.customOutputs) {
         String text(out.customOutputs.GetAllocator());

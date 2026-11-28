@@ -39,8 +39,8 @@ public:
 
     // root 그래프에서 시작해 참조 닫힘을 모은다(앞서 모은 것을 비운다). 열지 못한 참조·역할
     // 클래스가 아닌 대상은 References에 object null로 남고 공급에서 빠진다(번역이 그 노드에서
-    // 진단한다). 오류: context의 registry가 null이면 InvalidArgument, Registry 조회 오류(열기 실패
-    // 밖), 할당 실패.
+    // 진단한다). 오류: context의 registry·opener가 null이면 InvalidArgument, Registry 조회
+    // 오류(열기 실패 밖), 할당 실패.
     Result<void> Gather(const MaterialCookGatherContext& context,
                         const nodegraph::GraphDocument& root) noexcept;
 
@@ -91,7 +91,7 @@ private:
     Result<void> AddTexture(const MaterialCookGatherContext& context, Guid asset,
                             ObjectHandle object) noexcept;
     Result<void> AddCollection(const MaterialCookGatherContext& context, Guid asset,
-                               ObjectHandle object) noexcept;
+                               ObjectHandle object, MaterialCookReference& reference) noexcept;
     void Clear() noexcept;
 
     Allocator* allocator_;

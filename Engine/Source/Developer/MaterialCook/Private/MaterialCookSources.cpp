@@ -79,8 +79,9 @@ namespace {
 
 // float4 하나에 묶는 scalar 수다(UE DivideAndRoundUp(ScalarParameters.Num(), 4)).
 constexpr uint32 ScalarsPerVector = 4;
-// 컬렉션 base 사슬 깊이 상한이다(순환 방어 — 정상 사슬은 몇 단계다).
-constexpr uint32 MaxCollectionChain = 64;
+// 참조 사슬(컬렉션 base·함수 인스턴스 부모) 깊이 상한이다(순환 방어 — 정상 사슬은 몇 단계다).
+// 넘으면 그 참조는 열지 못한 것으로 둔다(번역이 진단한다).
+constexpr uint32 MaxReferenceChain = 64;
 
 bool ReferenceLess(const MaterialCookReference& left, const MaterialCookReference& right) noexcept {
     if (left.role != right.role) {
@@ -156,7 +157,9 @@ void MaterialCookSources::Clear() noexcept {
 
 Result<void> MaterialCookSources::Gather(const MaterialCookGatherContext& context,
                                          const nodegraph::GraphDocument& root) noexcept {
-    if (context.registry == nullptr || context.registry->Names() == nullptr) {
+    // opener가 없으면 참조를 열 수 없다(열린 패키지만으로 모으면 참조 동기화가 필드를 지운다).
+    if (context.registry == nullptr || context.registry->Names() == nullptr ||
+        context.opener == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -247,10 +250,6 @@ Result<void> MaterialCookSources::Gather(const MaterialCookGatherContext& contex
 Result<void> MaterialCookSources::Visit(const MaterialCookGatherContext& context,
                                         MaterialCookReference& reference,
                                         Array<MaterialCookReference>& pending) noexcept {
-    if (context.opener == nullptr) {
-        return Result<void>::Success();
-    }
-
     AssetDiagnostic failure;
     auto package = context.opener->Open(reference.asset, &failure);
     if (!package) {
@@ -312,8 +311,7 @@ Result<void> MaterialCookSources::Visit(const MaterialCookGatherContext& context
             return Result<void>::Success();
         }
 
-        reference.object = object.Value();
-        return AddCollection(context, asset, object.Value());
+        return AddCollection(context, asset, object.Value(), reference);
     }
 
     return Result<void>::Success();
@@ -325,7 +323,7 @@ Result<void> MaterialCookSources::AddGraph(const MaterialCookGatherContext& cont
     ObjectRegistry& registry = *context.registry;
     // 함수 인스턴스는 기반 함수 그래프다(override 적용은 MS6 — 6.12절 MS2e2).
     ObjectHandle source = object;
-    for (uint32 depth = 0; !material && depth < MaxCollectionChain; ++depth) {
+    for (uint32 depth = 0; !material && depth < MaxReferenceChain; ++depth) {
         auto type = registry.AcquireType(context.access, source);
         if (!type) {
             return Result<void>::Failure(type.Error());
@@ -568,14 +566,16 @@ Result<void> MaterialCookSources::AddTexture(const MaterialCookGatherContext& co
 }
 
 Result<void> MaterialCookSources::AddCollection(const MaterialCookGatherContext& context,
-                                                Guid asset, ObjectHandle object) noexcept {
+                                                Guid asset, ObjectHandle object,
+                                                MaterialCookReference& reference) noexcept {
     // UE GetParameterIndex 배치: 가장 깊은 base부터 [scalar float4 묶음][vector]를 쌓고 자기 것이
     // 맨 끝이다(ParameterCollection.cpp:681–732).
     ObjectRegistry& registry = *context.registry;
     Array<ObjectHandle> chain(*allocator_);
     for (ObjectHandle current = object; !current.IsNull();) {
-        if (chain.Size() == MaxCollectionChain) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        // base 순환·너무 깊은 사슬은 열지 못한 참조다(번역이 컬렉션 없음으로 진단한다).
+        if (chain.Size() == MaxReferenceChain) {
+            return Result<void>::Success();
         }
 
         if (auto pushed = chain.TryPushBack(current); !pushed) {
@@ -633,6 +633,7 @@ Result<void> MaterialCookSources::AddCollection(const MaterialCookGatherContext&
     }
 
     collection.vectors = vector;
+    reference.object = object;
     return ownedCollections_.TryPushBack(Move(owned.Value()));
 }
 
