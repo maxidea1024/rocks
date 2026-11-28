@@ -618,6 +618,7 @@ internal static partial class CppEmitter
 
         EmitVisitFields(schema, type, native, $"::{{0}}", Line);
         EmitNotifyIds(type, native, Line);
+        EmitSetterOf(type, native, Line);
         Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept;");
         Body($"RuntimeTypeOps {self}::Ops(ModuleLease module) noexcept {{");
         Body($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
@@ -666,6 +667,9 @@ internal static partial class CppEmitter
                 // Notify 필드는 멤버 저장소 thunk를 끝 칸에 싣는다(readStaged·keyNativeType 뒤 — Docs/Design/ChangeNotification.ko.md
                 // CN-D10). Registry 참조·컨테이너 API가 받은 멤버 주소로 통지할 필드를 찾는다.
                 string storage = field.Spec.Notify ? $", detail::FieldStorage<{native}, {member}>" : "";
+                // 생성 setter thunk(Docs/Design/ChangeNotification.ko.md CN-D14)는 storage 뒤 끝 칸이다. 이 클래스가 선언한 ROCKS_SETTER
+                // 필드만 채운다 — 상속 필드는 등록이 기반 레코드의 함수표에서 물려받는다(기반의 생성 헤더가 이 소스에 보이지 않을 수 있다).
+                string setter = HasGeneratedSetter(type, field) ? $", GeneratedType<{native}>::template SetterOf<{member}>()" : "";
                 Body($"{{{GuidValue(field.Id)},");
                 if (field.IsMap || field.IsSet)
                 {
@@ -675,7 +679,7 @@ internal static partial class CppEmitter
                     Body("nullptr, {}, nullptr,");
                     string mapValueNative = ValueNativeType(schema, field);
                     string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
-                    string mapTail = storage.Length == 0 ? keyNative : (keyNative.Length == 0 ? ", nullptr, nullptr" : keyNative) + storage;
+                    string mapTail = Tail(keyNative, storage, setter);
                     EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + mapTail, Body);
                     return;
                 }
@@ -688,7 +692,7 @@ internal static partial class CppEmitter
                     // 4.6·5.6·7.1절, ReflectionExtensions.ko.md 6절). 멤버·원소 단위 접근은 경로 thunk가 한다.
                     Body("nullptr, {}, nullptr,");
                     string valueNative = ValueNativeType(schema, field);
-                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
+                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field) + Tail("", storage, setter), Body);
                     return;
                 }
 
@@ -716,11 +720,21 @@ internal static partial class CppEmitter
                 // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
                 // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
                 string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
-                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
+                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field) + Tail("", storage, setter), Body);
             }
 
-            // readStaged·keyNativeType(생성 코드는 싣지 않는다) 뒤의 storage 칸이다.
-            static string StorageTail(string storage) => storage.Length == 0 ? "" : ", nullptr, nullptr" + storage;
+            // path 뒤의 readStaged(생성 코드는 싣지 않는다)·keyNativeType·storage·setter 칸이다. keyNative는 Map의 ", nullptr, <키 native>"
+            // (readStaged·keyNativeType)이고, 뒤 칸이 있으면 앞 칸을 nullptr로 채운다.
+            static string Tail(string keyNative, string storage, string setter)
+            {
+                if (storage.Length == 0 && setter.Length == 0)
+                {
+                    return keyNative;
+                }
+
+                string head = keyNative.Length == 0 ? ", nullptr, nullptr" : keyNative;
+                return setter.Length == 0 ? head + storage : head + (storage.Length == 0 ? ", nullptr" : storage) + setter;
+            }
         }
 
         if (baseId is not null)
@@ -1515,6 +1529,70 @@ internal static partial class CppEmitter
         Line("}");
     }
 
+    // 멤버 → 생성 setter thunk 표다(Docs/Design/ChangeNotification.ko.md CN-D14 — RuntimeFieldOps::setter). 이 클래스가 선언한 ROCKS_SETTER
+    // 필드마다 인라인 람다가 생성 setter와 같은 순서(Notify면 접근 검사 → 같은 값이면 끝 → 대입 → Apply → 통지)로 하되 대입은 상자 값의
+    // 교환이다(사본 없음 — SetterAccess::AssignOwned). 람다는 GeneratedType<C>(C의 friend) 안이라 private 멤버·Apply도 부른다. 그 밖의
+    // 멤버는 nullptr다.
+    // 파생 클래스·다른 모듈의 생성 함수표가 상속 필드의 setter 칸을 이것으로 채운다. EditorOnly 필드의 항목은 조건 블록 안이다.
+    private static void EmitSetterOf(ClassModel type, string native, Action<string> Line)
+    {
+        Line("template <auto Member>");
+        Line("static constexpr FieldSetterFunction SetterOf() noexcept {");
+        foreach (AccessorModel setter in type.Accessors.Where(accessor => accessor.Setter))
+        {
+            FieldModel field = type.OwnFields.First(own => own.Name == setter.Field);
+            string member = $"&{native}::{field.Name}";
+            List<string> lines =
+            [
+                $"if constexpr (::rocks::detail::SameMemberV<Member, {member}>) {{",
+                "return +[](Object& object, void* value) noexcept -> Result<void> {",
+                .. SetterBody(type, native, field, $"AssignOwned<{member}>(object, *static_cast<decltype({native}::{field.Name})*>(value))"),
+                "};",
+                "}"
+            ];
+            Line(Guard(field, string.Join("\n", lines)));
+        }
+
+        Line("return nullptr;");
+        Line("}");
+    }
+
+    // 생성 setter 정의와 SetterOf thunk가 함께 쓰는 본문이다(두 쓰기 경로의 의미가 갈라지지 않게 한 곳에서 낸다 — CN-D13·CN-D14): object(이
+    // 객체 — ::rocks::Object&)에 대해 Notify면 접근 검사(Prepare) → assign(대입 호출 — 생성 setter는 사본 뒤 교환 Assign, thunk는 상자 값 교환
+    // AssignOwned) → 같은 값이면 끝 → Apply → Notify면 통지다. Apply는 템플릿 람다의 의존 requires로 모양을 보고(오버로드에서도 `void ()`
+    // noexcept 하나를 고르고 기반 클래스의 함수도 받는다 — decltype(&C::F)는 오버로드에서 ill-formed라 쓰지 않는다) 없으면 RMC2904 문구다.
+    private static List<string> SetterBody(ClassModel type, string native, FieldModel field, string assign)
+    {
+        string member = $"&{native}::{field.Name}";
+        List<string> lines = [$"using Access = ::rocks::detail::SetterAccess<decltype({member})>;"];
+        if (field.Spec.Notify)
+        {
+            lines.AddRange(["if (auto ready = Access::Prepare(object); !ready) {", "return ready;", "}"]);
+        }
+
+        lines.AddRange([
+            $"auto assigned = Access::template {assign};",
+            "if (!assigned) {", "return ::rocks::Result<void>::Failure(assigned.Error());", "}",
+            "if (!assigned.Value()) {", "return ::rocks::Result<void>::Success();", "}"]);
+        if (field.Spec.Apply.Length != 0)
+        {
+            string shape = $"requires {{ static_cast<void (Self::*)() noexcept>(&Self::{field.Spec.Apply}); }}";
+            lines.Add($"[]<class Self = {native}>(Self& self) noexcept {{");
+            lines.Add($"static_assert({shape}, \"Apply method {type.Name}::{field.Spec.Apply} must be 'void {field.Spec.Apply}() noexcept' of {type.Name} or a base (RMC2904)\");");
+            lines.Add($"if constexpr ({shape}) {{");
+            lines.Add($"(self.*static_cast<void (Self::*)() noexcept>(&Self::{field.Spec.Apply}))();");
+            lines.Add("}");
+            lines.Add($"}}(static_cast<{native}&>(object));");
+        }
+
+        lines.Add(field.Spec.Notify ? $"return Access::template Notify<{member}>(object);" : "return ::rocks::Result<void>::Success();");
+        return lines;
+    }
+
+    // field의 함수표 setter 칸을 SetterOf로 채울지다: type이 선언하고 ROCKS_SETTER가 있는 필드만이다(상속 필드는 등록이 기반에서 물려받는다).
+    private static bool HasGeneratedSetter(ClassModel type, FieldModel field) =>
+        field.Owner == type.Name && type.Accessors.Any(accessor => accessor.Setter && accessor.Field == field.Name);
+
     // 생성 setter 정의다(Docs/Design/ChangeNotification.ko.md CN-D13 — ROCKS_SETTER가 선언). Notify 필드면 대입 전 접근 검사(Prepare — 문맥·
     // 스레드·종료) → 같은 값이면 끝 → 대입(detail::SetterAccess::Assign — 사본 뒤 교환) → Apply → Notify 필드면 통지(실패는 그 오류 — Busy만 남는다). 매개변수 형식은 선언과 같은 detail::SetterParam<decltype(필드)>이다. EditorOnly
     // 필드의 setter는 필드와 같은 조건으로 감싼다. Apply 함수의 모양은 static_assert로 대조한다(RMC2904 — 오버로드·없는 이름은 컴파일 오류).
@@ -1528,30 +1606,10 @@ internal static partial class CppEmitter
             List<string> lines =
             [
                 $"auto {native}::{setter.Name}(::rocks::detail::SetterParam<decltype({native}::{field.Name})> value) noexcept -> ::rocks::Result<void> {{",
-                $"using Access = ::rocks::detail::SetterAccess<decltype({member})>;",
-                .. field.Spec.Notify
-                    ? (string[])["if (auto ready = Access::Prepare(*this); !ready) {", "return ready;", "}", ""]
-                    : [],
-                $"auto assigned = Access::template Assign<{member}>(*this, value);",
-                "if (!assigned) {",
-                "return ::rocks::Result<void>::Failure(assigned.Error());",
-                "}",
-                "",
-                "if (!assigned.Value()) {",
-                "return ::rocks::Result<void>::Success();",
-                "}",
-                ""
+                "::rocks::Object& object = *this;",
+                .. SetterBody(type, native, field, $"Assign<{member}>(object, value)"),
+                "}"
             ];
-            if (field.Spec.Apply.Length != 0)
-            {
-                // 오버로드가 있어도 `void ()` noexcept 하나를 고른다(없으면 RMC2904 문구의 static_assert — decltype(&C::F)는 오버로드에서
-                // ill-formed라 쓰지 않는다 — 템플릿 람다의 의존 requires라야 틀린 식이 오류 대신 거짓이 된다). 기반 클래스의 함수도 받는다(기반 멤버 포인터는 파생 멤버 포인터로 바뀐다).
-                lines.Add($"static_assert([]<class Self = {native}>() noexcept {{ return requires {{ static_cast<void (Self::*)() noexcept>(&Self::{field.Spec.Apply}); }}; }}(), \"Apply method {type.Name}::{field.Spec.Apply} must be 'void {field.Spec.Apply}() noexcept' of {type.Name} or a base (RMC2904)\");");
-                lines.Add($"(this->*static_cast<void ({native}::*)() noexcept>(&{native}::{field.Spec.Apply}))();");
-            }
-
-            lines.Add(field.Spec.Notify ? $"return Access::template Notify<{member}>(*this);" : "return ::rocks::Result<void>::Success();");
-            lines.Add("}");
             Body(Guard(field, SiteComment(type.Header, setter.Site.Line, $"{type.Name}::{setter.Name}") + "\n" + string.Join("\n", lines)));
         }
     }

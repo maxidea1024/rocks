@@ -22,6 +22,7 @@ void DetachedValue::Reset() noexcept {
     void* storage = storage_;
     const RuntimeValueOps* ops = ops_;
     storage_ = nullptr;
+    ++generation_;
     ops_ = nullptr;
     enter_ = nullptr;
     field_ = nullptr;
@@ -34,8 +35,22 @@ void DetachedValue::Reset() noexcept {
     // 값(옛 값일 수 있다)을 먼저 비운 상자 밖에서 소멸·반환하고 lease를 마지막에 놓는다(소멸 함수의
     // 코드 수명을 lease가 지킨다).
     ops->destroy(storage);
-    (void)allocator_->Deallocate(storage);
+    ReleaseStorage(storage);
     lease_.Reset();
+}
+
+Result<void*> DetachedValue::AcquireStorage(usize size, usize alignment) noexcept {
+    if (size <= DetachedInlineBytes && alignment <= DetachedInlineAlignment) {
+        return Result<void*>::Success(static_cast<void*>(inline_));
+    }
+
+    return allocator_->Allocate(size, alignment);
+}
+
+void DetachedValue::ReleaseStorage(void* storage) noexcept {
+    if (storage != static_cast<void*>(inline_)) {
+        (void)allocator_->Deallocate(storage);
+    }
 }
 
 Result<void> DetachedValue::ValidateTree() const noexcept {
@@ -57,7 +72,8 @@ void DetachedValue::ResetToDefault() noexcept {
 
 void PreparedAttach::Publish(ObjectBatchPublish& batch) noexcept {
     if (!IsReady() || kind_ != PathTarget::Kind::Object || !batch.IsActive() ||
-        !(batch.Owner() == owner_) || box_->storage_ != boxStorage_) {
+        !(batch.Owner() == owner_) || box_->storage_ != boxStorage_ ||
+        box_->generation_ != boxGeneration_) {
         platform::Fatal("Prepared attach needs the open batch of its owner and its detached value");
     }
 
@@ -71,7 +87,8 @@ Result<void> PreparedAttach::Publish() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (kind_ == PathTarget::Kind::Object || box_->storage_ != boxStorage_) {
+    if (kind_ == PathTarget::Kind::Object || box_->storage_ != boxStorage_ ||
+        box_->generation_ != boxGeneration_) {
         platform::Fatal("Prepared attach to a published object needs a batch publish section");
     }
 
@@ -137,7 +154,7 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
 
     DetachedValue& box = *box_;
     Allocator& allocator = box.GetAllocator();
-    auto memory = allocator.Allocate(ops.size, ops.alignment);
+    auto memory = box.AcquireStorage(ops.size, ops.alignment);
     if (!memory) {
         return Fail(memory.Error());
     }
@@ -153,13 +170,14 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
         // 실패 기록이 고정을 먼저 푼다 — 사본은 그 뒤에 반환한다.
         Record(copied.Error(), PropertyPathError::None);
         ops.destroy(storage);
-        (void)allocator.Deallocate(storage);
+        box.ReleaseStorage(storage);
         return copied;
     }
 
     ReleasePin();
     const PathFrame& frame = Frame();
     box.storage_ = storage;
+    ++box.generation_;
     box.ops_ = &ops;
     box.enter_ = enter;
     box.lease_ = Move(lease.Value());
@@ -191,6 +209,7 @@ Result<void> PathCursor::AttachValue(const RuntimeValueOps& ops, void* value) no
     out.bytes_ = ops.size;
     out.box_ = box_;
     out.boxStorage_ = box.storage_;
+    out.boxGeneration_ = box.generation_;
     out.owner_ = owner_;
     out.kind_ = root_;
     out.transaction_ = construction_;

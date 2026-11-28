@@ -734,6 +734,21 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
+    // setter 경유(Docs/Design/ChangeNotification.ko.md CN-D14): 게시된 객체의 변경이 setter 있는
+    // 최상위 필드를 지나면 ReadOnly(전파된 하위 플래그 포함)를 막지 않는다 — 쓰기는 setter로 가고
+    // setter가 검증한다. 최상위 단일 값은 등록된 write(FieldWriteOperation)가 setter로 보내고, 하위
+    // 경로는 검증(5·6단계) 뒤 hook 우회 자리에서 setter를 남긴다. Registry 참조 필드에는 setter가
+    // 없으므로 참조 자리·준비 사본·원소 준비물은 해당하지 않는다.
+    const bool viaSetter = cursor.redirectHooks_ && cursor.root_ == PathTarget::Kind::Object &&
+                           IsMutation(operation) && cursor.topOps_ &&
+                           cursor.topOps_->setter != nullptr && !cursor.reference_ &&
+                           !cursor.stage_ && !cursor.elements_;
+    if (viaSetter) {
+        for (usize index = 0; index < steps.Size(); ++index) {
+            cursor.frames_[index].effectiveFlags &= ~static_cast<uint32>(FieldFlags::ReadOnly);
+        }
+    }
+
     // 5. 참조 값(강한·weak)의 lease(FieldWriteOperation과 같은 순서 — 기대 타입, non-null 대상).
     // 완료까지 쥔다.
     cursor.current_ = last;
@@ -901,6 +916,14 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     // 지점 분류·검증(값싼 거부) 뒤, Borrow 직전이다. 쓰기 접근 판정(Busy·Destroyed·StaleHandle)은
     // 제자리 경로와 같은 순서·코드로 먼저 본다. 참조 자리·준비 사본·원소 준비물은 hook struct 안에
     // 없다(hook struct는 참조가 없다).
+    // setter 경유(CN-D14): 연산하지 않고 setter를 남긴다 — 진입점이 최상위 값을 상자로 분리해 같은
+    // 연산을 하고 setter로 넣는다(값 트리 검증 포함 — hook 상자를 따로 쓰지 않는다).
+    if (viaSetter) {
+        cursor.current_ = 0;
+        cursor.setter_ = cursor.topOps_->setter;
+        return Result<void>::Success();
+    }
+
     if (cursor.redirectHooks_ && objectRoot && IsMutation(operation) && !cursor.reference_ &&
         !cursor.stage_ && !cursor.elements_) {
         usize hook = FindHookStep(cursor.frames_, steps.Size(), steps.Size());
@@ -1127,6 +1150,122 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
     return Result<void>::Success();
 }
 
+// setter 있는 최상위 필드(path.steps[0])에 대한 게시된 객체 object의 변경이다(Docs/Design/
+// ChangeNotification.ko.md CN-D14 — UE CallSetter·PerformOperationWithSetter): 변경 표지를 읽고 →
+// 최상위 필드를 상자(지금 값의 깊은 사본 — ReadOnly 허용)로 분리 → 원래 경로 연산을 상자에 그대로
+// 한다(값 검증은 상자 위 경로가 같은 코드로) → 바뀐 것이 없는 연산(이미 있는 Set 원소의
+// InsertKey)이면 setter를 부르지 않는다 → 상자 값 트리의 검증 hook(거부는 InvalidArgument
+// (StructValidation)) → 분리 뒤 객체가 바뀌었으면 Busy(분리 중 재진입 변경을 덮지 않는다) → 쓰기
+// Borrow(encode 고정 중 Busy, 변경 표지 올림) 아래, 호출자의 접근 문맥을 실행 scope로 두고 setter
+// (상자 값을 교환으로 가져간다 — 사본 없음). 통지는 setter가 내고, 통지 묶음이 Borrow를 놓은 뒤에
+// 낸다(구독자가 쓰기 Borrow 아래에서 불리지 않게). 실패하면 출력 인자(output·length)는 그대로이고,
+// setter·변경 표지의 실패는 failure에 단계 0(사유 None)으로 남는다. changed는 setter를 불렀는지다.
+Result<void> RunThroughSetter(ObjectRegistry& registry, const ObjectAccessContext& access,
+                              ObjectHandle object, PropertyPath path, PathOperation operation,
+                              const FieldValue* input, FieldValue* output,
+                              PropertyPathFailure* failure, usize* length, TypeId instancedRequest,
+                              FieldSetterFunction setter, bool* changed) noexcept {
+    PathStep unitStep = path.steps[0];
+    unitStep.selector = PathSelector::None;
+    unitStep.index = 0;
+    const PropertyPath unit{Span<const PathStep>(&unitStep, 1), path.keys};
+    const auto atTop = [failure](ErrorCode error) noexcept {
+        if (failure) {
+            *failure = PropertyPathFailure{PropertyPathError::None, 0, 0};
+        }
+
+        return Result<void>::Failure(error);
+    };
+
+    NotifyGroup group;
+    if (auto opened = registry.BeginNotifyGroup(access); opened) {
+        group = Move(opened.Value());
+    }
+
+    auto stamp = registry.MutationStamp(access, object);
+    if (!stamp) {
+        return Result<void>::Failure(stamp.Error());
+    }
+
+    DetachedValue box(registry.ObjectAllocator());
+    if (auto detached = PathDetach(registry, access, object, unit, box, failure); !detached) {
+        return detached;
+    }
+
+    // 분리가 상자의 ReadOnly 허용을 원래 자리의 것으로 덮으므로 분리 뒤에 켠다.
+    box.AcceptReadOnlyWrites();
+
+    Optional<FieldValue> result;
+    if (output) {
+        result.Emplace(output->GetAllocator());
+    }
+
+    usize produced = 0;
+    bool setElement = false;
+    {
+        detail::PathCursor cursor =
+            PathRunner::Make(registry, access, PathTarget::Value(box), operation, input,
+                             result.HasValue() ? &result.Value() : nullptr, failure);
+        if (operation == PathOperation::SetInstancedType) {
+            PathRunner::BindInstancedRequest(cursor, instancedRequest);
+        }
+
+        if (auto ran = PathRunner::Run(cursor, path); !ran) {
+            return ran;
+        }
+
+        produced = PathRunner::Length(cursor);
+        setElement = PathRunner::EndsAtSetElement(cursor);
+    }
+
+    *changed = !(operation == PathOperation::InsertKey && produced == 0 && setElement);
+    if (*changed) {
+        if (auto checked = box.ValidateTree(); !checked) {
+            if (failure) {
+                failure->reason = PropertyPathError::StructValidation;
+                failure->step = 0;
+                failure->offset = 0;
+            }
+
+            return checked;
+        }
+
+        auto now = registry.MutationStamp(access, object);
+        if (!now) {
+            return atTop(now.Error());
+        }
+
+        if (now.Value() != stamp.Value()) {
+            return atTop(ErrorCode::Busy);
+        }
+
+        auto owner = registry.ResolveForWrite<Object>(access, object);
+        if (!owner) {
+            return atTop(owner.Error());
+        }
+
+        auto live = owner.Value().Get();
+        if (!live) {
+            return atTop(live.Error());
+        }
+
+        ObjectAccessScope scope(access);
+        if (auto set = setter(*live.Value(), PathRunner::BoxValue(box)); !set) {
+            return atTop(set.Error());
+        }
+    }
+
+    if (output) {
+        *output = Move(result.Value());
+    }
+
+    if (length) {
+        *length = produced;
+    }
+
+    return Result<void>::Success();
+}
+
 // 게시된 객체의 경로 변경이 끝난 뒤 최상위 필드를 알린다(Docs/Design/ChangeNotification.ko.md
 // CN-D10 — 하위 경로·컨테이너 변경은 비교 없이). 변경은 이미 성공했으므로 통지의 실패는 결과를
 // 바꾸지 않는다(접근·종료는 변경이 먼저 보았다).
@@ -1165,6 +1304,13 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
             return result;
         }
 
+        // setter 경유(CN-D14)는 setter가 알린다(같은 값 생략 — 경로 진입점이 다시 알리지 않는다).
+        if (const FieldSetterFunction setter = PathRunner::SetterRedirect(cursor)) {
+            bool changed = false;
+            return RunThroughSetter(registry, access, target.Object(), path, operation, input,
+                                    output, failure, length, instancedRequest, setter, &changed);
+        }
+
         hook = PathRunner::HookStep(cursor);
         if (hook == IndexNone) {
             if (length) {
@@ -1190,6 +1336,24 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
 
     return boxed;
 }
+
+} // namespace
+
+namespace detail {
+
+Result<void> WriteFieldThroughSetter(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                     ObjectHandle object, Guid fieldId, const FieldValue& value,
+                                     FieldSetterFunction setter) noexcept {
+    const PathStep step{fieldId, 0, PathSelector::None};
+    const PropertyPath path{Span<const PathStep>(&step, 1), {}};
+    bool changed = false;
+    return RunThroughSetter(registry, access, object, path, PathOperation::Write, &value, nullptr,
+                            nullptr, nullptr, TypeId{}, setter, &changed);
+}
+
+} // namespace detail
+
+namespace {
 
 // 결과가 Length 칸의 0·1인 연산(PathContains·PathInsertKey·PathIsOptionalSet)이다.
 Result<bool> RunQuery(ObjectRegistry& registry, const ObjectAccessContext& access,
