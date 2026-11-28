@@ -139,8 +139,18 @@ private:
         }
     }
 
+    // 줄마다 단조 시계 ms를 앞에 붙인다(같은 기기의 관리자 로그와 시간 축을 맞춘다 — 16.4절).
     void Log(const char* message) noexcept {
         if (log_.IsOpen()) {
+            char stamp[TimingLineBytes];
+            const int written =
+                snprintf(stamp, sizeof(stamp), "[%llu] ",
+                         static_cast<unsigned long long>(platform::MonotonicNanoseconds() /
+                                                         NanosecondsPerMillisecond));
+            if (written > 0 && static_cast<usize>(written) < sizeof(stamp)) {
+                (void)log_.WriteAll(stamp, static_cast<usize>(written));
+            }
+
             (void)log_.WriteAll(message, strlen(message));
             (void)log_.WriteAll("\n", 1);
         }
