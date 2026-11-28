@@ -2,8 +2,7 @@
 
 namespace rocks::ui {
 
-Result<SharedPtr<TextLabel>> EditableText::AddCaption(const Text& value, float size,
-                                                      bool error) noexcept {
+Result<SharedPtr<TextLabel>> EditableText::AddHint(const Text& value, float size) noexcept {
     if (!value.IsValid()) {
         return Result<SharedPtr<TextLabel>>::Success({});
     }
@@ -27,41 +26,33 @@ Result<SharedPtr<TextLabel>> EditableText::AddCaption(const Text& value, float s
         return Result<SharedPtr<TextLabel>>::Success({});
     }
 
-    if (error) {
-        ready = label.Value()->SetLayoutOptions(0, text::TextAlignment::Left, true);
-    } else {
-        ready = label_->CopyParagraphTo(*label.Value());
-    }
-
+    ready = label_->CopyParagraphTo(*label.Value());
     if (!ready) {
         return Result<SharedPtr<TextLabel>>::Failure(ready.Error());
     }
 
-    label.Value()->SetColor(error ? LinearColor{1, 0.3f, 0.26f, 1}
-                                  : LinearColor{0.65f, 0.67f, 0.7f, 1});
+    // 힌트는 물려받은 전경색 × 스타일 불투명도다(UE HintTextOpacity — SlateEditableTextLayout.cpp
+    // 3683행).
+    label.Value()->SetColor(ColorRef{ColorSource::Foreground});
+    (void)label.Value()->SetRenderOpacity(style_.hintOpacity);
     label.Value()->SetClipToBounds(true);
-    label.Value()->SetVisibility(error || label_->GetText().IsEmpty() ? Visibility::HitTestInvisible
-                                                                      : Visibility::Collapsed);
+    label.Value()->SetVisibility(label_->GetText().IsEmpty() ? Visibility::HitTestInvisible
+                                                             : Visibility::Collapsed);
     ready = TryAddChild(label.Value());
     return ready ? Move(label) : Result<SharedPtr<TextLabel>>::Failure(ready.Error());
 }
 
-void EditableText::PublishCaption(SharedPtr<TextLabel> next, bool error) noexcept {
-    auto& previous = error ? error_ : hint_;
-    if (previous) {
-        (void)RemoveChild(*previous);
+void EditableText::PublishHint(SharedPtr<TextLabel> next) noexcept {
+    if (hint_) {
+        (void)RemoveChild(*hint_);
     }
 
-    previous = Move(next);
+    hint_ = Move(next);
     InvalidateLayout();
 }
 
-Result<void> EditableText::SetCaption(const Text& value, bool error) noexcept {
-    if (error && !boxed_) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
-    }
-
-    auto copy = value.IsValid() ? value.DeepClone(allocator_) : Result<Text>::Success({});
+Result<void> EditableText::SetHintText(const Text& hint) noexcept {
+    auto copy = hint.IsValid() ? hint.DeepClone(allocator_) : Result<Text>::Success({});
     if (!copy) {
         return Result<void>::Failure(copy.Error());
     }
@@ -74,32 +65,20 @@ Result<void> EditableText::SetCaption(const Text& value, bool error) noexcept {
     }
 
     if (label_) {
-        auto caption = AddCaption(copy.Value(), fontSize_, error);
-        if (!caption) {
-            return Result<void>::Failure(caption.Error());
+        auto made = AddHint(copy.Value(), fontSize_);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
         }
 
-        PublishCaption(Move(caption.Value()), error);
+        PublishHint(Move(made.Value()));
     }
 
-    (error ? errorText_ : hintText_) = Move(copy.Value());
+    hintText_ = Move(copy.Value());
     return Result<void>::Success();
-}
-
-Result<void> EditableText::SetHintText(const Text& hint) noexcept {
-    return SetCaption(hint, false);
 }
 
 const Text& EditableText::HintText() const noexcept {
     return hintText_;
-}
-
-Result<void> EditableText::SetError(const Text& message) noexcept {
-    return SetCaption(message, true);
-}
-
-bool EditableText::HasError() const noexcept {
-    return errorText_.IsValid();
 }
 
 float EditableText::FontSize() const noexcept {
@@ -120,31 +99,24 @@ Result<void> EditableText::SetFontSize(float size) noexcept {
         return Result<void>::Success();
     }
 
-    // 세 텍스트 모두 새 크기로 준비되어야 교체한다. 준비 중인 자식은 실패하면 즉시 분리한다.
-    auto hint = AddCaption(hintText_, size, false);
+    // 두 글자 모두 새 크기로 준비되어야 교체한다. 준비 중인 힌트는 실패하면 즉시 분리한다.
+    auto hint = AddHint(hintText_, size);
     if (!hint) {
         return Result<void>::Failure(hint.Error());
     }
 
-    auto error = AddCaption(errorText_, size, true);
     // 조합 중이면 미리보기를 새 크기로 셰이핑한다(조합을 끊지 않는다).
-    auto ready = !error       ? Result<void>::Failure(error.Error())
-                 : composing_ ? ShapeText(preview_.View(), size, password_)
-                              : Shape(text_.View(), size, password_);
+    auto ready = composing_ ? ShapeText(preview_.View(), size, password_)
+                            : Shape(text_.View(), size, password_);
     if (!ready) {
         if (hint.Value()) {
             (void)RemoveChild(*hint.Value());
         }
 
-        if (error && error.Value()) {
-            (void)RemoveChild(*error.Value());
-        }
-
         return ready;
     }
 
-    PublishCaption(Move(hint.Value()), false);
-    PublishCaption(Move(error.Value()), true);
+    PublishHint(Move(hint.Value()));
     return Result<void>::Success();
 }
 

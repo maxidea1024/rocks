@@ -47,15 +47,17 @@ internal static class IdentityCommands
         {
             case "add":
                 {
-                    Allow("manifest", "type", "field", "function");
+                    Allow("manifest", "type", "field", "function", "subobject");
                     string path = ManifestPath(One("manifest"));
                     string[] types = Many("type");
                     string[] fields = Many("field");
                     // 리플렉션 함수(ROCKS_FUNCTION — `<클래스>::<함수>`, Docs/Design/FunctionReflection.ko.md FD3)다.
                     string[] functions = Many("function");
-                    if (types.Length + fields.Length + functions.Length == 0)
+                    // 선언 subobject 소유 필드(ROCKS_PROPERTY(Subobject) — Docs/Design/Prefab 10.2절)다.
+                    string[] subobjects = Many("subobject");
+                    if (types.Length + fields.Length + functions.Length + subobjects.Length == 0)
                     {
-                        throw new ArgumentException("Specify at least one --type, --field or --function.");
+                        throw new ArgumentException("Specify at least one --type, --field, --function or --subobject.");
                     }
 
                     StableIdManifest.Update(path, true, manifest =>
@@ -75,9 +77,14 @@ internal static class IdentityCommands
                             manifest.Register("function", name);
                         }
 
+                        foreach (string name in subobjects)
+                        {
+                            manifest.Register("subobject", name);
+                        }
+
                         return 0;
                     });
-                    Console.WriteLine($"Registered {types.Length} types, {fields.Length} fields and {functions.Length} functions in {path}.");
+                    Console.WriteLine($"Registered {types.Length} types, {fields.Length} fields, {functions.Length} functions and {subobjects.Length} subobjects in {path}.");
                     return 0;
                 }
             case "reissue":

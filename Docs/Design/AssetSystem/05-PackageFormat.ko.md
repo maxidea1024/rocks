@@ -7,7 +7,7 @@
 ```
 offset size 필드
 0      4    magic "RPKG"
-4      2    formatVersion (1)
+4      2    formatVersion (3 — 2는 A5c, 3은 sidecar 20절)
 6      2    headerBytes (64)
 8      4    flags: Editor(1) | Cooked(2) 중 정확히 하나
 12     4    sectionCount (1–32)
@@ -21,7 +21,7 @@ offset size 필드
 ```
 
 - 섹션 flags: `Required`(1) — 이 섹션을 모르는 reader는 패키지를 해석할 수 없다. `PerEntryChecksum`(2) — 섹션 표의 crc32 칸은 0이고 entry별 CRC로 검증(Bulk). 정의되지 않은 비트는 `CorruptPackage`. 알려진 kind의 flags는 5.2절 표로 고정이다.
-- 물리 순서는 kind 오름차순으로 고정한다: Summary(1) → Exports(2) → ObjectImports(3) → Dependencies(4) → Objects(5) → ImportRecord(6) → Tags(7) → Bulk(8) → BulkIndex(9) → 섹션 표. BulkIndex를 Bulk 뒤에 두어 스트리밍 기록 중 확정되는 압축 크기·CRC를 마지막에 쓴다. 빈 섹션 규칙은 5.2절 표(같은 내용 → 같은 바이트).
+- 물리 순서는 kind 오름차순으로 고정한다: Summary(1) → Exports(2) → ObjectImports(3) → Dependencies(4) → Objects(5) → ImportRecord(6) → Tags(7) → Bulk(8) → BulkIndex(9) → Sidecar(10 — 20.1 4) → 섹션 표. BulkIndex를 Bulk 뒤에 두어 스트리밍 기록 중 확정되는 압축 크기·CRC를 마지막에 쓴다. 빈 섹션 규칙은 5.2절 표(같은 내용 → 같은 바이트).
 - 검증 순서와 진단:
   1. 크기 ≥ 64, magic, headerCrc, flags(Editor·Cooked 중 정확히 하나, 정의되지 않은 비트 없음 — 버전 판정이 이 값에 달렸다). 실패는 `CorruptPackage`(버전 필드를 믿을 수 없다).
   2. `formatVersion`: 5.3절 규칙(`NewerVersion`·`UnsupportedVersion`).
@@ -49,8 +49,9 @@ offset size 필드
 | Objects(5) | ObjectSerialization graph v2 바이트 | Required | 항상 있음 | ○ | ○ |
 | ImportRecord(6) | Import Metadata(5.4절) | — | 생략(임포트하지 않은 에셋) | ○ | × |
 | Tags(7) | 인덱스 검색 태그 Record(타입이 정한 키→값, 키 정렬) | — | 생략 | ○ | × |
-| Bulk(8) | entry 본문(bulkAlignment 정렬, PerEntryChecksum) | Required·PerEntryChecksum | 생략(entry 없음) | ○ | ○ |
-| BulkIndex(9) | `{ bulkId(1부터 연속), flags(EditorOnly), offset(Bulk 섹션 시작 기준), storedBytes, rawBytes, codec(None=0·Zstd=1 — Zstd 저장 byte는 블록 컨테이너, 5.7절 6), crc32(저장 바이트), sha256(raw) }`. 검증: bulkId 순이며 offset도 증가, entry는 Bulk 섹션 안에서 겹치지 않고 entry 사이에는 bulkAlignment 정렬 패딩(0)만 있다, codec None이면 storedBytes = rawBytes, 쿠킹 패키지의 EditorOnly 표시는 0, Objects의 모든 `BulkDataRef`가 가리키는 bulkId가 있고 rawBytes·SHA-256이 같다 | Required | Bulk와 함께 생략 | ○ | ○ |
+| Bulk(8) | entry 본문(bulkAlignment 정렬, PerEntryChecksum) | Required·PerEntryChecksum | 생략(패키지 안 entry 없음 — 모든 bulk가 sidecar여도 생략, 20.1 4) | ○ | ○ |
+| BulkIndex(9) | `{ bulkId(1부터 연속), flags(EditorOnly·Sidecar — Sidecar는 쿠킹만, 20.1 4), offset(Bulk 섹션 시작 기준 — Sidecar 항목은 sidecar 파일 기준, 머리 64 byte 뒤), storedBytes, rawBytes, codec(None=0·Zstd=1 — Zstd 저장 byte는 블록 컨테이너, 5.7절 6), crc32(저장 바이트), sha256(raw) }`. 검증: bulkId 순이며 offset도 증가, entry는 Bulk 섹션 안에서 겹치지 않고 entry 사이에는 bulkAlignment 정렬 패딩(0)만 있다, codec None이면 storedBytes = rawBytes, 쿠킹 패키지의 EditorOnly 표시는 0, Objects의 모든 `BulkDataRef`가 가리키는 bulkId가 있고 rawBytes·SHA-256이 같다. 증가·정렬·겹침은 두 공간(Bulk 섹션·sidecar)마다 따로 보고, Sidecar 항목은 codec None·`Sidecar` 섹션 fileBytes 안이다 | Required | bulk가 없으면 생략 | ○ | ○ |
+| Sidecar(10) | `{ fileBytes u64, sha256, hashBlockBytes u32(64 KiB — 4 KiB–1 MiB의 2의 거듭제곱), hashCount u32(= ceil(fileBytes / hashBlockBytes)), 블록 SHA-256 × hashCount }`(20.1 4). 크기 = 48 + 32 × hashCount, fileBytes > 64(머리), 마지막 Sidecar 항목 끝 = fileBytes. SHA-256 값은 매니페스트 대조(10.1절 8)와 범위 읽기가 본다 | Required | Sidecar 항목이 없으면 생략 | × | ○ |
 
 ### 5.3 버전 축
 

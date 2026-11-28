@@ -14,6 +14,20 @@ void DemoTextInputClient::GetSelection(uint32& begin, uint32& length) const noex
     }
 }
 
+uint32 DemoTextInputClient::GetTextLength() const noexcept {
+    return context ? context->GetTextLength() : 0;
+}
+
+Result<void> DemoTextInputClient::GetText(uint32 begin, uint32 length,
+                                          Array<char16_t>& out) const noexcept {
+    if (!context) {
+        return length == 0 && begin == 0 ? Result<void>::Success()
+                                         : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return context->GetText(begin, length, out);
+}
+
 void DemoTextInputClient::SetSelection(uint32 begin, uint32 length) noexcept {
     if (context) {
         context->SetSelection(begin, length);
@@ -30,6 +44,14 @@ bool DemoTextInputClient::GetTextBounds(uint32 begin, uint32 length,
                                         Box2<float>& client) const noexcept {
     // UI 창 좌표가 client 물리 픽셀이다(19.2절 DPI).
     return context && context->GetTextBounds(begin, length, client);
+}
+
+bool DemoTextInputClient::GetScreenBounds(Box2<float>& client) const noexcept {
+    return context && context->GetScreenBounds(client);
+}
+
+Optional<uint32> DemoTextInputClient::GetCharacterIndexFromPoint(Vec2 client) const noexcept {
+    return context ? context->GetCharacterIndexFromPoint(client) : Optional<uint32>{};
 }
 
 void DemoTextInputClient::BeginComposition() noexcept {

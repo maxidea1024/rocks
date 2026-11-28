@@ -30,6 +30,7 @@
   },
   "features": ["compute", "vertexViewportLayerOutput", "debugPixelUav"],
   "deviceRequirements": [],
+  "platformClass": ["Pc"],
   "producers": [
     { "host": "macos-arm64", "systemTools": ["MetalToolchain"] },
     { "host": "windows-x64", "systemTools": ["MetalToolchain"] }

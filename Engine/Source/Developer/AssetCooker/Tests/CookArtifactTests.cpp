@@ -65,6 +65,13 @@ public:
     Result<void> Run(const CookArtifactRequest& request, CookArtifactSink& sink) noexcept override {
         ++runs;
         offered = request.reusable.Size();
+        packages = request.packages.Size();
+        packagesOrdered = true;
+        for (usize index = 1; index < request.packages.Size(); ++index) {
+            packagesOrdered = packagesOrdered && GuidLess(request.packages[index - 1]->asset.value,
+                                                          request.packages[index]->asset.value);
+        }
+
         sawEngineOnly = request.engineOnly;
         sawVerify = request.verifyNuggets;
         sawDevelopment = request.settings->cookDevelopmentShaders;
@@ -127,6 +134,9 @@ public:
     uint32 produced = 0;
     uint32 reused = 0;
     usize offered = 0;
+    // 마지막 Run이 받은 쿠킹 패키지 수와 AssetId 엄격 오름차순 여부다(ShaderSystem 16.5절 SSD87).
+    usize packages = 0;
+    bool packagesOrdered = false;
     bool sawDevelopment = false;
     ErrorCode unregisterDuring = ErrorCode::None;
     ErrorCode registerDuring = ErrorCode::None;
@@ -438,6 +448,9 @@ TEST(CookArtifact_PublishesAndReuses) {
 
     CHECK(manifest.Value().artifacts[0].name.View() == "Engine" &&
           manifest.Value().artifacts[0].formatId.View() == "D3D12_SM6");
+    // 단계는 이번 게시가 담을 패키지 전부를 AssetId 순으로 받는다.
+    CHECK(manifest.Value().entries.Size() > 1 &&
+          scene.stage.packages == manifest.Value().entries.Size() && scene.stage.packagesOrdered);
     CHECK(ReportHas(scene.project, "\"kind\":\"ShaderLibrary\"") &&
           ReportHas(scene.project, "\"reused\":false") &&
           ReportHas(scene.project, "\"name\":\"libraries\",\"value\":4"));
@@ -450,6 +463,9 @@ TEST(CookArtifact_PublishesAndReuses) {
           scene.stage.produced == 4 && again.bytesWritten == 0);
     REQUIRE(again.artifacts.Size() == 4);
     CHECK(again.artifacts[0].reused && ReportHas(scene.project, "\"reused\":true"));
+    // 재사용한 패키지도 목록에 있다(Cook이 불리지 않은 대상 — 16.5절 SSD87).
+    CHECK(again.reused > 0 && scene.stage.packages == manifest.Value().entries.Size() &&
+          scene.stage.packagesOrdered);
 
     // 게시 파일 손상: 그 항목은 후보가 아니고, 다시 만든 파일이 손상 파일을 교체한다.
     auto current = scene.Manifest();
@@ -497,6 +513,8 @@ TEST(CookArtifact_PartialAndVerify) {
     CHECK(partial.published && partial.partial && scene.ShaderFiles() == 8);
     auto manifest = scene.Manifest();
     REQUIRE(manifest && manifest.Value().artifacts.Size() == 4);
+    // 부분 쿠킹의 패키지 목록도 게시 전체다(다시 쿠킹한 것·재사용한 것, 병합할 이전 항목).
+    CHECK(scene.stage.packages == manifest.Value().entries.Size() && scene.stage.packagesOrdered);
     for (const CookedManifestArtifact& artifact : manifest.Value().artifacts) {
         CHECK(CheckCookedArtifactFile(artifact,
                                       scene.project.files.Bytes(scene.Published(artifact).View())));

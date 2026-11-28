@@ -349,7 +349,53 @@ struct ArtifactStageInputs {
     bool verifyNuggets = false;
     bool engineOnly = false;
     CookArtifactStageTable* stages = nullptr;
+    // 부분 쿠킹의 병합 대상(이전 매니페스트)과 지운 에셋(AssetId 오름차순)이다. 쿠킹 패키지 목록에
+    // 이전 항목을 더하는 데 쓴다(전체 쿠킹·엔진 전용은 null·빈다).
+    const CookedManifest* merge = nullptr;
+    Span<const AssetId> removed{};
 };
+
+bool PackageLess(const CookedManifestEntry* left, const CookedManifestEntry* right) noexcept {
+    return GuidLess(left->asset.value, right->asset.value);
+}
+
+// 단계에 넘길 쿠킹 패키지 목록(ShaderSystem 16.5절 SSD87)이다: 게시기의 이번 항목과, 부분 쿠킹이면
+// 이번에 바뀌지도 지워지지도 않은 이전 항목. AssetId 순이다.
+Result<void> CollectCookedPackages(const ArtifactStageInputs& request,
+                                   const CookPublisher& publisher,
+                                   Array<const CookedManifestEntry*>& out) noexcept {
+    const Span<const CookedManifestEntry> fresh = publisher.Entries();
+    const usize mergeCount = request.merge != nullptr ? request.merge->entries.Size() : 0;
+    if (auto reserved = out.TryReserve(fresh.Size() + mergeCount); !reserved) {
+        return reserved;
+    }
+
+    for (const CookedManifestEntry& entry : fresh) {
+        (void)out.TryPushBack(&entry);
+    }
+
+    algo::Sort(out.View(), PackageLess);
+    if (request.merge == nullptr) {
+        return Result<void>::Success();
+    }
+
+    const usize freshCount = out.Size();
+    for (const CookedManifestEntry& old : request.merge->entries) {
+        const bool replaced =
+            algo::BinarySearch(Span<const CookedManifestEntry* const>(out.Data(), freshCount), &old,
+                               PackageLess) != algo::NotFound;
+        const bool gone = algo::BinarySearch(request.removed, old.asset,
+                                             [](AssetId left, AssetId right) noexcept {
+                                                 return GuidLess(left.value, right.value);
+                                             }) != algo::NotFound;
+        if (!replaced && !gone) {
+            (void)out.TryPushBack(&old);
+        }
+    }
+
+    algo::Sort(out.View(), PackageLess);
+    return Result<void>::Success();
+}
 
 Result<void> RunArtifactStages(Allocator& allocator, const ArtifactStageInputs& request,
                                StringView root, const CookedManifest* previous,
@@ -392,6 +438,11 @@ Result<void> RunArtifactStages(Allocator& allocator, const ArtifactStageInputs& 
         }
     }
 
+    Array<const CookedManifestEntry*> packages(allocator);
+    if (auto collected = CollectCookedPackages(request, publisher, packages); !collected) {
+        return collected;
+    }
+
     StringBuilder<CookProjectInlineBytes> staging(allocator);
     const StringView stagingPieces[] = {root, "/", CookStagingDirectoryName};
     if (auto built = staging.TryAppendJoin(stagingPieces, ""); !built) {
@@ -409,6 +460,7 @@ Result<void> RunArtifactStages(Allocator& allocator, const ArtifactStageInputs& 
     artifactRequest.engineOnly = request.engineOnly;
     artifactRequest.verifyNuggets = request.verifyNuggets;
     artifactRequest.reusable = reusable.View();
+    artifactRequest.packages = packages.View();
     ArtifactStageSink sink(allocator, publisher, artifactRequest, *stage, result);
     Result<void> ran = Result<void>::Success();
     {
@@ -797,8 +849,11 @@ Result<void> CookProject(Allocator& allocator, const CookProjectRequest& request
 
     // 비에셋 산출물 단계는 에셋 오류가 있어도 돈다(보고서가 오류를 한 번에 모은다 — 10.3.1절 A4f3
     // 3번).
-    if (auto staged = RunArtifactStages(allocator, StageInputsOf(request), root.View(), previous,
-                                        publisher, result);
+    ArtifactStageInputs stageInputs = StageInputsOf(request);
+    stageInputs.merge = result.partial ? previous : nullptr;
+    stageInputs.removed = targets.removed.View();
+    if (auto staged =
+            RunArtifactStages(allocator, stageInputs, root.View(), previous, publisher, result);
         !staged) {
         return staged;
     }

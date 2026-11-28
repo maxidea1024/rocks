@@ -213,6 +213,7 @@ ShaderFormatFacts SampleFacts() noexcept {
     facts.limits.uniformVectors[1] = 224;
     facts.features = ShaderFeatureCompute | ShaderFeatureVertexViewportLayerOutput;
     facts.deviceRequirements = DeviceRequiresVulkan1_1;
+    facts.platformClasses = ShaderPlatformClassPc | ShaderPlatformClassMobile;
     return facts;
 }
 
@@ -814,7 +815,8 @@ TEST(ShaderCore_LibraryRoundTrip) {
     CHECK(view.Facts().backend == ShaderBackend::Vulkan &&
           view.Facts().shaderModel == facts.shaderModel);
     CHECK(view.Facts().features == facts.features &&
-          view.Facts().deviceRequirements == facts.deviceRequirements);
+          view.Facts().deviceRequirements == facts.deviceRequirements &&
+          view.Facts().platformClasses == facts.platformClasses);
     CHECK(memcmp(&view.Facts().limits, &facts.limits, sizeof(facts.limits)) == 0);
     CHECK(view.FormatDefinitionSha256() == Digest(0x11) && view.TypeSetSha256() == Digest(0x22));
     // 파일 SHA는 자기 칸을 0으로 둔 byte의 SHA다.
@@ -823,7 +825,9 @@ TEST(ShaderCore_LibraryRoundTrip) {
     memset(zeroed.Data() + FileShaAt, 0, Sha256Digest::Bytes);
     CHECK(view.FileSha256() == Sha256::Hash(zeroed.View()));
     // 머리 golden 몇 칸.
-    CHECK(memcmp(bytes.Data(), "RSHL", 4) == 0 && LoadLittleEndian<uint32>(bytes.Data() + 4) == 1);
+    CHECK(memcmp(bytes.Data(), "RSHL", 4) == 0 && LoadLittleEndian<uint32>(bytes.Data() + 4) == 2);
+    // v2(16.5절 SSD90): offset 115는 플랫폼 분류 비트다.
+    CHECK(bytes[115] == (ShaderPlatformClassPc | ShaderPlatformClassMobile));
     CHECK(bytes[8] == 1 &&
           LoadLittleEndian<uint64>(bytes.Data() + 192) == ShaderLibraryHeaderBytes);
     CHECK(bytes.Size() % ShaderLibraryAlignment == 0);
@@ -878,8 +882,30 @@ TEST(ShaderCore_LibraryRoundTrip) {
     view.Close();
     CHECK(!view.IsOpen());
     CHECK(StringView(ShaderLibraryKindName(ShaderLibraryKind::Engine)) == "Engine");
-    CHECK(ShaderLibraryKindOf(ShaderTypeOwner::ProjectPlugin) == ShaderLibraryKind::Project &&
-          ShaderLibraryKindOf(ShaderTypeOwner::EnginePlugin) == ShaderLibraryKind::Engine);
+    CHECK(ShaderLibraryKindOf(EngineShaderBundleId, ShaderTypeOwner::ProjectPlugin) ==
+              ShaderLibraryKind::Project &&
+          ShaderLibraryKindOf(EngineShaderBundleId, ShaderTypeOwner::EnginePlugin) ==
+              ShaderLibraryKind::Engine);
+    // 머티리얼 항목은 소속이 Engine이어도 묶음 id로 Project에 간다(16.5절 SSD85).
+    CHECK(ShaderLibraryKindOf(9, ShaderTypeOwner::Engine) == ShaderLibraryKind::Project);
+}
+
+TEST(ShaderCore_MaterialShaderBundleIdIsLittleEndianPrefix) {
+    // 묶음 id = 셰이더 집합 id 앞 8 byte(little-endian), 0이면 1(16.5절 SSD85).
+    Sha256Digest set = Digest(0xee);
+    for (usize index = 0; index < sizeof(uint64); ++index) {
+        set.bytes[index] = static_cast<uint8>(index + 1);
+    }
+
+    CHECK(MaterialShaderBundleId(set) == 0x0807060504030201ull);
+    CHECK(MaterialShaderBundleId(Sha256Digest{}) == EngineShaderBundleId + 1);
+    Sha256Digest zeroPrefix = Digest(0xab);
+    memset(zeroPrefix.bytes, 0, sizeof(uint64));
+    CHECK(MaterialShaderBundleId(zeroPrefix) == 1u);
+    // 앞 8 byte 밖은 묶음 id에 닿지 않는다(충돌은 쿠커가 진단한다 — SSD88).
+    Sha256Digest tail = set;
+    tail.bytes[sizeof(uint64)] ^= 0xff;
+    CHECK(MaterialShaderBundleId(tail) == MaterialShaderBundleId(set));
 }
 
 TEST(ShaderCore_LibraryBuildRejectsInvalidInput) {
@@ -908,6 +934,14 @@ TEST(ShaderCore_LibraryBuildRejectsInvalidInput) {
     CHECK(BuildRejects([](E&, D& d) noexcept { d.facts.backend = static_cast<ShaderBackend>(5); }));
     CHECK(BuildRejects([](E&, D& d) noexcept { d.facts.formatId[0] = '\0'; }));
     CHECK(BuildRejects([](E&, D& d) noexcept { d.facts.formatId[0] = '-'; }));
+    CHECK(BuildRejects([](E&, D& d) noexcept { d.facts.platformClasses = 1u << 7; }));
+    // Engine 라이브러리는 묶음 id 0만 담는다(표본의 넷째 항목은 묶음 9 — 16.5절 SSD85).
+    CHECK(BuildRejects([](E&, D& d) noexcept { d.kind = ShaderLibraryKind::Engine; }));
+    CHECK(!BuildRejects([](E& e, D& d) noexcept {
+        d.kind = ShaderLibraryKind::Engine;
+        e.entries[3].key.bundleId = EngineShaderBundleId;
+        e.entries[3].key.permutationId = 5;
+    }));
     // 대조: 정상 입력은 받는다.
     CHECK(!BuildRejects([](E&, D&) noexcept {}));
 }
@@ -1003,7 +1037,9 @@ TEST(ShaderCore_LibraryOpenRejectsCorruption) {
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[8] = 2; }, "header"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[9] = 1; }, "header"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[112] = 5; }, "header"));
-    CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[115] = 1; }, "header"));
+    CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[115] = 0x80; }, "platform classes"));
+    // Engine 라이브러리의 머티리얼 묶음 항목(표본은 Project — 종류만 바꾼다).
+    CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[8] = 0; }, "material bundle id"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[188] = 1; }, "header"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[16] = '-'; }, "format id"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[16 + 20] = 'X'; }, "format id"));
@@ -1015,8 +1051,8 @@ TEST(ShaderCore_LibraryOpenRejectsCorruption) {
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { b[224] += 8; }, "offsets"));
     CHECK(CorruptAfter([&](Array<uint8>& b) noexcept { (void)b.TryResize(b.Size() + 8); },
                        "offsets"));
-    // 버전은 SHA보다 먼저 본다.
-    bytes[4] = 2;
+    // 버전은 SHA보다 먼저 본다(v1은 더 읽지 않는다 — 16.5절 SSD90).
+    bytes[4] = 1;
     CHECK(view.Open(bytes.View()).error == ShaderReadError::UnsupportedVersion);
 }
 

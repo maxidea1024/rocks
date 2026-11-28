@@ -46,6 +46,15 @@ internal static class MetaProbeIdentity
             "probe::Thing::edited", "probe::Bell::rang", "probe::Quiet::rang", "probe::Thing::opened", "probe::Thing::pinged2",
             "probe::Note::rang"];
 
+    // 선언 subobject 시험(MetaTests.Subobjects)의 타입·필드·subobject다. legacy는 field로 등록해 kind 변경 거부를 본다.
+    private static readonly string[] SubobjectTypes = ["probe::Part", "probe::ScenePart", "probe::Owner", "probe::Sub", "probe::EdPart", "probe::AbsPart"];
+
+    private static readonly string[] SubobjectFields = ["probe::Part::count", "probe::ScenePart::parent", "probe::Owner::parts", "probe::Owner::root",
+        "probe::Owner::legacy", "probe::Owner::edRoot"];
+
+    private static readonly string[] SubobjectNames = ["probe::Owner::arm", "probe::Owner::body", "probe::Owner::plain", "probe::Sub::hand_",
+        "probe::Sub::hand"];
+
     public static void Create(string path)
     {
         StableIdManifest.Update(path, true, manifest =>
@@ -62,7 +71,7 @@ internal static class MetaProbeIdentity
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
                 "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow", "probe::Cell",
                 "probe::ViaAliasTemplate", "probe::ViaMemberTypedef", "probe::ViaDecltype", "probe::TwoTags", "probe::Tool" }
-                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes).Concat(FunctionTypes))
+                .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")).Concat(SparksBindingTypes).Concat(FunctionTypes).Concat(SubobjectTypes))
             {
                 manifest.Register("type", name);
             }
@@ -122,7 +131,7 @@ internal static class MetaProbeIdentity
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
                 "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
-                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields).Concat(EventFields))
+                .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")).Concat(SparksBindingFields).Concat(FunctionFields).Concat(EventFields).Concat(SubobjectFields))
             {
                 manifest.Register("field", name);
             }
@@ -130,6 +139,11 @@ internal static class MetaProbeIdentity
             foreach (string name in FunctionNames)
             {
                 manifest.Register("function", name);
+            }
+
+            foreach (string name in SubobjectNames)
+            {
+                manifest.Register("subobject", name);
             }
 
             return 0;

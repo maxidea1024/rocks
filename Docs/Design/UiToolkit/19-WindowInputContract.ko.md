@@ -136,7 +136,7 @@
   - 넘치면 남은 조합 갱신을 지운다(뒤의 조합·확정이 미리보기를 어차피 덮는다). 확정은 지우지 않는다.
   - 그래도 넘치면 남은 기록을 모두 버리고 '끝' 기록 하나를 넣는다. 창은 OS 조합을 취소하고(`CPS_CANCEL`) 경고 로그를 남긴다. 그 동안의 확정은 잃는다(한 프레임에 4096 code unit을 넘게 확정하는 IME는 없다고 본다).
   - 처음 안의 "게임 lane이 필요하면 키운다"는 버렸다. 고정 용량에서 넘침 규칙이 정해져 있고, 키우는 시점을 펌프 앞에 따로 둘 이유가 없다.
-- **TSF.** 같은 인터페이스 위의 UW4f3(병합 뒤)이다. TSF의 동기 질의는 펌프 중에만 받고, lane 대기 펌프 중이면 잠금 거부(`TS_E_SYNCHRONOUS`)로 답한다.
+- **TSF.** 같은 인터페이스 위의 UW4f3b다(세부 22.13절). TSF의 동기 질의는 창의 거울 문서로 답하고 수정은 기록으로 넘긴다(Mac과 같은 원칙). 그래서 펌프·대기 중 여부와 상관없이 UI를 고치지 않는다(원안의 "lane 대기 펌프면 `TS_E_SYNCHRONOUS`" 규칙은 버렸다).
 - **입력 이벤트에서 조합 문자열이 빠진다.**
   - `TextComposition`·`TextCompositionCommit` 이벤트와 `InputEvent::composition`을 지우고, `Text`(code point 하나)와 `TextInputMethod` 표지만 남긴다. UE도 IME 문자열은 이벤트가 아니라 context로 간다.
   - `InputEvent`는 trivially copyable이 된다(`static_assert`).

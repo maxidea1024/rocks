@@ -14,7 +14,8 @@
 // 목록 순서로 Engine 라이브러리 Produce, 같은 cookKey 재사용(Reuse), cookDevelopmentShaders 토글과
 // 형식 정의 변경의 cookKey 변화, verify 대조, 보고서 절, 형식 정의 대조 음성(없는 형식·자리만 둔
 // 형식·backend 다름·GLES31_PC — InvalidSetting, 컴파일 없음), 만들 수 없는 형식·job 실패·프로젝트
-// 소속 타입·등록부 원천 실패의 진단, 단계 표 등록. 실제 워커와 도구 저장소를 쓴다(없으면 SKIP).
+// 소속 타입·등록부 원천 실패의 진단, 단계 표 등록, 머티리얼 묶음의 Project 라이브러리(16.5절
+// SSD87·SSD88). 실제 워커와 도구 저장소를 쓴다(없으면 SKIP).
 namespace rocks::shader_cook_stage_test {
 
 using namespace rocks::shader_manager_test;
@@ -98,7 +99,8 @@ public:
     }
 
     Result<void> Produce(const CookArtifactOutput& output) noexcept override {
-        if (!(output.name == CookedArtifactEngineName) ||
+        if (!(output.name == CookedArtifactEngineName ||
+              output.name == CookedArtifactProjectName) ||
             !output.stagingFile.StartsWith(StringView(staging_), StringComparison::CaseSensitive)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -629,6 +631,224 @@ TEST(ShaderLibraryCookStage_DiagnosesUnavailableFormatsAndJobs) {
         request.profile = nullptr;
         CHECK(stage.Run(request, sink).Error() == ErrorCode::InvalidArgument);
     }
+}
+
+namespace {
+
+ROCKS_SHADER_TYPE_NAME(StageMaterialName, "CookStageMaterial");
+
+constexpr char StageMaterialSource[] = "#include \"/Engine/Generated/Material.rsh\"\n"
+                                       "float4 PSMain() : SV_Target { return MaterialColor(); }\n";
+constexpr char StageMaterialRed[] =
+    "float4 MaterialColor() { return float4(1.0, 0.0, 0.0, 1.0); }\n";
+
+constexpr ShaderTypeDesc MakeStageMaterial() noexcept {
+    ShaderTypeDesc desc =
+        MakeShaderTypeDesc(StageMaterialName, "/Plugin/CookStage/Material.rsf", "PSMain",
+                           ShaderStagePixel, ShaderTypeOwner::EnginePlugin);
+    desc.flags = ShaderTypeMaterialShader;
+    return desc;
+}
+
+constexpr ShaderTypeDesc StageMaterial = MakeStageMaterial();
+
+// 시험 머티리얼 AssetId다.
+AssetId StageAsset(uint64 low) noexcept {
+    return AssetId{Guid{0, low}};
+}
+
+// 고정 묶음 원천이다(16.5절 SSD87 — 실제 원천은 MaterialCook). 받은 패키지 수를 기록한다.
+class FixedBundleSource final : public MaterialShaderBundleSource {
+public:
+    Result<void> Collect(const CookArtifactRequest& request,
+                         MaterialShaderBundleSink& sink) noexcept override {
+        ++calls;
+        packages = request.packages.Size();
+        if (fail) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+
+        if (reportPackage) {
+            CookDiagnostic diagnostic;
+            diagnostic.asset = StageAsset(11);
+            diagnostic.error = ErrorCode::NotFound;
+            if (auto reported = sink.Report(diagnostic); !reported) {
+                return reported;
+            }
+        }
+
+        for (const MaterialShaderBundle& bundle : bundles) {
+            if (auto added = sink.Add(bundle); !added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    Span<const MaterialShaderBundle> bundles;
+    bool fail = false;
+    bool reportPackage = false;
+    uint32 calls = 0;
+    usize packages = 0;
+};
+
+Sha256Digest StageSetId(uint8 fill, uint8 tail = 0) noexcept {
+    Sha256Digest digest;
+    memset(digest.bytes, fill, sizeof(digest.bytes));
+    digest.bytes[Sha256Digest::Bytes - 1] ^= tail;
+    return digest;
+}
+
+MaterialShaderBundle StageBundle(const Sha256Digest& set, uint64 asset) noexcept {
+    MaterialShaderBundle bundle;
+    bundle.formatId = "D3D12_SM6";
+    bundle.shaderSetId = set;
+    bundle.materialSource = StringView(StageMaterialRed);
+    bundle.asset = StageAsset(asset);
+    return bundle;
+}
+
+bool HasAssetDiagnostic(const RecordingSink& sink, ErrorCode error, AssetId asset,
+                        AssetId related) noexcept {
+    for (const CookDiagnostic& diagnostic : sink.diagnostics) {
+        if (diagnostic.code == AssetDiagnosticCode::None && diagnostic.error == error &&
+            diagnostic.asset == asset && diagnostic.related == related && !diagnostic.warning) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+} // namespace
+
+// Project 라이브러리 단계(16.5절 SSD87·SSD88): 원천이 받은 쿠킹 패키지, Engine 뒤 Project Produce,
+// 묶음 id 항목, 재사용, 충돌 진단(asset·related)과 Project 미생성, 원천의 패키지 진단 전달, 원천
+// 없음·엔진 전용은 Project 없음, 원천 실패의 DependencyFailed, 원천 표의 사용 중 Busy.
+TEST(ShaderLibraryCookStage_BuildsProjectLibraryFromMaterialBundles) {
+    StageCase test;
+    const char* skip = nullptr;
+    if (!test.Make("cookstagematerial", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderLibraryCookStage_BuildsProjectLibraryFromMaterialBundles: %s\n",
+                   skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Plugin/Material.rsf", StageMaterialSource));
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&StagePixel, &StageMaterial};
+    REQUIRE(registry.Register(types));
+    REQUIRE(registry.Freeze());
+    FixedRegistrySource registrySource(registry);
+    FixedBundleSource bundles;
+    const Sha256Digest red = StageSetId(0x31);
+    const MaterialShaderBundle one[] = {StageBundle(red, 7)};
+    bundles.bundles = one;
+    ShaderLibraryCookStageConfig config = test.Config(registrySource);
+    config.bundles = &bundles;
+    ShaderLibraryCookStage stage(config);
+    TargetProfile profile(TestAllocator());
+    REQUIRE(profile.id.TryAssign("Windows"));
+    REQUIRE(AddBackend(profile, "D3D12", {"D3D12_SM6"}));
+    CookSettings settings(TestAllocator());
+
+    // 쿠킹 패키지 둘을 원천에 넘긴다(이번 게시 항목 — 원천이 머티리얼 패키지를 읽는다).
+    CookedManifestEntry firstPackage(TestAllocator());
+    CookedManifestEntry secondPackage(TestAllocator());
+    firstPackage.asset = StageAsset(1);
+    secondPackage.asset = StageAsset(2);
+    const CookedManifestEntry* const packages[] = {&firstPackage, &secondPackage};
+    CookArtifactRequest request = test.Request(profile, settings);
+    request.packages = packages;
+
+    // 1. Engine 뒤에 Project를 만든다. Project 항목의 키는 묶음 id다.
+    RecordingSink first(test.staging);
+    REQUIRE(stage.Run(request, first));
+    CHECK(first.diagnostics.IsEmpty());
+    CHECK(bundles.calls == 1 && bundles.packages == 2);
+    REQUIRE(first.produced.Size() == 2);
+    CHECK(first.produced[0].name.View() == CookedArtifactEngineName &&
+          first.produced[1].name.View() == CookedArtifactProjectName &&
+          first.produced[1].formatId.View() == "D3D12_SM6");
+    ShaderLibraryView engineView;
+    REQUIRE(engineView.Open(first.produced[0].bytes.View()));
+    CHECK(engineView.Kind() == ShaderLibraryKind::Engine && engineView.EntryCount() == 1);
+    ShaderLibraryView projectView;
+    REQUIRE(projectView.Open(first.produced[1].bytes.View()));
+    ShaderLibraryEntry entry;
+    CHECK(projectView.Kind() == ShaderLibraryKind::Project && projectView.EntryCount() == 1 &&
+          projectView.Find(ShaderLibraryKey{MaterialShaderBundleId(red), StageMaterialName.hash,
+                                            NoVertexInputType, 0},
+                           entry));
+    CHECK(first.Stat("materialBundles") == 1 && first.Stat("projectEntries") == 1 &&
+          first.Stat("entries") == 2);
+
+    // 2. 같은 입력이면 둘 다 재사용한다.
+    Array<CookedManifestArtifact> candidates(TestAllocator());
+    REQUIRE(ToCandidates(first, candidates));
+    CookArtifactRequest reuse = test.Request(profile, settings, candidates.View());
+    reuse.packages = packages;
+    RecordingSink again(test.staging);
+    REQUIRE(stage.Run(reuse, again));
+    CHECK(again.diagnostics.IsEmpty() && again.produced.IsEmpty() && again.reused.Size() == 2);
+
+    // 3. 앞 8 byte가 같은 두 집합: 충돌 진단(asset·related) 하나, Project는 만들지 않는다. 원천의
+    //    패키지 진단은 그대로 전달된다.
+    const MaterialShaderBundle colliding[] = {StageBundle(red, 9),
+                                              StageBundle(StageSetId(0x31, 0x01), 5)};
+    bundles.bundles = colliding;
+    bundles.reportPackage = true;
+    RecordingSink collided(test.staging);
+    REQUIRE(stage.Run(request, collided));
+    CHECK(HasAssetDiagnostic(collided, ErrorCode::AlreadyExists, StageAsset(5), StageAsset(9)));
+    CHECK(HasAssetDiagnostic(collided, ErrorCode::NotFound, StageAsset(11), AssetId{}));
+    CHECK(collided.diagnostics.Size() == 2);
+    REQUIRE(collided.produced.Size() == 1);
+    CHECK(collided.produced[0].name.View() == CookedArtifactEngineName);
+    bundles.reportPackage = false;
+
+    // 4. 원천 실패는 DependencyFailed 하나이고 Project는 없다(Engine은 만든다).
+    bundles.fail = true;
+    RecordingSink failed(test.staging);
+    REQUIRE(stage.Run(request, failed));
+    CHECK(failed.diagnostics.Size() == 1 &&
+          HasDiagnostic(failed, AssetDiagnosticCode::None, ErrorCode::DependencyFailed, 0));
+    CHECK(failed.produced.Size() == 1);
+    bundles.fail = false;
+
+    // 5. 엔진 전용 쿠킹은 원천을 부르지 않는다.
+    const uint32 callsBefore = bundles.calls;
+    CookArtifactRequest engineOnly = request;
+    engineOnly.engineOnly = true;
+    RecordingSink engine(test.staging);
+    REQUIRE(stage.Run(engineOnly, engine));
+    CHECK(bundles.calls == callsBefore && engine.produced.Size() == 1 &&
+          engine.Stat("materialBundles") == NumericLimits<uint64>::Max());
+
+    // 6. 원천이 없으면(표가 비었다) Project도, 그 보고서 값도 없다. 표에 등록한 원천은 단계가 도는
+    //    동안 Busy이고 단계가 그 원천을 쓴다.
+    ShaderLibraryCookStage tableStage(test.Config(registrySource));
+    RecordingSink noSource(test.staging);
+    REQUIRE(MaterialShaderBundleSources().Current() == nullptr);
+    REQUIRE(tableStage.Run(request, noSource));
+    CHECK(noSource.diagnostics.IsEmpty() && noSource.produced.Size() == 1 &&
+          noSource.Stat("projectEntries") == NumericLimits<uint64>::Max());
+    bundles.bundles = one;
+    REQUIRE(MaterialShaderBundleSources().Register(bundles));
+    FixedBundleSource other;
+    CHECK(MaterialShaderBundleSources().Register(other).Error() == ErrorCode::AlreadyExists);
+    RecordingSink fromTable(test.staging);
+    REQUIRE(tableStage.Run(request, fromTable));
+    CHECK(fromTable.produced.Size() == 2 && !MaterialShaderBundleSources().InUse());
+    MaterialShaderBundleSources().BeginUse();
+    CHECK(MaterialShaderBundleSources().Unregister(bundles).Error() == ErrorCode::Busy);
+    MaterialShaderBundleSources().EndUse();
+    CHECK(MaterialShaderBundleSources().Unregister(other).Error() == ErrorCode::NotFound);
+    REQUIRE(MaterialShaderBundleSources().Unregister(bundles));
 }
 
 } // namespace rocks::shader_cook_stage_test

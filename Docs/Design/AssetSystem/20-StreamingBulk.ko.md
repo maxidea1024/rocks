@@ -1,4 +1,4 @@
-## 20. 스트리밍 bulk(sidecar)와 범위 읽기 — PR12(2026-11-28, 구현 전 기록, 설계 교차 검증 반영 개정 1)
+## 20. 스트리밍 bulk(sidecar)와 범위 읽기 — PR12(2026-11-28, 설계 교차 검증 반영 개정 1, PR12a 구현 리뷰 반영 개정 2)
 
 오디오 AU6b(AudioSystem 3.12·3.40절)는 3분 곡의 첫 음을 내기 전에 플랫폼 데이터 전체를 읽지 않아야 한다. 그러려면 쿠킹된 압축 청크가 패키지 밖에 있고, 재생 중에 필요한 범위만 비동기로 읽을 수 있어야 한다. 지금 런타임은 쿠킹 패키지를 통째로 읽고 `Prepare`가 모든 bulk를 풀어 `Package`가 갖는다(`PackageBulkMode::Decode` — 5절 10번·11절). 이 절이 그 기반(PR12 — AudioSystem 06-Phases 표의 선행)을 정한다.
 
@@ -18,10 +18,11 @@
 4. **패키지 포맷**(5절 — `formatVersion` 올림, 옛 판은 `UnsupportedVersion`): 
    - BulkIndex 항목 flag `Sidecar`(bit 1). Sidecar 항목의 offset은 sidecar 파일 안 위치(머리 뒤 bulkAlignment 정렬), storedBytes = rawBytes(codec None), crc32·sha256은 지금 뜻 그대로다. offset 증가·정렬 규칙은 두 공간(패키지 Bulk 섹션·sidecar)마다 따로 적용한다.
    - 새 섹션 `Sidecar(10)`(Required — Sidecar 항목이 있으면 필수, 없으면 생략): `{ fileBytes u64, sha256 (32), hashBlockBytes u32, hashCount u32, blockSha256 × hashCount }`. 블록 해시는 sidecar 파일 전체를 hashBlockBytes(64 KiB — UE IoStore 압축 블록과 같은 크기) 단위로 나눈 SHA-256이다(마지막 블록은 짧다). 패키지 SHA(매니페스트)가 이 섹션을 덮으므로 서명 사슬(ContentSigning — 매니페스트 서명이 패키지 byte를 모두 묶는다)이 sidecar byte까지 이어진다.
+   - 섹션 존재: BulkIndex는 Bulk 또는 Sidecar 섹션이 있을 때만 있다(둘 다 없는 BulkIndex는 `CorruptPackage` — 부분 읽기도 표 단계에서 거부), 에디터 패키지는 Sidecar 섹션이 없고 Bulk ⇔ BulkIndex다. rawBytes 0인 bulk는 Sidecar를 골라도 패키지 안에 둔다(읽을 byte가 없다 — sidecar fileBytes > 머리 규칙을 정렬과 무관하게 지킨다, 구현 리뷰 반영).
    - 모든 bulk가 Sidecar면 Bulk 섹션은 없고 BulkIndex만 있다(5절 53행 "Bulk와 함께 생략" 규칙을 고친다). `PackageKnownSectionKinds`는 10이 된다.
    - `bulkRawBytes`(10.1절 28)는 **패키지 안 entry의 rawBytes 합**으로 뜻을 바꾼다. sidecar 크기는 매니페스트 `sidecarBytes`로 따로 센다.
 5. **매니페스트 v3**(10.3절 4의 v2를 대체 — v2 reader는 두지 않는다): 항목에 `sidecarBytes u64 | sidecarSha256 (32)`를 더한다. 0 byte면 SHA도 0이어야 한다(아니면 `CorruptPackage`). 진단 칸 `SidecarBytes`·`SidecarSha256`. 패키지 `Sidecar` 섹션의 fileBytes·sha256이 매니페스트와 다르면 `CorruptPackage`다(`CheckCookedPackageContents`).
-6. **쿠킹**: bulk 배치는 `PackageBulkSource::Placement(ref)`(새 가상 함수 — 기본 Package, writer가 저장 전 id로 묻는다)로 정한다. writer는 패키지와 sidecar를 같은 staging에 쓰고(sidecar를 먼저, 블록 해시를 계산해 패키지 `Sidecar` 섹션에 넣는다), 실행기가 staging의 sidecar 파일에서 크기·SHA-256을 직접 재 매니페스트에 넣는다(셰이더 artifact와 같은 방식 — 10.3절). 게시는 sidecar → 패키지 → 매니페스트 순이다. 부분 쿠킹 재사용(10.2절 8)은 패키지 대조에 sidecar 파일 크기·SHA-256 대조를 더한다(sidecar만 지워져도 다시 쿠킹). **배치는 너겟 키·값에 들어가지 않는다**: 너겟 값은 처리기의 가공 결과(오디오는 플랫폼 데이터 byte — AudioSystem 3.37절)이고 패키지가 아니며, 배치는 패키지를 쓸 때 정한다(위치·SHA가 나누기 전후로 같다).
+6. **쿠킹**: bulk 배치는 `PackageBulkSource::Placement(ref)`(새 가상 함수 — 기본 Package, writer가 저장 전 id로 묻는다)로 정한다. writer는 패키지와 sidecar를 같은 staging에 쓰고(sidecar를 먼저, 블록 해시를 계산해 패키지 `Sidecar` 섹션에 넣는다), 실행기가 sidecar byte에서 크기·SHA-256을 재 매니페스트에 넣는다(20.5 3 — 패키지처럼 메모리 byte에서 잰다). 게시는 sidecar → 패키지 → 매니페스트 순이다. 부분 쿠킹 재사용(10.2절 8)은 패키지 대조에 sidecar 파일 크기·SHA-256 대조를 더한다(sidecar만 지워져도 다시 쿠킹). **배치는 너겟 키·값에 들어가지 않는다**: 너겟 값은 처리기의 가공 결과(오디오는 플랫폼 데이터 byte — AudioSystem 3.37절)이고 패키지가 아니며, 배치는 패키지를 쓸 때 정한다(위치·SHA가 나누기 전후로 같다).
 7. **런타임 로드**: `Prepare`는 sidecar를 읽지 않고, `DecodePackageBulk`·Prepare SHA 확인·bulk 할당·로더 예산(11절 52·63 — 파일 크기 + bulkRawBytes)·`EstimatePrimaryAsset`(11절 107)에서 Sidecar entry를 뺀다(`EstimatePrimaryAsset`은 sidecarBytes 합을 따로 낸다). sidecar 파일 크기 대조는 로더 IO 경계 안에서 한다: `CookedPackageRead`에 sidecar 경로·기대 크기를 더하고 IO 구현이 IO 스레드에서 Stat한다(다르거나 없으면 `CorruptPackage` — Game 스레드 동기 IO 없음, 시험은 지금처럼 gate 구현을 끼운다). `Package`의 bulk 조회는 Sidecar 항목에 `Streamed`를 알린다(`BulkBytes` → `Unsupported` — 메모리에 없다).
 8. **범위 읽기**: 20.2 3. 읽은 byte는 덮는 블록 해시로 늘 검증한다(블록 단위로 읽어 대조한 뒤 요청 범위를 복사 — 서명 사슬). 그래서 소비자가 자기 해시를 따로 볼 필요가 없다(오디오 `VerifyAudioChunk`는 남겨도 되고 빼도 된다 — 오디오 세션 결정).
 9. **준비 티켓은 오디오 몫**: "frame N부터 낼 수 있다"(AudioSystem 3.12.4 `PreparePlayback`)는 청크 캐시·디코드를 아는 오디오가 범위 읽기 위에 만든다. 에셋 쪽은 읽기 요청 하나의 상태만 준다. AudioSystem 06-Phases의 PR12 행("준비 티켓·sidecar 범위 읽기")과 3.12.4를 고치도록 알린다(준비 티켓은 AU6b).
@@ -35,7 +36,7 @@
    - reader: Sidecar 항목은 Bulk 섹션 범위 대신 `Sidecar` 섹션 fileBytes 안인지·정렬·증가를 본다. `Sidecar` 섹션 크기 = 48 + 32 × hashCount, hashCount = ceil(fileBytes / hashBlockBytes), hashBlockBytes는 2의 거듭제곱(4 KiB–1 MiB).
    - sidecar 머리: `ReadSidecarHeader`(magic·판·정렬·entryCount·fileBytes·대표 AssetId·crc32 — 다르면 `CorruptData`). 런타임은 첫 열기 때 머리 64 byte를 비동기로 읽어 본다(첫 Read 앞에).
    - 매니페스트 v3 reader·검증·쓰기(판 상수 3 — `CookedManifest.h`).
-2. **AssetCooker**: `CookContext`에 sidecar sink(staging 파일 — 실행기가 패키지 sink와 함께 준다), 처리기는 `PackageBulkSource::Placement`를 구현하는 쿠킹 bulk 원본(`CookChainedBulkSource` — CookBulkSource.h 36)에 배치를 표시한다(`Add(raw, CookBulkPlacement::Sidecar)`). 실행기가 staging sidecar의 크기·SHA를 매니페스트에 넣는다.
+2. **AssetCooker**: `CookContext`에 sidecar sink(staging 파일 — 실행기가 패키지 sink와 함께 준다), 처리기는 `PackageBulkSource::Placement`를 구현하는 쿠킹 bulk 원본(`CookChainedBulkSource` — CookBulkSource.h 36)에 배치를 표시한다(`Add(raw, PackageBulkPlacement::Sidecar)` — 20.5 1). 실행기가 staging sidecar의 크기·SHA를 매니페스트에 넣는다.
 3. **런타임 손잡이**(AssetRuntime — `AssetManagerConfig`에 범위 IO 인터페이스를 더한다, 기본 구현은 EngineAssets의 `AsyncIoContext`(EngineAssetsSubsystem `io_`)를 쓴다):
    ```cpp
    // lease가 가리키는 에셋 패키지의 스트리밍 bulk를 연다(Game 스레드 — lease는 그대로 호출자에게 있다).
@@ -73,6 +74,8 @@
 | PR12b | 쿠킹: `Placement`·쿠킹 bulk 원본 배치, `CookContext` sidecar sink, staging·게시 순서, 매니페스트 sidecar 칸 쓰기·병합, 부분 쿠킹 재사용, 정리·패키징 `.rbsc`, `asset-load-cooked --verify-sidecars`, 시험 | AssetCooker·AssetCommandlets |
 | PR12c | 런타임 손잡이: 범위 IO 인터페이스·기본 구현, `OpenStreamedBulk`·`StreamedBulk`·`BulkReadHandle`(제출 큐·우선순위·취소·블록 해시·worker callback·파일 계수), 종료 계약, 시험 | AssetRuntime·EngineAssets |
 
+**진행**: PR12a 구현 완료(2026-11-28 — 대조표 14.1.121). 구현 리뷰에서 블록 수 올림 넘침, 섹션 존재 규칙(BulkIndex ⇔ Bulk 또는 Sidecar), 0 byte Sidecar 배치(패키지 안), 쿠커 bulkRawBytes 합의 Sidecar 제외, `ExpectedSidecarHeader` 입력 계약, Sandbox TestContent 에디터 패키지 20개의 판 올림을 반영했다. PR12b 구현 완료(2026-11-28 — 20.5, 대조표 14.1.123, 구현 리뷰 반영: 20.2 2·20.1 6 표기 정정, sidecar 경로의 할당 실패·쓰기 실패 시험, 검증만이면 타입 모듈 생략). 지금 엔진 처리기 가운데 Sidecar를 고르는 것은 없다(오디오 AU6b가 처음 쓴다). 다음은 PR12c다.
+
 단계마다 리뷰어 하나다. PR12a 판 올림 뒤 Sandbox TestContent 재쿠킹·14.1 golden 재생성을 같이 한다. PR12c가 끝나면 오디오 세션에 알린다(AU6b 착수 가능 — 배치·두 번째 bulk ref·Subsystem 순서·3.11.5·3.12.4·06-Phases 수정). 렌더 세션에는 텍스처 스트리밍이 같은 API를 쓸 수 있음을 알린다.
 
 ### 20.4 시험(완료 조건 — 과하게)
@@ -82,3 +85,15 @@
 - 매니페스트 v3: 판정 순서 표, sidecarBytes 0인데 SHA 0 아님, 패키지 `Sidecar` 섹션과 매니페스트 불일치 `CorruptPackage`, v2 `UnsupportedVersion`.
 - 쿠킹: 게시 순서(중간 실패에서 매니페스트가 새 sidecar를 가리키지 않음), 재사용(sidecar만 바뀌거나 지워지면 다시 쿠킹), 배치가 너겟 키·값을 바꾸지 않음, 내용 주소 경로, 전체 쿠킹이 낡은 `.rbsc`만 지움·부분 쿠킹은 보존, `--verify-sidecars`, 서버 프로필 sidecar 없음.
 - 런타임: 범위 경계(0·끝·넘침·4 GiB), 짧은 읽기 `CorruptData`, 같은 크기로 byte만 바뀐 sidecar의 블록 해시 검출, IO 실패(AsyncIoFaultPoint), 취소 제출 전·뒤, 우선순위 순서, 완료 재정렬(`HoldCompletions` gate — 시간 대기 금지), callback 정확히 한 번·worker 스레드, callback 안 자기 손잡이 파괴, Pending 손잡이 소멸 Fatal(death test), 마지막 손잡이 뒤 파일 닫힘, scope Revoke·lease 반납 뒤에도 읽기, Shutdown 뒤 Open·Read `ShuttingDown`, 파괴 때 남은 손잡이 Fatal, 할당 실패 주입(전 지점), 여러 스레드 동시 Read.
+
+### 20.5 PR12b 구현 세부(2026-11-28 — 착수 때 정함)
+
+1. **쿠킹 bulk 원본**: `CookChainedBulkSource::Add(bytes, placement = PackageBulkPlacement::Package)`가 배치를 entry와 함께 적고 `Placement(ref)`가 새 bulk는 그 값, 그 밖은 next(없으면 Package)를 돌려준다. 새 enum을 두지 않는다(writer의 `PackageBulkPlacement`를 그대로 쓴다).
+2. **sidecar 출력**: `CookContext::sidecar`(`PackageSink*`)다. 기본 `WriteCookedPackage`가 `PackageWriteOptions::sidecar`로 넘긴다. **출력이 null이면 Sidecar 배치를 패키지 안으로 돌린다**(bulk 원본을 배치만 Package로 바꾸는 어댑터로 감싼다) — 서버 프로필은 출력을 주지 않는 것으로 sidecar를 만들지 않는다(20.1 1). 지금 `TargetProfile`에는 서버 표시가 없어 실행기는 늘 출력을 주고, BS7이 서버 프로필을 더할 때 그 프로필에서 null로 둔다.
+3. **실행기**(`CookRun`): 패키지처럼 sidecar도 메모리 sink에 받는다(쿠킹 패키지 byte도 메모리에 다 있다 — 20.1 6의 "staging 파일에서 잰다"는 메모리 byte에서 재는 것으로 바꾼다, 게시기가 staging에 쓰고 옮기는 순서는 같다). 크기·SHA-256을 재 로더 대조 항목(`checkEntry_`)과 `CookedPackage::sidecar`·`sidecarSha256`에 넣는다. bulkRawBytes는 Sidecar 항목을 뺀다(PR12a에서 고침).
+4. **게시**(`CookPublisher::Put`): sidecar가 있으면 먼저 `.staging/<sidecar 파일 이름>.tmp`에 쓰고 `Packages/<a>/<A>-<h>.rbsc`로 덮어쓰지 않고 옮긴다(같은 이름이면 크기·SHA-256 대조 — 패키지와 같은 `PlaceStaged`). 그다음 패키지, 매니페스트는 지금처럼 `Finish`에서 마지막에 교체한다 — 중간에 실패하면 게시본 매니페스트는 옛 sidecar만 가리킨다. 새로 쓴 byte 합(`BytesWritten`)에 sidecar도 넣는다. `Reuse`·병합 복사(`CopyEntry`)는 sidecar 칸을 옮긴다.
+5. **재사용 판정**(`PlanCookReuse`): 패키지 파일 대조에 더해 sidecarBytes가 있으면 sidecar 파일 크기·SHA-256을 대조한다(없거나 다르면 다시 쿠킹 — sidecar만 지워져도).
+6. **정리**: 전체 쿠킹의 `RemoveUnreferenced`는 새 매니페스트가 가리키는 sidecar 경로도 남긴다(낡은 `.rbsc`만 지운다). 부분 쿠킹은 지우지 않는다(지금과 같다). `Begin`의 staging 고아 정리가 sidecar 임시 파일도 지운다. 패키징 복사(10.3절)는 아직 구현이 없다 — 구현할 때 쿠킹 루트의 `Packages/` 전체(`.rbsc` 포함)를 옮긴다.
+7. **`asset-load-cooked --verify-sidecars`**(13.1절 문법에 더함): `asset-load-cooked --profile=<id> [<AssetId|경로 힌트>] [--project=<dir>] [--verify-sidecars]` — `--verify-sidecars`가 있으면 대상은 선택이다. 대상이 있으면 지금처럼 로드한 뒤, 매니페스트의 sidecarBytes가 있는 모든 항목을 AssetId 순으로 본다: 패키지 파일 크기·SHA-256(`CheckCookedPackageFile`) → `ReadPackage`(타입 축 없음) → `Sidecar` 섹션이 매니페스트와 같은지(`CheckCookedPackageContents`) → `VerifySidecarFile`(아래). 성공 줄 `asset-load-cooked: <profile> sidecars verified <수>`(대상이 있으면 로드 줄 뒤), 첫 실패는 `<진단 코드>: <AssetId>: error <오류> (sidecar)`·종료 코드 1이다.
+8. **`VerifySidecarFile(reader, contents, scratch, failure)`**(AssetRuntime `PackageReader.h`): sidecar 파일 전체를 scratch 크기 조각으로 흘려 읽어 파일 크기 = fileBytes, 머리(`ReadSidecarHeader`), 블록 SHA-256 전부, 전체 SHA-256 = 섹션 sha256을 본다. 다르면 `CorruptPackage` / `CorruptData`(section = `Sidecar`, detail = 첫 다른 블록 번호 또는 0), 읽기 오류는 그 오류(진단 None), 빈 scratch InvalidArgument. 범위 읽기 손잡이(PR12c)와 검증 명령이 같은 규칙을 쓴다.
+9. **시험**: 쿠킹 bulk 원본 배치(새 bulk·next), sidecar 출력 null이면 패키지 안, 실행기의 sidecar 칸(로더 대조 통과), 게시 순서(sidecar 게시 뒤 패키지 단계 실패 → 매니페스트가 새 sidecar를 가리키지 않음 — sink 결과 주입), 같은 이름 sidecar 대조·손상 교체, 재사용(sidecar만 지워짐·바뀜 → 다시 쿠킹, 같으면 재사용), 전체 쿠킹이 낡은 `.rbsc`만 지움·부분 쿠킹은 보존, `VerifySidecarFile`의 각 실패(크기·머리·블록·전체·IO·조각 크기 모두), 명령(성공 줄·대상과 함께·손상 sidecar·없는 sidecar·사용법), 같은 처리기를 두 번 쿠킹하면 패키지·sidecar byte가 같다. 배치는 너겟 키에 들어가지 않는다(키는 처리기 정체·설정·콘텐츠 해시뿐이다 — 20.1 6, 따로 시험하지 않는다).

@@ -211,6 +211,7 @@ private:
         }
 
         MemoryPackageSink sink(allocator_);
+        MemoryPackageSink sidecar(allocator_);
         AssetDiagnostic failure;
         warnings_.Clear();
         CookContext context;
@@ -228,6 +229,7 @@ private:
         context.scheduler = request_.scheduler;
         context.scratch = request_.scratch;
         context.sink = &sink;
+        context.sidecar = &sidecar;
         context.failure = &failure;
         context.warnings = &warnings_;
         DependencyOpener dependencies(packages, result_.opens);
@@ -278,7 +280,10 @@ private:
 
         uint64 bulkRawBytes = 0;
         for (const PackageBulkEntry& bulk : contents.Value().bulkEntries) {
-            bulkRawBytes += bulk.rawBytes;
+            // sidecar entry는 상주 raw 합에 들지 않는다(AssetSystem 20.1 4).
+            if ((bulk.flags & static_cast<uint32>(BulkEntryFlags::Sidecar)) == 0) {
+                bulkRawBytes += bulk.rawBytes;
+            }
         }
 
         // 만든 항목을 로더 대조로 확인한다(처리기가 다른 프로파일 값·대표 타입을 썼으면 게시 뒤
@@ -289,6 +294,11 @@ private:
         checkEntry_.packageSha256 = sha256;
         checkEntry_.packageBytes = sink.Bytes().Size();
         checkEntry_.bulkRawBytes = bulkRawBytes;
+        // sidecar 칸은 처리기가 쓴 sidecar byte에서 잰다(AssetSystem 20.5 3).
+        const Span<const uint8> sidecarBytes = sidecar.Bytes();
+        checkEntry_.sidecarBytes = sidecarBytes.Size();
+        checkEntry_.sidecarSha256 =
+            sidecarBytes.IsEmpty() ? Sha256Digest{} : Sha256::Hash(sidecarBytes);
         AssetDiagnostic mismatch;
         if (auto checked =
                 CheckCookedPackage(check_, checkEntry_, sink.Bytes(), contents.Value(), &mismatch);
@@ -309,6 +319,8 @@ private:
         package.bytes = sink.Bytes();
         package.sha256 = sha256;
         package.bulkRawBytes = bulkRawBytes;
+        package.sidecar = sidecarBytes;
+        package.sidecarSha256 = checkEntry_.sidecarSha256;
         package.cookKey = key.cookKey;
         if (auto put = request_.output->Put(package); !put) {
             return put;

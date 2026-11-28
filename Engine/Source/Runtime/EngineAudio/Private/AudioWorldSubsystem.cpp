@@ -48,6 +48,22 @@ void AudioWorldSubsystem::Deinitialize(World& world) noexcept {
     engine_ = nullptr;
 }
 
+void AudioWorldSubsystem::OnTick(World& world, const TickContext& context) noexcept {
+    (void)world;
+    // context.paused는 IsPaused && !singleStep이다(디버그 단일 스텝 frame은 흐른다 — 3.44.1절).
+    if (engine_ != nullptr && scene_.IsValid()) {
+        engine_->SetSceneWorldPaused(scene_, context.paused);
+    }
+}
+
+Result<void> AudioWorldSubsystem::SetPaused(bool paused) noexcept {
+    if (engine_ == nullptr) {
+        return Result<void>::Success();
+    }
+
+    return engine_->SetScenePaused(scene_, paused);
+}
+
 void AudioWorldSubsystem::ReleaseScene() noexcept {
     if (engine_ != nullptr && scene_.IsValid()) {
         engine_->UnregisterScene(scene_);

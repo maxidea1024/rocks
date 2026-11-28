@@ -35,6 +35,17 @@ public:
     // 엔진 쪽을 찾아 scene을 잡는다. 엔진 쪽이 없어도 성공한다(재생은 빈 handle).
     Result<void> Initialize(World& world) noexcept override;
     void OnWorldEndPlay(World& world) noexcept override;
+    // World pause를 scene 일시정지로 넘긴다(3.44.1절 — pause 중에도 tick한다, 단일 스텝 frame은
+    // 일시정지가 아니다).
+    bool IsTickable() const noexcept override {
+        return true;
+    }
+
+    bool TickWhenPaused() const noexcept override {
+        return true;
+    }
+
+    void OnTick(World& world, const TickContext& context) noexcept override;
     // 편집 World처럼 OnWorldEndPlay가 없는 World도 여기서 scene을 놓는다. 바깥 조회 창은 닫혀
     // 있으므로 Initialize에서 보관한 포인터를 쓴다(엔진 Subsystem은 모든 World보다 오래 산다
     // — 3.35.7절).
@@ -83,6 +94,10 @@ public:
     // World가 끝나면 엔진 기본 base 믹스로 돌아간다. 오류는 AudioEngineSubsystem::SetBaseMix와
     // 같다.
     Result<void> SetBaseMix(const MixSnapshotRef& mix) noexcept;
+
+    // 이 World scene의 코드 일시정지다(AudioEngineSubsystem::SetScenePaused와 같다 — World pause와
+    // OR). 엔진 오디오가 없으면 성공(할 일 없음)이다.
+    Result<void> SetPaused(bool paused) noexcept;
 
     // 이 World의 scene이다(놓은 뒤·엔진 오디오 없음이면 무효 id).
     AudioSceneId Scene() const noexcept {

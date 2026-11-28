@@ -1,6 +1,8 @@
 #include "../../AssetDatabase/Tests/EditorPackageSetTestSupport.h"
 
+#include <AssetCooker/CookBulkSource.h>
 #include <AssetCooker/CookRun.h>
+#include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageReader.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/FileError.h>
@@ -13,7 +15,8 @@
 // 없이 쿠킹(2)), 두 번 같은 byte(13), 열린 집합 관리(시작 때 열린 패키지 유지·열기 횟수·상한으로
 // 한꺼번에 닫기 — 결과 같음), 에셋별 오류 계속(읽기 전용·열기 실패·미해결 import·처리기 실패·깨진
 // 출력·로더 대조 실패), 요청 거부(인자·dirty·sink 오류·처리기 조회 오류 — 연 패키지는 닫힘), 할당
-// 실패.
+// 실패, sidecar 배치(AS 20.5 1–3 — 처리기가 고른 Sidecar bulk의 sidecar byte·칸·로더 대조, 출력이
+// 없으면 패키지 안, 쿠킹 bulk 원본의 배치).
 using namespace rocks;
 
 namespace cook_run_tests_file {
@@ -37,7 +40,7 @@ const uint64 AllIds[] = {BaseId, DerivedId, HeroId, VillainId, LeafId, CycleAId,
 // 출력 하나의 사본이다.
 struct OutputRecord {
     explicit OutputRecord(Allocator& allocator) noexcept
-        : bytes(allocator), path(allocator), dependencies(allocator) {
+        : bytes(allocator), sidecar(allocator), path(allocator), dependencies(allocator) {
     }
 
     AssetId asset{};
@@ -46,6 +49,8 @@ struct OutputRecord {
     Sha256Digest sha256{};
     Sha256Digest cookKey{};
     uint64 bulkRawBytes = 0;
+    Array<uint8> sidecar;
+    Sha256Digest sidecarSha256{};
     uint32 flags = 0;
     String path;
     Array<CookedManifestDependency> dependencies;
@@ -70,9 +75,11 @@ public:
         record.sha256 = package.sha256;
         record.cookKey = package.cookKey;
         record.bulkRawBytes = package.bulkRawBytes;
+        record.sidecarSha256 = package.sidecarSha256;
         record.flags = package.flags;
         record.bundles = package.bundles.Size();
-        if (!record.bytes.TryAppend(package.bytes) || !record.path.TryAssign(package.pathHint) ||
+        if (!record.bytes.TryAppend(package.bytes) || !record.sidecar.TryAppend(package.sidecar) ||
+            !record.path.TryAssign(package.pathHint) ||
             !record.dependencies.TryAppend(package.dependencies)) {
             return Result<void>::Failure(ErrorCode::OutOfMemory);
         }
@@ -181,6 +188,53 @@ public:
 
 private:
     bool fail_;
+};
+
+// 모든 bulk의 배치를 Sidecar로 바꾸는 bulk 원본이다(읽기는 next).
+class AllSidecarSource final : public PackageBulkSource {
+public:
+    explicit AllSidecarSource(PackageBulkSource* next) noexcept : next_(next) {
+    }
+
+    Result<Span<const uint8>> ReadBulk(const BulkDataRef& ref) noexcept override {
+        return next_ != nullptr ? next_->ReadBulk(ref)
+                                : Result<Span<const uint8>>::Failure(ErrorCode::NotFound);
+    }
+
+    Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept override {
+        return next_ != nullptr ? next_->ReadStoredBulk(ref)
+                                : Result<PackageStoredBulk>::Failure(ErrorCode::NotFound);
+    }
+
+    PackageBulkPlacement Placement(const BulkDataRef&) const noexcept override {
+        return PackageBulkPlacement::Sidecar;
+    }
+
+private:
+    PackageBulkSource* next_;
+};
+
+// 모든 bulk를 sidecar에 두는 처리기다(withOutput이 거짓이면 sidecar 출력을 지운다 — 서버 프로필
+// 모양, 기본 쓰기가 패키지 안으로 돌린다).
+class SidecarProcessor final : public CookProcessor {
+public:
+    explicit SidecarProcessor(bool withOutput) noexcept : withOutput_(withOutput) {
+    }
+
+    NuggetProcessorId Identity() const noexcept override {
+        return NuggetProcessorId{Guid{0x51DE, 1}, Guid{0x51DE, 2}};
+    }
+
+    Result<void> Cook(CookContext& context) const noexcept override {
+        AllSidecarSource source(context.bulkSource);
+        CookContext write = context;
+        write.bulkSource = &source;
+        write.sidecar = withOutput_ ? context.sidecar : nullptr;
+        return CookProcessor::Cook(write);
+    }
+
+private:
+    bool withOutput_;
 };
 
 // 실행 장면이다: 메모리 프로젝트(Sources 여덟 + 선택 읽기 전용 패키지)·색인·집합·처리기 표·대상·키.
@@ -738,12 +792,99 @@ TEST(CookRun_Rejects) {
     CHECK(scene.set.Count() == 0);
 }
 
+// sidecar 배치(AS 20.5 2·3): 처리기가 Sidecar를 고르면 실행기가 sidecar byte를 받아 출력에 싣고
+// (크기·SHA-256), bulkRawBytes는 패키지 안만 센다(Hero 0). 쿠킹 패키지의 Sidecar 섹션이 출력의
+// sidecar와 같고 로더 대조(CheckCookedPackage)를 지난다. 출력이 없으면(서버 프로필 모양) 같은
+// 처리기가 패키지 안에 둔다(sidecar 없음, bulkRawBytes = 픽셀). 두 번 쿠킹하면 sidecar byte가 같다.
+TEST(CookRun_SidecarPlacement) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    const SidecarProcessor streamed(true);
+    RunScene scene(env, false, &streamed);
+    REQUIRE(scene.ready && scene.Prepare());
+    MemoryOutput output(env.allocator);
+    CookRunResult result(env.allocator);
+    REQUIRE(CookPackages(env.allocator, scene.Request(output), result));
+    CHECK(result.diagnostics.IsEmpty());
+    const OutputRecord* hero = output.Of(HeroId);
+    REQUIRE(hero != nullptr);
+    CHECK(hero->bulkRawBytes == 0 && !hero->sidecar.IsEmpty());
+    CHECK(hero->sidecarSha256 == Sha256::Hash(hero->sidecar.View()));
+    PackageReadOptions read;
+    auto contents = ReadPackage(env.allocator, hero->bytes.View(), read);
+    REQUIRE(contents);
+    CHECK(contents.Value().sidecarPresent && !contents.Value().bulkSectionPresent);
+    CHECK(contents.Value().sidecar.fileBytes == hero->sidecar.Size() &&
+          contents.Value().sidecar.sha256 == hero->sidecarSha256);
+    for (const PackageBulkEntry& entry : contents.Value().bulkEntries) {
+        CHECK(entry.flags == static_cast<uint32>(BulkEntryFlags::Sidecar));
+    }
+
+    MemoryPackageRangeReader sidecarReader(hero->sidecar.View());
+    uint8 scratch[4096];
+    CHECK(
+        VerifySidecarFile(sidecarReader, contents.Value(), Span<uint8>(scratch, sizeof(scratch))));
+    // bulk 없는 대상은 sidecar도 없다.
+    const OutputRecord* leaf = output.Of(LeafId);
+    REQUIRE(leaf != nullptr);
+    CHECK(leaf->sidecar.IsEmpty() && leaf->sidecarSha256 == Sha256Digest{});
+
+    // 두 번째 쿠킹은 같은 byte다.
+    RunScene again(env, false, &streamed);
+    REQUIRE(again.ready && again.Prepare());
+    MemoryOutput second(env.allocator);
+    CookRunResult secondResult(env.allocator);
+    REQUIRE(CookPackages(env.allocator, again.Request(second), secondResult));
+    const OutputRecord* heroAgain = second.Of(HeroId);
+    REQUIRE(heroAgain != nullptr);
+    CHECK(SameBytes(hero->bytes, heroAgain->bytes) && SameBytes(hero->sidecar, heroAgain->sidecar));
+
+    // 출력 없음: 패키지 안.
+    const SidecarProcessor packaged(false);
+    RunScene server(env, false, &packaged);
+    REQUIRE(server.ready && server.Prepare());
+    MemoryOutput serverOutput(env.allocator);
+    CookRunResult serverResult(env.allocator);
+    REQUIRE(CookPackages(env.allocator, server.Request(serverOutput), serverResult));
+    CHECK(serverResult.diagnostics.IsEmpty());
+    const OutputRecord* serverHero = serverOutput.Of(HeroId);
+    REQUIRE(serverHero != nullptr);
+    CHECK(serverHero->sidecar.IsEmpty() && serverHero->bulkRawBytes == PixelBytes);
+}
+
+// 쿠킹 bulk 원본의 배치(AS 20.5 1): 새 bulk는 Add가 받은 배치(기본 Package), 그 밖 ref는 next의
+// 배치, next가 없으면 Package다.
+TEST(CookRun_ChainedBulkPlacement) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    const uint8 bytes[] = {1, 2, 3};
+    AllSidecarSource next(nullptr);
+    CookChainedBulkSource chained(env.allocator, &next);
+    auto packaged = chained.Add(Span<const uint8>(bytes, sizeof(bytes)));
+    auto streamed =
+        chained.Add(Span<const uint8>(bytes, sizeof(bytes)), PackageBulkPlacement::Sidecar);
+    REQUIRE(packaged && streamed);
+    CHECK(chained.Placement(packaged.Value()) == PackageBulkPlacement::Package);
+    CHECK(chained.Placement(streamed.Value()) == PackageBulkPlacement::Sidecar);
+    BulkDataRef other;
+    other.bulkId = 5;
+    CHECK(chained.Placement(other) == PackageBulkPlacement::Sidecar);
+    CookChainedBulkSource alone(env.allocator, nullptr);
+    CHECK(alone.Placement(other) == PackageBulkPlacement::Package);
+    auto read = chained.ReadBulk(streamed.Value());
+    REQUIRE(read);
+    CHECK(read.Value().Size() == sizeof(bytes));
+}
+
 // 할당 실패: 실행 allocator(처리기의 쓰기·검증 읽기·순서·의존 목록)와 집합 allocator(열기)의 모든
 // 지점에서 OutOfMemory이고 연 패키지는 닫힌다. 지점을 다 지나면 기준과 byte가 같다.
 TEST(CookRun_AllocationFailures) {
     AssetEnv env;
     REQUIRE(env.Ready());
-    RunScene scene(env);
+    // sidecar 처리기다(Hero의 sidecar sink 할당 지점도 지난다 — AS 20.5 3, bulk 없는 대상은 기본과
+    // 같다).
+    const SidecarProcessor streamed(true);
+    RunScene scene(env, false, &streamed);
     REQUIRE(scene.ready && scene.Prepare());
     MemoryOutput baseline(env.allocator);
     CookRunResult result(env.allocator);
@@ -765,6 +906,7 @@ TEST(CookRun_AllocationFailures) {
             REQUIRE(output.records.Size() == baseline.records.Size());
             for (usize index = 0; index < output.records.Size(); ++index) {
                 CHECK(SameBytes(output.records[index].bytes, baseline.records[index].bytes));
+                CHECK(SameBytes(output.records[index].sidecar, baseline.records[index].sidecar));
             }
 
             break;

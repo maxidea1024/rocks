@@ -24,6 +24,8 @@ constexpr usize DefineValueBytes = 16;
 constexpr usize FileShaPrefixHex = 16;
 // 임시 파일 접미 버퍼 byte 수(".<pid>.tmp" NUL 포함)다.
 constexpr usize TemporarySuffixBytes = 32;
+// 묶음 id 16 hex와 NUL의 byte 수다.
+constexpr usize BundleIdHexBytes = 2 * sizeof(uint64) + 1;
 
 // job 하나가 가리키는 정의 저장소다. 자기 배열을 가리키므로 만든 뒤 옮기지 않는다(Array를 미리
 // 예약).
@@ -64,6 +66,7 @@ ErrorCode OutcomeError(ShaderLibraryCookOutcome outcome, ErrorCode writeError) n
     case ShaderLibraryCookOutcome::CorruptEntry:
         return ErrorCode::AlreadyExists;
     case ShaderLibraryCookOutcome::BuildFailed:
+    case ShaderLibraryCookOutcome::BundleFailed:
         return ErrorCode::InvalidArgument;
     case ShaderLibraryCookOutcome::WriteFailed:
         return writeError == ErrorCode::None ? ErrorCode::InvalidArgument : writeError;
@@ -393,6 +396,7 @@ Sha256Digest LibraryCookKey(const ShaderLibraryCookDesc& desc, const ShaderForma
     writer.Digest(typeSet);
     writer.U32(static_cast<uint32>(entries.Size()));
     for (const ShaderLibraryBuildEntry& entry : entries) {
+        writer.U64(entry.key.bundleId);
         writer.U64(entry.key.nameHash);
         writer.U64(entry.key.vertexInputType);
         writer.U32(entry.key.permutationId);
@@ -411,6 +415,197 @@ Sha256Digest LibraryCookKey(const ShaderLibraryCookDesc& desc, const ShaderForma
     }
 
     return writer.Finish();
+}
+
+// 정규화한 머티리얼 묶음 하나다(같은 셰이더 집합 id를 합친 것 — 16.5절 SSD88).
+struct NormalizedBundle {
+    explicit NormalizedBundle(Allocator& allocator) noexcept : inputs(allocator) {
+    }
+
+    // 정렬 순 첫 묶음(원문·traits의 기준)이다.
+    const MaterialShaderBundle* first = nullptr;
+    uint64 bundleId = EngineShaderBundleId;
+    // 합친 묶음 가운데 가장 작은 머티리얼이다(진단용).
+    AssetId asset{};
+    // 사용 대상 정점 입력 타입의 등록부 desc 사본이다(id 오름차순, 중복 없음).
+    Array<ShaderVertexInputType> inputs;
+};
+
+bool BundleLess(const MaterialShaderBundle* left, const MaterialShaderBundle* right) noexcept {
+    const uint64 leftId = MaterialShaderBundleId(left->shaderSetId);
+    const uint64 rightId = MaterialShaderBundleId(right->shaderSetId);
+    if (leftId != rightId) {
+        return leftId < rightId;
+    }
+
+    const int set = memcmp(left->shaderSetId.bytes, right->shaderSetId.bytes, Sha256Digest::Bytes);
+    if (set != 0) {
+        return set < 0;
+    }
+
+    return GuidLess(left->asset.value, right->asset.value);
+}
+
+bool SameBytes(Span<const uint8> left, Span<const uint8> right) noexcept {
+    return left.Size() == right.Size() &&
+           (left.IsEmpty() || memcmp(left.Data(), right.Data(), left.Size()) == 0);
+}
+
+// 문제 하나를 report에 더하고 영어 Log Error로 남긴다.
+Result<void> AddBundleProblem(ShaderLibraryCookReport& report, StringView formatId,
+                              const ShaderLibraryBundleProblem& problem) noexcept {
+    if (!report.bundleProblems.TryPushBack(problem)) {
+        return Fail(ErrorCode::OutOfMemory);
+    }
+
+    ShaderLibraryBundleProblem& stored = report.bundleProblems[report.bundleProblems.Size() - 1];
+    CopyText(stored.formatId, sizeof(stored.formatId), formatId);
+    char set[Sha256Digest::HexBytes + 1];
+    char other[Sha256Digest::HexBytes + 1];
+    char bundle[BundleIdHexBytes];
+    problem.shaderSetId.ToHex(set);
+    problem.otherShaderSetId.ToHex(other);
+    (void)snprintf(bundle, sizeof(bundle), "%016llx",
+                   static_cast<unsigned long long>(problem.bundleId));
+    switch (problem.kind) {
+    case ShaderLibraryBundleProblemKind::Collision:
+        Log::Error(LogShaderLibraryBuild,
+                   "Material shader sets {Set} (material {Asset}) and {Other} (material "
+                   "{OtherAsset}) share the shader library bundle id {Bundle} in {Format} (a "
+                   "64-bit prefix collision of SHA-256 shader set ids); change one of the "
+                   "materials so that its shader set id differs",
+                   StringView(set), problem.asset, StringView(other), problem.otherAsset,
+                   StringView(bundle), formatId);
+        break;
+    case ShaderLibraryBundleProblemKind::Inconsistent:
+        Log::Error(LogShaderLibraryBuild,
+                   "Material shader set {Set} (material {Asset}) arrived more than once for "
+                   "{Format} with different generated source or traits bytes (the material "
+                   "shader bundle source broke its contract)",
+                   StringView(set), problem.asset, formatId);
+        break;
+    case ShaderLibraryBundleProblemKind::UnknownVertexInput:
+        Log::Error(LogShaderLibraryBuild,
+                   "Material shader set {Set} (material {Asset}) uses vertex input type id "
+                   "{VertexInput} for {Format}, which no loaded module registered",
+                   StringView(set), problem.asset, problem.vertexInputType, formatId);
+        break;
+    }
+
+    return Result<void>::Success();
+}
+
+// bundle의 정점 입력 타입을 group에 합친다(id 순, 중복 없음). 등록부에 없으면 문제다.
+Result<void> MergeInputs(const ShaderTypeRegistry& registry, const MaterialShaderBundle& bundle,
+                         StringView formatId, NormalizedBundle& group,
+                         ShaderLibraryCookReport& report, bool& failed) noexcept {
+    for (const VertexInputTypeId id : bundle.vertexInputTypes) {
+        const ShaderVertexInputType* input =
+            id == NoVertexInputType ? nullptr : registry.FindVertexInputType(id);
+        if (input == nullptr) {
+            ShaderLibraryBundleProblem problem;
+            problem.kind = ShaderLibraryBundleProblemKind::UnknownVertexInput;
+            problem.bundleId = group.bundleId;
+            problem.shaderSetId = bundle.shaderSetId;
+            problem.asset = bundle.asset;
+            problem.vertexInputType = id;
+            failed = true;
+            if (auto added = AddBundleProblem(report, formatId, problem); !added) {
+                return added;
+            }
+
+            continue;
+        }
+
+        usize at = 0;
+        while (at < group.inputs.Size() && group.inputs[at].id < id) {
+            ++at;
+        }
+
+        if (at < group.inputs.Size() && group.inputs[at].id == id) {
+            continue;
+        }
+
+        if (!group.inputs.TryInsert(*input, at)) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// desc.materialBundles 가운데 formatId 형식의 묶음을 정규화한다(16.5절 SSD88). 문제가 있으면
+// failed가 참이고 report.bundleProblems에 정렬 순으로 남는다.
+Result<void> NormalizeBundles(const ShaderLibraryCookDesc& desc, StringView formatId,
+                              Allocator& allocator, Array<NormalizedBundle>& out,
+                              ShaderLibraryCookReport& report, bool& failed) noexcept {
+    out.Clear();
+    failed = false;
+    Array<const MaterialShaderBundle*> chosen(allocator);
+    for (const MaterialShaderBundle& bundle : desc.materialBundles) {
+        if (bundle.formatId == formatId && !chosen.TryPushBack(&bundle)) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+    }
+
+    algo::Sort(chosen.View(), BundleLess);
+    for (const MaterialShaderBundle* bundle : chosen) {
+        const uint64 bundleId = MaterialShaderBundleId(bundle->shaderSetId);
+        NormalizedBundle* last = out.IsEmpty() ? nullptr : &out[out.Size() - 1];
+        if (last != nullptr && last->first->shaderSetId == bundle->shaderSetId) {
+            // 같은 셰이더 집합은 하나다 — 내용이 같아야 한다.
+            if (!(last->first->materialSource == bundle->materialSource) ||
+                !SameBytes(last->first->traits, bundle->traits)) {
+                ShaderLibraryBundleProblem problem;
+                problem.kind = ShaderLibraryBundleProblemKind::Inconsistent;
+                problem.bundleId = bundleId;
+                problem.shaderSetId = bundle->shaderSetId;
+                problem.asset = bundle->asset;
+                failed = true;
+                if (auto added = AddBundleProblem(report, formatId, problem); !added) {
+                    return added;
+                }
+            }
+
+            if (auto merged = MergeInputs(*desc.registry, *bundle, formatId, *last, report, failed);
+                !merged) {
+                return merged;
+            }
+
+            continue;
+        }
+
+        if (last != nullptr && last->bundleId == bundleId) {
+            ShaderLibraryBundleProblem problem;
+            problem.kind = ShaderLibraryBundleProblemKind::Collision;
+            problem.bundleId = bundleId;
+            problem.shaderSetId = last->first->shaderSetId;
+            problem.asset = last->asset;
+            problem.otherShaderSetId = bundle->shaderSetId;
+            problem.otherAsset = bundle->asset;
+            failed = true;
+            if (auto added = AddBundleProblem(report, formatId, problem); !added) {
+                return added;
+            }
+
+            continue;
+        }
+
+        if (!out.TryEmplaceBack(allocator)) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+
+        NormalizedBundle& group = out[out.Size() - 1];
+        group.first = bundle;
+        group.bundleId = bundleId;
+        group.asset = bundle->asset;
+        if (auto merged = MergeInputs(*desc.registry, *bundle, formatId, group, report, failed);
+            !merged) {
+            return merged;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 // 라이브러리 파일 경로다.
@@ -454,6 +649,21 @@ const char* ShaderLibraryCookOutcomeName(ShaderLibraryCookOutcome outcome) noexc
         return "WriteFailed";
     case ShaderLibraryCookOutcome::Built:
         return "Built";
+    case ShaderLibraryCookOutcome::BundleFailed:
+        return "BundleFailed";
+    }
+
+    return "unknown";
+}
+
+const char* ShaderLibraryBundleProblemKindName(ShaderLibraryBundleProblemKind kind) noexcept {
+    switch (kind) {
+    case ShaderLibraryBundleProblemKind::Collision:
+        return "Collision";
+    case ShaderLibraryBundleProblemKind::Inconsistent:
+        return "Inconsistent";
+    case ShaderLibraryBundleProblemKind::UnknownVertexInput:
+        return "UnknownVertexInput";
     }
 
     return "unknown";
@@ -467,10 +677,12 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
                           Array<uint8>* memory) noexcept {
     report.formats.Clear();
     report.failures.Clear();
+    report.bundleProblems.Clear();
     report.sources.Clear();
     if (desc.allocator == nullptr || desc.registry == nullptr || desc.manager == nullptr ||
         (memory == nullptr && desc.outputDirectory.IsEmpty()) ||
-        (memory != nullptr && desc.formats.Size() != 1)) {
+        (memory != nullptr && desc.formats.Size() != 1) ||
+        (desc.library == ShaderLibraryKind::Engine && !desc.materialBundles.IsEmpty())) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
@@ -508,6 +720,49 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             return enumerated;
         }
 
+        // 머티리얼 묶음(Project 라이브러리 — 16.5절 SSD88)이다. planBundles는 조합마다 묶음 번호
+        // (엔진 셰이더는 IndexNone)다.
+        Array<NormalizedBundle> bundles(allocator);
+        bool bundleFailed = false;
+        if (auto normalized = NormalizeBundles(desc, snapshot->definition.Id(), allocator, bundles,
+                                               report, bundleFailed);
+            !normalized) {
+            return normalized;
+        }
+
+        line.materialBundles = static_cast<uint32>(bundles.Size());
+        if (bundleFailed) {
+            line.outcome = ShaderLibraryCookOutcome::BundleFailed;
+            line.reason = "material shader bundles collide or break the bundle source contract";
+            firstError = firstError == ErrorCode::None ? ErrorCode::InvalidArgument : firstError;
+            continue;
+        }
+
+        Array<usize> planBundles(allocator);
+        if (!planBundles.TryReserve(plans.Size())) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+
+        for (usize index = 0; index < plans.Size(); ++index) {
+            (void)planBundles.TryPushBack(IndexNone);
+        }
+
+        for (usize index = 0; index < bundles.Size(); ++index) {
+            const NormalizedBundle& bundle = bundles[index];
+            if (auto enumerated = EnumerateMaterialShaderCombinations(
+                    desc.registry->Types(), bundle.inputs.View(), facts, bundle.first->traits,
+                    bundle.bundleId, desc.includeDevelopment, plans);
+                !enumerated) {
+                return enumerated;
+            }
+
+            while (planBundles.Size() < plans.Size()) {
+                if (!planBundles.TryPushBack(index)) {
+                    return Fail(ErrorCode::OutOfMemory);
+                }
+            }
+        }
+
         // job과 그 정의 저장소다(저장소는 예약한 뒤 옮기지 않는다).
         Array<JobStorage> storage(allocator);
         Array<ShaderCompileJob> jobs(allocator);
@@ -517,7 +772,8 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
         }
 
         const ShaderCompileOptions defaults = DefaultShaderCompileOptions(snapshot->definition);
-        for (const ShaderLibraryCombination& plan : plans) {
+        for (usize planIndex = 0; planIndex < plans.Size(); ++planIndex) {
+            const ShaderLibraryCombination& plan = plans[planIndex];
             (void)storage.TryPushBack(JobStorage{});
             JobStorage& defines = storage[storage.Size() - 1];
             if (auto filled = FillDefines(plan, defines); !filled) {
@@ -544,6 +800,13 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
                     desc.registry->FindVertexInputType(plan.vertexInputType);
                 job.vertexInputSource = input != nullptr ? input->sourcePath : StringView();
             }
+
+            // 머티리얼 job: 생성 원문을 잇고 경고를 오류로 다루지 않는다(16.4절 SSD79).
+            if (planBundles[planIndex] != IndexNone) {
+                job.materialSource = bundles[planBundles[planIndex]].first->materialSource;
+                job.options.warningsAsErrors = false;
+            }
+
             (void)jobs.TryPushBack(job);
         }
 
@@ -595,6 +858,11 @@ Result<void> RunLibraries(const ShaderLibraryCookDesc& desc, ShaderLibraryCookRe
             CopyText(failure.typeName, sizeof(failure.typeName), plans[index].type->name);
             failure.vertexInputType = plans[index].vertexInputType;
             failure.permutationId = plans[index].permutationId;
+            failure.bundleId = plans[index].bundleId;
+            if (planBundles[index] != IndexNone) {
+                failure.asset = bundles[planBundles[index]].asset;
+            }
+
             failure.status = result.status;
             (void)failure.diagnostics.TryAssign(result.diagnostics.View());
         }

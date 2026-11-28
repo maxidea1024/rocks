@@ -22,36 +22,6 @@ struct XorShift {
     }
 };
 
-// 헤더·섹션 표·비-Bulk 섹션 CRC를 모두 다시 맞춘다(구조가 망가져 위치를 읽을 수 없으면 그대로
-// 둔다).
-void FixAllCrcs(Array<uint8>& file) noexcept {
-    if (file.Size() < PackageHeaderBytes) {
-        return;
-    }
-
-    const uint64 table = LoadLittleEndian<uint64>(file.Data() + 16);
-    const uint32 count = LoadLittleEndian<uint32>(file.Data() + 12);
-    if (count <= PackageMaxSections && table <= file.Size() &&
-        uint64{PackageSectionEntryBytes} * count + 4 <= file.Size() - table) {
-        for (uint32 index = 0; index < count; ++index) {
-            uint8* row = file.Data() + table + PackageSectionEntryBytes * index;
-            const uint64 offset = LoadLittleEndian<uint64>(row + 8);
-            const uint64 bytes = LoadLittleEndian<uint64>(row + 16);
-            const uint32 flags = LoadLittleEndian<uint32>(row + 4);
-            if ((flags & static_cast<uint32>(PackageSectionFlags::PerEntryChecksum)) == 0 &&
-                offset <= file.Size() && bytes <= file.Size() - offset) {
-                StoreLittleEndian<uint32>(
-                    row + 24,
-                    Crc32(Span<const uint8>(file.Data() + offset, static_cast<usize>(bytes))));
-            }
-        }
-
-        FixTableCrc(file);
-    }
-
-    FixHeaderCrc(file);
-}
-
 bool AllowedReadError(ErrorCode error, AssetDiagnosticCode code) noexcept {
     return (error == ErrorCode::CorruptData && code == AssetDiagnosticCode::CorruptPackage) ||
            (error == ErrorCode::Unsupported && (code == AssetDiagnosticCode::UnsupportedVersion ||

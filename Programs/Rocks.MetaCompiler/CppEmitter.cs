@@ -422,6 +422,58 @@ internal static partial class CppEmitter
         Body("}");
     }
 
+    // 선언 subobject 표(펼친 표)와 소유 구조 지정자 필드 ID를 TypeSchema 끝 칸 문자열(", span, list, root, attach")로 낸다(Docs/Design/Prefab
+    // 10.2절). 표와 지정자가 모두 없으면 ""다. 표는 Schema() 안 정적 배열로 둔다.
+    private static string SubobjectSchemaTail(ClassModel type, Action<string> Body)
+    {
+        if (type.Subobjects.Count == 0 && type.SubobjectListId is null && type.SubobjectRootId is null && type.SubobjectAttachId is null)
+        {
+            return "";
+        }
+
+        string span = "Span<const SubobjectSchema>{}";
+        if (type.Subobjects.Count != 0)
+        {
+            Body("static const SubobjectSchema subobjects[] = {");
+            foreach (SubobjectModel entry in type.Subobjects)
+            {
+                Body($"{{{GuidValue(entry.Id)}, {GuidValue(entry.TypeId)}, {entry.AttachParent}, {(entry.Root ? "static_cast<uint32>(SubobjectFlags::Root)" : "0u")}}},");
+            }
+
+            Body("};");
+            span = $"Span<const SubobjectSchema>(subobjects, {type.Subobjects.Count})";
+        }
+
+        return $", {span}, {GuidValue(type.SubobjectListId)}, {GuidValue(type.SubobjectRootId)}, {GuidValue(type.SubobjectAttachId)}";
+    }
+
+    // 선언 subobject 연산(소유 필드 주소 — 펼친 표 순서)과 자기 InitSubobjectDefaults를 함수표에 싣는다(Docs/Design/Prefab 10.2절). base 필드는
+    // protected 이상이라(RMC3002) 파생 GeneratedType(파생의 friend)이 파생 객체를 통해 접근한다.
+    private static void EmitSubobjectOps(SchemaModel schema, ClassModel type, string native, Action<string> Body)
+    {
+        if (type.Subobjects.Count != 0)
+        {
+            Body("static const RuntimeSubobjectOps subobjects[] = {");
+            foreach (SubobjectModel entry in type.Subobjects)
+            {
+                // 선언 클래스로 한정한다(파생에 같은 C++ 이름 멤버가 있어도 base 항목이 base 필드를 가리키게).
+                string declaring = "::" + schema.Find(entry.Owner).NativeName;
+                Body($"{{{GuidValue(entry.Id)}, [](Object& owner) noexcept -> void* {{ return &static_cast<{native}&>(owner).{declaring}::{entry.Field}; }}}},");
+            }
+
+            Body("};");
+            Body($"ops.subobjects = Span<const RuntimeSubobjectOps>(subobjects, {type.Subobjects.Count});");
+        }
+
+        if (type.HasInitSubobjectDefaults)
+        {
+            // 서명 대조다(Ops 본문 안 — GeneratedType은 friend라 private hook도 본다).
+            Body($"static_assert(IsSameV<decltype(&{native}::InitSubobjectDefaults), Result<void> (*)(SubobjectDefaultsContext&) noexcept>, " +
+                $"\"{type.Name}::InitSubobjectDefaults must be static Result<void>(SubobjectDefaultsContext&) noexcept (RMC3003)\");");
+            Body($"ops.initSubobjectDefaults = &{native}::InitSubobjectDefaults;");
+        }
+    }
+
     // 리플렉션 클래스의 GeneratedType 특수화다. 헤더: Id(constexpr), Trace(inline — GC와 native 파생의 Trace 사슬이 직접 부른다),
     // 나머지 멤버의 선언. 생성 소스: bitfield 접근자, 정적 검사, Schema, ReferenceLayout, Ops, Register.
     private static void EmitClass(SchemaModel schema, ClassModel type, string module, Action<string> Line, Action<string> Body)
@@ -480,8 +532,12 @@ internal static partial class CppEmitter
         string fieldSpan = FieldSpan("FieldSchema", "fields", type.Fields);
         string functionSpan = EmitFunctionSchemas(type, Body);
         string editorOnlyIds = EditorOnlyIds(type);
-        string functionsTail = functionSpan.Length == 0 ? "" : $"{(editorOnlyIds.Length == 0 ? ", Span<const Guid>{}" : "")}, {functionSpan}";
-        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}{editorOnlyIds}{functionsTail}}};");
+        // 선언 subobject 표와 소유 구조 지정자(Docs/Design/Prefab 10.2절)는 TypeSchema의 마지막 칸들이라, 있으면 앞 칸(EditorOnly ID·함수)을
+        // 빈 값으로라도 채운다.
+        string subobjectTail = SubobjectSchemaTail(type, Body);
+        string functionsTail = functionSpan.Length == 0 && subobjectTail.Length == 0 ? ""
+            : $"{(editorOnlyIds.Length == 0 ? ", Span<const Guid>{}" : "")}, {(functionSpan.Length == 0 ? "Span<const FunctionSchema>{}" : functionSpan)}";
+        Body($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(baseId)}, {type.Flags}u, {View(type.EffectiveToolName)}, {GuidValue(type.WithinId)}{editorOnlyIds}{functionsTail}{subobjectTail}}};");
         Body("return schema;");
         Body("}");
         // 클래스 생성 Trace다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a). 상속 필드를 포함한 모든 참조·struct·배열
@@ -578,6 +634,9 @@ internal static partial class CppEmitter
                 }
 
                 string member = $"&::{field.Owner}::{field.Name}";
+                // Notify 필드는 멤버 저장소 thunk를 끝 칸에 싣는다(readStaged·keyNativeType 뒤 — Docs/Design/ChangeNotification.ko.md
+                // CN-D10). Registry 참조·컨테이너 API가 받은 멤버 주소로 통지할 필드를 찾는다.
+                string storage = field.Spec.Notify ? $", detail::FieldStorage<{native}, {member}>" : "";
                 Body($"{{{GuidValue(field.Id)},");
                 if (field.IsMap || field.IsSet)
                 {
@@ -587,7 +646,8 @@ internal static partial class CppEmitter
                     Body("nullptr, {}, nullptr,");
                     string mapValueNative = ValueNativeType(schema, field);
                     string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
-                    EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Body);
+                    string mapTail = storage.Length == 0 ? keyNative : (keyNative.Length == 0 ? ", nullptr, nullptr" : keyNative) + storage;
+                    EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + mapTail, Body);
                     return;
                 }
 
@@ -599,7 +659,7 @@ internal static partial class CppEmitter
                     // 4.6·5.6·7.1절, ReflectionExtensions.ko.md 6절). 멤버·원소 단위 접근은 경로 thunk가 한다.
                     Body("nullptr, {}, nullptr,");
                     string valueNative = ValueNativeType(schema, field);
-                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field), Body);
+                    EmitClassCodec(native, member, (valueNative.Length == 0 ? ", nullptr" : valueNative) + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
                     return;
                 }
 
@@ -627,8 +687,11 @@ internal static partial class CppEmitter
                 // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
                 // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
                 string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
-                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Body);
+                EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field) + StorageTail(storage), Body);
             }
+
+            // readStaged·keyNativeType(생성 코드는 싣지 않는다) 뒤의 storage 칸이다.
+            static string StorageTail(string storage) => storage.Length == 0 ? "" : ", nullptr, nullptr" + storage;
         }
 
         if (baseId is not null)
@@ -637,6 +700,7 @@ internal static partial class CppEmitter
         }
 
         EmitFunctionOps(type, self, Body);
+        EmitSubobjectOps(schema, type, native, Body);
         Body("ops.completeFieldLayout = true;");
         // 모든 필드 encode thunk가 생성 코드다(클래스 기본값 레코드의 원본 모드 — Docs/Design/RuntimeClassMetadata.ko.md 'A5a 레코드').
         Body("ops.generatedFieldCodecs = true;");

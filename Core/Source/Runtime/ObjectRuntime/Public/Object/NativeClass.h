@@ -301,6 +301,15 @@ Result<TypeRegistrationToken> RegisterNativeClass(TypeRegistry& types,
         // 이벤트 필드 연산(EventReflection ED15)도 빌린다(thunk는
         // Resolve·ResolveForWrite<Reflected> — 파생 객체도 받는다).
         ops.events = GeneratedType<Reflected>::Ops().events;
+        // 선언 subobject 표·소유 구조 지정자·소유 필드 접근자도 물려받는다(Docs/Design/Prefab
+        // 10.2절 — 등록이 base 표를 앞부분으로 요구한다. 접근자는 Reflected로 casting하므로 파생
+        // 객체도 받는다). 기본값 덮기 hook은 자기 것만 싣는 규칙이라 null로 둔다(런타임이 base
+        // 사슬을 걷는다).
+        schema.subobjects = reflected.subobjects;
+        schema.subobjectListField = reflected.subobjectListField;
+        schema.subobjectRootField = reflected.subobjectRootField;
+        schema.subobjectAttachField = reflected.subobjectAttachField;
+        ops.subobjects = GeneratedType<Reflected>::Ops().subobjects;
         ops.completeFieldLayout = false;
         ops.parallelTraceSafe = false;
         ops.hasStrongReferences =

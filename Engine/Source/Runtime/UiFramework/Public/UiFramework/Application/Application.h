@@ -38,6 +38,14 @@ public:
                                                Delegate<void(double)>&& frame) noexcept;
     // 창이 먼저 소멸할 수 있는 나중 작업은 이 토큰을 잠근 뒤 Application을 사용한다.
     Result<WeakPtr<Application*>> WeakContext() noexcept;
+    // element가 붙은 트리의 Application이다(Docs/Design/UiToolkit 22.7a절·16.5절 — UE
+    // FSlateApplication::Get 대응, 전역 없이 루트의 호스트 묶음으로 찾는다). 트리에 붙지 않았거나
+    // Application이 없으면 nullptr이다. 돌려준 포인터는 그 Application이 사는 동안만 쓴다(나중
+    // 작업은 WeakContext).
+    //
+    // 사용 예(Element 안에서 메뉴를 열 때):
+    //   if (Application* app = Application::Find(*this)) { (void)anchor->OpenFocused(*app); }
+    static Application* Find(const Element& element) noexcept;
     void SetRoot(const SharedPtr<Element>& root) noexcept;
     // 지금 루트다(툴팁 임시 호스트로 감쌌으면 그 호스트). 없으면 빈 포인터다.
     const SharedPtr<Element>& GetRoot() const noexcept;

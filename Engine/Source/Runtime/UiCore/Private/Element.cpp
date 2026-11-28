@@ -313,6 +313,10 @@ bool Element::SupportsKeyboardFocus() const noexcept {
     return false;
 }
 
+SharedPtr<Element> Element::FocusDelegate() const noexcept {
+    return {};
+}
+
 bool Element::OnPreviewKeyChord(uint32 user, const input::InputEvent& event, KeyChord) noexcept {
     return OnPreviewKeyDown(user, event);
 }

@@ -24,7 +24,8 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
       gcWork_(allocator), gcShade_(allocator),
       clustersEnabled_(options.clusters || options.permanentRegion ||
                        (options.policy.packageNativeType != nullptr && options.packageClusters)),
-      permanentOpen_(options.permanentRegion), notifyStates_(allocator) {
+      permanentOpen_(options.permanentRegion), notifyStates_(allocator), notifyPending_(allocator),
+      notifyPendingIndex_(allocator) {
     if (options_.permanentRegion && options_.policy.packageNativeType != nullptr) {
         platform::Fatal("A package-policy ObjectRegistry cannot open a permanent region");
     }
@@ -50,6 +51,11 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
 }
 
 ObjectRegistry::~ObjectRegistry() {
+    // 열린 통지 묶음(NotifyGroup)은 이 Registry를 가리킨다 — 나중의 End가 해제된 Registry를 쓴다.
+    if (notifyGroupDepth_ != 0) {
+        platform::Fatal("ObjectRegistry destroyed while a NotifyGroup is still open");
+    }
+
     auto stopped = Shutdown(OwnerAccess());
     if (!stopped) {
         platform::Fatal(

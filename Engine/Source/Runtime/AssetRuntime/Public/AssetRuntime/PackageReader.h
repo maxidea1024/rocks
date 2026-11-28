@@ -119,8 +119,8 @@ struct PackageReadOptions {
 struct PackageContents {
     explicit PackageContents(Allocator& allocator) noexcept
         : sections(allocator), summary(allocator), exports(allocator), imports(allocator),
-          dependencies(allocator), bulkEntries(allocator), changedDefaults(allocator),
-          unavailableDefaults(allocator) {
+          dependencies(allocator), bulkEntries(allocator), sidecarBlocks(allocator),
+          changedDefaults(allocator), unavailableDefaults(allocator) {
     }
 
     PackageContents(PackageContents&&) noexcept = default;
@@ -143,6 +143,12 @@ struct PackageContents {
     // DecodePackageBulk가 압축을 풀며 확인한다).
     Span<const uint8> bulk{};
     Array<PackageBulkEntry> bulkEntries;
+    // Bulk·Sidecar 섹션이 있는지다(AS 20.1 4 — 모든 bulk가 sidecar면 Bulk 섹션이 없다).
+    bool bulkSectionPresent = false;
+    bool sidecarPresent = false;
+    // Sidecar 섹션 값이다(sidecarPresent일 때 — blockHashes는 sidecarBlocks를 가리킨다).
+    PackageSidecarInfo sidecar{};
+    Array<Sha256Digest> sidecarBlocks;
     // 에디터 패키지를 읽기 전용으로 열어야 하는지다(더 새 타입·커스텀 버전, 건너뛴 Required가 아닌
     // 모르는 섹션·더 새 섹션 — AS 5.3절). 쿠킹 패키지는 언제나 거짓이다.
     bool readOnly = false;
@@ -247,6 +253,59 @@ ROCKS_ASSETRUNTIME_API Result<PackageFingerprint>
 ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
                        AssetDiagnostic* failure = nullptr) noexcept;
 
+// sidecar 파일 머리(AS 20.1 3)에 있어야 할 값이다(ExpectedSidecarHeader가 패키지에서 만든다 — 범위
+// 읽기 손잡이는 이 값을 복사해 쥔다).
+struct SidecarHeaderExpectation {
+    uint32 bulkAlignment = 0;
+    // Sidecar 항목 수다.
+    uint32 entryCount = 0;
+    uint64 fileBytes = 0;
+    AssetId asset{};
+};
+
+// 읽은 패키지(ReadPackage·ReadPackageForEdit 결과 — BulkIndex를 읽은 것, ReadPackageIndex 결과는
+// bulkEntries가 비어 entryCount가 0이 되므로 쓰지 않는다)에서 sidecar 머리 기대값을 만든다:
+// 헤더 bulkAlignment·assetId, Sidecar 항목 수, Sidecar 섹션 fileBytes. sidecar가 없는 패키지는
+// entryCount·fileBytes가 0이다.
+ROCKS_ASSETRUNTIME_API SidecarHeaderExpectation
+ExpectedSidecarHeader(const PackageContents& contents) noexcept;
+
+// sidecar 파일의 처음 64 byte(header)를 검증한다(AS 20.2 1): magic "RBSC", formatVersion
+// (SidecarFormatVersion), headerBytes 64, bulkAlignment·entryCount·fileBytes·assetId가 expected와
+// 같음, reserved(40–59) 0, headerCrc = CRC32(byte 0–59). 런타임 손잡이가 첫 열기 때(첫 Read 앞),
+// 검증 명령이 전체 대조 때 부른다. 정렬 여백·entry 내용은 보지 않는다(블록 해시가 본다).
+//
+// 사용 예:
+//   const SidecarHeaderExpectation expected = ExpectedSidecarHeader(contents);
+//   if (auto checked = ReadSidecarHeader(Span<const uint8>(head, SidecarHeaderBytes), expected);
+//       !checked) { ... }
+//
+// 오류: header 크기가 SidecarHeaderBytes가 아니면 InvalidArgument, 그 밖 다른 칸은 모두
+// CorruptData다(패키지와 짝이 아닌 sidecar — 판이 달라도 손상으로 본다, 둘은 함께 쓰인다).
+ROCKS_ASSETRUNTIME_API Result<void>
+ReadSidecarHeader(Span<const uint8> header, const SidecarHeaderExpectation& expected) noexcept;
+
+// sidecar 파일 전체를 검증한다(AS 20.5 8 — 검증 명령 `asset-load-cooked --verify-sidecars`):
+// reader의 파일을 scratch 크기 조각으로 흘려 읽어 파일 크기 = contents.sidecar.fileBytes, 머리
+// (ReadSidecarHeader — ExpectedSidecarHeader(contents)), 블록 SHA-256 전부, 전체 SHA-256 =
+// contents.sidecar.sha256을 본다. contents는 ReadPackage·ReadPackageForEdit 결과(BulkIndex를 읽은
+// 것)여야 한다.
+//
+// 사용 예:
+//   FilePackageRangeReader sidecar;
+//   sidecar.Open(files, sidecarPath);
+//   if (auto verified = VerifySidecarFile(sidecar, contents, scratch.View(), &failure);
+//       !verified) { ... }
+//
+// 오류: 빈 scratch·sidecar 없는 contents InvalidArgument(진단 없음), 크기·머리 다름은
+// CorruptPackage / CorruptData(section = Sidecar, detail 0), 블록 해시 다름은 같은 진단(detail = 첫
+// 다른 블록 번호), 전체 SHA-256 다름은 detail 0, 범위 읽기 오류는 그 오류(진단 None, section =
+// Sidecar).
+ROCKS_ASSETRUNTIME_API Result<void> VerifySidecarFile(PackageRangeReader& reader,
+                                                      const PackageContents& contents,
+                                                      Span<uint8> scratch,
+                                                      AssetDiagnostic* failure = nullptr) noexcept;
+
 // 저장한 패키지 파일의 재검증이다(AS 5.5절 5, 7.1절 15 — A2c1). 에디터 패키지로 헤더·섹션 표·
 // 모든 섹션 CRC·섹션 사이 패딩 0·BulkIndex 배치·entry 사이 패딩 0·entry 저장 CRC를 scratch 크기
 // 조각으로 훑는다(버전 축은 보지 않는다, 압축 해제·SHA-256·그래프 해석은 하지 않는다). 같은
@@ -276,8 +335,11 @@ ROCKS_ASSETRUNTIME_API Result<void> DecodePackageBulkEntry(const PackageBulkEntr
                                                            Array<uint8>& out,
                                                            Allocator& allocator) noexcept;
 
-// contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
-// slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
+// contents의 패키지 안 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고,
+// entry별 위치를 slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면
+// CapacityExceeded다. sidecar entry(AS 20.1 7)는 풀지 않고 합에도 넣지 않으며 그 자리는
+// streamed(offset = sidecar 안 위치, crc32 = 저장 CRC)다 — slots는 모든 entry를 bulkId 순으로
+// 담는다.
 //
 // Zstd entry는 블록 컨테이너(RCBK)이며 헤더의 rawSize를 BulkIndex rawBytes와 먼저 대조한다(맞지
 // 않으면 해제하지 않는다).

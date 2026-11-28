@@ -1,6 +1,7 @@
 #include "TypeRegistryFunctions.h"
 #include "TypeRegistryInternal.h"
 #include "TypeRegistryRegisterInternal.h"
+#include "TypeRegistrySubobjects.h"
 
 #include <Base/PlacementNew.h>
 #include <Object/TypeRegistry.h>
@@ -83,6 +84,13 @@ bool SupportedFieldKind(ValueKind kind, bool structMember) noexcept {
 // read·write·writeStaged가 없어야 하고 Transient가 아니면 codec이 필수다).
 bool IsAggregateField(const FieldSchema& field) noexcept {
     return FieldIsAggregate(field);
+}
+
+// Registry 참조·컨테이너 API가 쓸 수 있는 Notify 필드다(강한 참조와 aggregate — 함수표에 storage가
+// 있어야 한다, Docs/Design/ChangeNotification.ko.md CN-D10).
+bool NotifyNeedsStorage(const FieldSchema& field) noexcept {
+    return HasFlag(field.flags, FieldFlags::Notify) &&
+           (field.value.kind == ValueKind::ObjectReference || IsAggregateField(field));
 }
 
 // 클래스 함수표에서 필드 ID의 valueNativeType(key면 keyNativeType)을 찾는다(ResolveValueTypes의
@@ -376,6 +384,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
 
     detail::FunctionBlockLayout functionBlock = functionsChecked.Value();
 
+    // 선언 subobject 표(Docs/Design/Prefab 10.2절)다. base 표와의 대조는 잠금 안에서 본다.
+    auto subobjectsChecked = detail::ValidateSubobjectList(schema, ops);
+    if (!subobjectsChecked) {
+        return Result<TypeRegistrationToken>::Failure(subobjectsChecked.Error());
+    }
+
+    detail::SubobjectBlockLayout subobjectBlock = subobjectsChecked.Value();
+
     // 완전한 필드 배치를 선언한 타입은 그래프에 저장할 수 있어야 하므로 Transient가 아닌 모든
     // 필드에 codec(encode·decode)이 있어야 한다(Docs/Design/ReflectionFoundations.ko.md 6.4절).
     if (ops.completeFieldLayout) {
@@ -428,6 +444,13 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 참조·컨테이너를 담을 수 있는 Notify 필드는 멤버 저장소 thunk가 있어야 한다(Registry 참조
+        // API가 받은 멤버 주소로 통지할 필드를 찾는다 — Docs/Design/ChangeNotification.ko.md
+        // CN-D10).
+        if (NotifyNeedsStorage(*matched) && !field.storage) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
         for (usize previous = 0; previous < index; ++previous) {
             if (field.fieldId == ops.fields[previous].fieldId) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
@@ -453,8 +476,10 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
         functionBlock.Place(opsIndexOffset + schema.fields.Size() * sizeof(uint32));
     // 이벤트 필드 인자·연산(ED15)을 함수 배열 뒤에 둔다.
     const usize eventsEnd = eventBlock.Place(functionsEnd);
+    // 선언 subobject 표·연산(Prefab 10.2절)을 이벤트 배열 뒤에 둔다.
+    const usize subobjectsEnd = subobjectBlock.Place(eventsEnd);
     // EditorOnly 필드 ID 목록(Guid 정렬)을 문자열보다 먼저 둔다.
-    const usize idsOffset = (eventsEnd + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
+    const usize idsOffset = (subobjectsEnd + alignof(Guid) - 1) & ~(alignof(Guid) - 1);
     usize bytes = idsOffset + schema.editorOnlyFieldIds.Size() * sizeof(Guid);
     if (!AddBytes(bytes, schema.name.Size()) || !AddBytes(bytes, schema.toolName.Size()) ||
         !AddBytes(bytes, functionBlock.textBytes) || !AddBytes(bytes, eventBlock.textBytes)) {
@@ -565,6 +590,12 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
             if (!ContainsInheritedFields(base->schema.fields, schema.fields)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
+            }
+
+            // 파생 스키마는 base의 선언 subobject 표를 앞부분으로 그대로 싣고 소유 구조 지정자를
+            // 이어받는다(Prefab 10.2절 — 펼친 표).
+            if (!detail::InheritsSubobjects(base->schema, schema)) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
         } else if (ops.nativeBaseType != nullptr) {
@@ -698,6 +729,9 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->schema.baseType = schema.baseType;
     record->schema.flags = schema.flags;
     record->schema.withinType = schema.withinType;
+    record->schema.subobjectListField = schema.subobjectListField;
+    record->schema.subobjectRootField = schema.subobjectRootField;
+    record->schema.subobjectAttachField = schema.subobjectAttachField;
     record->schema.editorOnlyFieldIds = CopyBytes(schema.editorOnlyFieldIds, cursor);
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
@@ -740,10 +774,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     Span<const RuntimeEventOps> eventOps;
     detail::CopyEvents(eventBlock, static_cast<uint8*>(memory.Value()), schema, ops, cursor, fields,
                        eventOps);
+    Span<const RuntimeSubobjectOps> subobjectOps;
+    detail::CopySubobjects(subobjectBlock, static_cast<uint8*>(memory.Value()), schema, ops,
+                           record->schema.subobjects, subobjectOps);
     record->ops = Move(ops);
     record->ops.fields = {fieldOps, record->ops.fields.Size()};
     record->ops.functions = functionOps;
     record->ops.events = eventOps;
+    record->ops.subobjects = subobjectOps;
     record->base = base;
     if (notifyCount != 0) {
         record->notifyIds =

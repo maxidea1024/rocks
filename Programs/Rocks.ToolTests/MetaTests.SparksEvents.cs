@@ -74,7 +74,7 @@ internal static partial class MetaTests
 
             using (JsonDocument descriptor = JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor)))
             {
-                Verify.Equal(9, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 9");
+                Verify.Equal(10, descriptor.RootElement.GetProperty("schema").GetInt32(), "descriptor schema 10");
                 JsonElement[] fields = [.. DescriptorType(descriptor, "probe::Thing").GetProperty("fields").EnumerateArray()];
                 JsonElement Field(string name) => fields.Single(field => field.GetProperty("name").GetString() == name);
                 Verify.Equal("Placed", Field("place_it").GetProperty("scriptName").GetString(), "descriptor scriptName from ScriptName");

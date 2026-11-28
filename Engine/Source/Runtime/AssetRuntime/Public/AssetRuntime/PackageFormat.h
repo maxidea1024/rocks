@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Containers/Span.h>
 #include <Core/Encoding/Sha256.h>
 #include <Core/Result.h>
 #include <Meta/TypeSchema.h>
@@ -23,7 +24,8 @@ namespace rocks {
 inline constexpr uint8 PackageMagic[4] = {'R', 'P', 'K', 'G'};
 
 // 이 엔진이 쓰고 읽는 컨테이너 버전이다(AS 5.3절 컨테이너 축).
-inline constexpr uint16 PackageFormatVersion = 2;
+// 3: 스트리밍 bulk(sidecar — BulkIndex Sidecar flag·Sidecar 섹션, AS 20절 PR12a).
+inline constexpr uint16 PackageFormatVersion = 3;
 
 // 헤더 크기다(모든 포맷 버전에서 고정 — 버전 판정 전에 headerCrc 위치를 알아야 한다).
 inline constexpr uint32 PackageHeaderBytes = 64;
@@ -74,11 +76,13 @@ enum class PackageSectionKind : uint32 {
     ImportRecord = 6,
     Tags = 7,
     Bulk = 8,
-    BulkIndex = 9
+    BulkIndex = 9,
+    // sidecar 파일의 정체와 블록 해시 표다(AS 20.1 4 — 쿠킹 패키지에 Sidecar bulk가 있을 때만).
+    Sidecar = 10
 };
 
 // 알려진 섹션 종류의 수다(1..이 값).
-inline constexpr uint32 PackageKnownSectionKinds = 9;
+inline constexpr uint32 PackageKnownSectionKinds = 10;
 
 // 섹션 표 flags 비트다. 정의되지 않은 비트는 CorruptPackage다.
 enum class PackageSectionFlags : uint32 {
@@ -130,7 +134,39 @@ inline constexpr uint32 PackageBulkBlockSizeLog2 = 18;
 enum class BulkEntryFlags : uint32 {
     None = 0,
     // 모든 참조 위치가 EditorOnly 필드다(쿠킹 패키지에서는 0이어야 한다).
-    EditorOnly = 1
+    EditorOnly = 1,
+    // entry가 패키지가 아니라 sidecar 파일에 있다(AS 20.1 4 — 쿠킹 패키지만, codec None, offset은
+    // sidecar 파일 안 위치).
+    Sidecar = 2
+};
+
+inline constexpr uint32 BulkEntryFlagsMask = 3;
+
+// sidecar 파일(AS 20.1 3)의 첫 4 byte다("RBSC").
+inline constexpr uint8 SidecarMagic[4] = {'R', 'B', 'S', 'C'};
+// sidecar 파일 형식 판이다.
+inline constexpr uint16 SidecarFormatVersion = 1;
+// sidecar 머리 크기다: 0 magic, 4 formatVersion(u16), 6 headerBytes(u16 = 64), 8
+// bulkAlignment(u32), 12 entryCount(u32), 16 fileBytes(u64), 24 assetId(Guid), 40 reserved(20 byte,
+// 0), 60 headerCrc(u32 = CRC32(byte 0–59)). entry 본문은 머리 뒤 bulkAlignment 정렬로 BulkIndex
+// 순서대로 잇는다.
+inline constexpr uint32 SidecarHeaderBytes = 64;
+// sidecar 블록 해시 단위다(AS 20.1 4 — UE IoStore 압축 블록과 같은 64 KiB). 범위는 4 KiB–1 MiB의
+// 2의 거듭제곱이다.
+inline constexpr uint32 SidecarHashBlockBytes = 64 * 1024;
+inline constexpr uint32 SidecarMinHashBlockBytes = 4 * 1024;
+inline constexpr uint32 SidecarMaxHashBlockBytes = 1024 * 1024;
+// Sidecar 섹션의 고정 앞부분 크기다(fileBytes u64, sha256 32, hashBlockBytes u32, hashCount u32 —
+// 그 뒤 블록 SHA-256 × hashCount).
+inline constexpr uint32 SidecarSectionFixedBytes = 48;
+
+// 패키지 Sidecar 섹션 값이다(검증을 지난 것 — sidecar 파일 크기·SHA-256과 블록 해시 표).
+struct PackageSidecarInfo {
+    uint64 fileBytes = 0;
+    Sha256Digest sha256{};
+    uint32 hashBlockBytes = SidecarHashBlockBytes;
+    // 블록 SHA-256 표다(ceil(fileBytes / hashBlockBytes)개 — 소유자의 저장소를 가리킨다).
+    Span<const Sha256Digest> blockHashes{};
 };
 
 // 헤더 값이다(검증을 지난 것 — PackageReader가 만든다).
@@ -163,6 +199,7 @@ constexpr uint32 PackageSectionRequiredFlags(PackageSectionKind kind) noexcept {
     case PackageSectionKind::Dependencies:
     case PackageSectionKind::Objects:
     case PackageSectionKind::BulkIndex:
+    case PackageSectionKind::Sidecar:
         return static_cast<uint32>(PackageSectionFlags::Required);
     case PackageSectionKind::Bulk:
         return static_cast<uint32>(PackageSectionFlags::Required) |
@@ -181,11 +218,14 @@ constexpr bool IsKnownPackageSection(uint32 kind) noexcept {
 }
 
 // 압축을 푼 bulk entry 하나의 위치다(raw byte 버퍼 안 offset — Package가 소유한 버퍼,
-// DecodePackageBulk).
+// DecodePackageBulk). 스트리밍 bulk(sidecar — AS 20.1 7)는 풀지 않으므로 streamed가 참이고 offset은
+// sidecar 파일 안 위치, crc32는 entry 저장 CRC다(범위 읽기 손잡이가 쓴다).
 struct PackageBulkSlot {
     uint64 offset = 0;
     uint64 rawBytes = 0;
     Sha256Digest sha256{};
+    bool streamed = false;
+    uint32 crc32 = 0;
 };
 
 // 패키지 지문이다(AS 5.5절 — 헤더 + 섹션 표 byte의 SHA-256). 저장의 외부 변경 검출과 AssetIndex

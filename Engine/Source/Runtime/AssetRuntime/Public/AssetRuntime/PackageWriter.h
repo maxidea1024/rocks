@@ -89,6 +89,14 @@ struct PackageStoredBulk {
     Span<const uint8> stored{};
 };
 
+// bulk entry를 둘 곳이다(AS 20.1 1 — 쿠킹 패키지만 Sidecar를 고를 수 있다).
+enum class PackageBulkPlacement : uint8 {
+    // 패키지 Bulk 섹션(지금까지의 배치).
+    Package,
+    // 패키지 옆 sidecar 파일(스트리밍 bulk — 런타임 Prepare가 읽지 않고 범위 읽기로 읽는다).
+    Sidecar
+};
+
 // writer가 bulk entry의 raw byte를 얻는 곳이다(AS 5.5절 — 객체가 메모리에 가진 raw 데이터이거나
 // 이전 패키지 파일의 entry). ref는 저장 전(옛) 값이다. 반환 span은 다음 호출이나 writer 반환까지
 // 유효해야 한다. writer가 크기·SHA-256을 ref와 대조한다(다르면 저장이 CorruptPackage로 실패 —
@@ -105,6 +113,13 @@ public:
     virtual Result<PackageStoredBulk> ReadStoredBulk(const BulkDataRef& ref) noexcept {
         (void)ref;
         return Result<PackageStoredBulk>::Failure(ErrorCode::NotFound);
+    }
+
+    // ref(저장 전 값)를 둘 곳이다(AS 20.1 6 — 기본 패키지 안). Sidecar는 쿠킹 쓰기에 sidecar 출력이
+    // 있을 때만 받는다(아니면 저장이 InvalidArgument).
+    virtual PackageBulkPlacement Placement(const BulkDataRef& ref) const noexcept {
+        (void)ref;
+        return PackageBulkPlacement::Package;
     }
 
 protected:
@@ -145,6 +160,10 @@ struct PackageWriteOptions {
     // bulk raw byte를 얻는 곳이다. 저장 그래프에 빈 값이 아닌 BulkDataRef가 있는데 null이면
     // InvalidArgument다.
     PackageBulkSource* bulkSource = nullptr;
+    // sidecar 파일 출력이다(AS 20.1 3 — 쿠킹 패키지만). bulkSource가 Sidecar를 고른 bulk가 있을
+    // 때만 쓴다(없으면 아무것도 쓰지 않는다). Sidecar bulk가 있는데 null이거나 에디터 패키지면
+    // InvalidArgument다. 빈 출력이어야 한다(머리부터 쓴다).
+    PackageSink* sidecar = nullptr;
     // 복제다(AssetSystem 7.1절 17 A2e3b — 에디터 패키지만, null이면 복제가 아니다). 주면 헤더
     // id가 이것이고, DuplicateTransient·NonTryoutDuplicateTransient 필드를 쓰지 않으며(로드가
     // 클래스 기본값 — UE DuplicateObject), 패키지의 지금 id를 가리키는 Soft 참조 값을 이 id로
@@ -169,6 +188,9 @@ struct PackageWriteResult {
     PackageFingerprint fingerprint{};
     // bulk 재매핑 표다(새 id 순).
     Array<BulkRemapEntry> bulkRemap;
+    // 쓴 sidecar 파일의 크기·SHA-256이다(Sidecar bulk가 없으면 0 — 매니페스트 sidecar 칸).
+    uint64 sidecarBytes = 0;
+    Sha256Digest sidecarSha256{};
 };
 
 // package(패키지 정책 Registry의 Package)와 소속 객체를 패키지 포맷 v1로 sink에

@@ -61,6 +61,9 @@ struct CookContext {
     bool verifyNuggets = false;
     // 쿠킹 패키지 byte를 받는 곳과 실패 진단이다.
     PackageSink* sink = nullptr;
+    // sidecar 파일 byte를 받는 곳이다(AssetSystem 20.5 2 — 빈 출력). null이면 Sidecar 배치를 패키지
+    // 안으로 돌린다(서버 프로필은 sidecar를 만들지 않는다).
+    PackageSink* sidecar = nullptr;
     AssetDiagnostic* failure = nullptr;
     // 처리기 안 병렬 실행이다(AssetSystem 12.17.9 4 — 텍스처 블록 압축). scheduler가 있으면
     // scratch는 동시 Allocate·Deallocate가 안전한 allocator여야 한다. 결과 byte와 무관하다(너겟
@@ -95,7 +98,8 @@ public:
 
     // 쿠킹 패키지를 context.sink에 쓴다. 기본: WritePackage(kind Cooked, profileId·profileSettings·
     // cookerVersion, 프로파일 bulkCodec·bulkAlignment(0이면 PackageDefaultCookedBulkAlignment),
-    // bulkSource). 오류: WritePackage의 오류(진단은 context.failure).
+    // bulkSource, sidecar — null이면 bulkSource의 Sidecar 배치를 Package로 바꿔 쓴다). 오류:
+    // WritePackage의 오류(진단은 context.failure).
     virtual Result<void> Cook(CookContext& context) const noexcept;
 
 protected:
