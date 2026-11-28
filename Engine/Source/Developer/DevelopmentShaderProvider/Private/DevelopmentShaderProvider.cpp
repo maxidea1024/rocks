@@ -32,6 +32,7 @@
 #include <ShaderCompiler/ShaderLibraryReloader.h>
 #include <ShaderCompiler/ShaderNugget.h>
 #include <ShaderCompiler/ShaderSourceTree.h>
+#include <ShaderCompiler/ShaderWatchSettle.h>
 #include <ShaderCompilerCommon/ShaderFormatDefinition.h>
 #include <ShaderCore/ShaderVirtualPath.h>
 #include <Task/WorkerScheduler.h>
@@ -228,6 +229,8 @@ struct WatchVisit {
     Array<String>* pending = nullptr;
     bool everything = false;
     bool rootRemoved = false;
+    // 이번 Poll에 셰이더 원문 사건(이미 모은 경로 포함)이나 Overflow가 있었다(SSD100 묶기).
+    bool changed = false;
 };
 
 bool AddPending(WatchVisit& visit, StringView relative) noexcept {
@@ -235,6 +238,8 @@ bool AddPending(WatchVisit& visit, StringView relative) noexcept {
     if (!MakeWatchedShaderPath(visit.root->virtualRoot.View(), relative, path)) {
         return true;
     }
+
+    visit.changed = true;
 
     for (const String& existing : *visit.pending) {
         if (existing.View() == path.View()) {
@@ -254,6 +259,7 @@ bool VisitChange(const platform::DirectoryChange& change, void* context) noexcep
     switch (change.kind) {
     case platform::DirectoryChangeKind::Overflow:
         visit.everything = true;
+        visit.changed = true;
         return true;
     case platform::DirectoryChangeKind::RootRemoved:
         visit.rootRemoved = true;
@@ -662,8 +668,10 @@ struct DevelopmentShaderProvider::State {
         static_cast<State*>(context)->WatchLoop();
     }
 
-    // 감시 스레드 본체다(SSD77): mount마다 감시기를 열고, 기다리지 않는 Poll로 모은 변경을 한 번의
-    // 재컴파일로 넘기고, 변경이 없으면 정지 event를 WatchIdleMilliseconds까지 기다린다.
+    // 감시 스레드 본체다(SSD77): mount마다 감시기를 열고, 기다리지 않는 Poll로 변경을 모은다. 첫
+    // 사건 뒤 조용한 구간까지 모았다가(16.6절 SSD100 — ShaderWatchSettled) 한 번 재컴파일한다.
+    // 모으는 동안은 ShaderWatchSettlePollMilliseconds, 변경이 없으면 WatchIdleMilliseconds까지 정지
+    // event를 기다린다.
     void WatchLoop() noexcept {
         Array<UniquePtr<WatchRoot>> roots(allocator);
         for (usize index = 0; index < tree.MountCount(); ++index) {
@@ -693,8 +701,12 @@ struct DevelopmentShaderProvider::State {
 
         Array<String> pending(allocator);
         Array<StringView> views(allocator);
+        bool everything = false;
+        bool collecting = false;
+        uint64 firstChange = 0;
+        uint64 lastChange = 0;
         while (stopWatch.Wait(0) != platform::WaitResult::Signaled) {
-            bool everything = false;
+            bool changed = false;
             for (UniquePtr<WatchRoot>& root : roots) {
                 if (!root->watcher.IsOpen()) {
                     continue;
@@ -705,6 +717,7 @@ struct DevelopmentShaderProvider::State {
                 visit.pending = &pending;
                 (void)root->watcher.Poll(&VisitChange, &visit);
                 everything = everything || visit.everything;
+                changed = changed || visit.changed;
                 if (visit.rootRemoved) {
                     Log::Error(LogDevelopmentShaderProvider,
                                "The watched shader source root {Root} was removed; it is no "
@@ -714,18 +727,39 @@ struct DevelopmentShaderProvider::State {
                 }
             }
 
-            if (pending.IsEmpty() && !everything) {
+            const uint64 now = platform::MonotonicNanoseconds();
+            if (changed) {
+                if (!collecting) {
+                    collecting = true;
+                    firstChange = now;
+                }
+
+                lastChange = now;
+            }
+
+            if (!collecting) {
                 (void)stopWatch.Wait(WatchIdleMilliseconds);
                 continue;
             }
 
-            views.Clear();
-            for (const String& path : pending) {
-                (void)views.TryPushBack(path.View());
+            if (!ShaderWatchSettled(firstChange, lastChange, now, ShaderWatchSettleMilliseconds,
+                                    ShaderWatchSettleLimitMilliseconds)) {
+                (void)stopWatch.Wait(ShaderWatchSettlePollMilliseconds);
+                continue;
             }
 
-            (void)Reload(views.View(), everything);
+            if (!pending.IsEmpty() || everything) {
+                views.Clear();
+                for (const String& path : pending) {
+                    (void)views.TryPushBack(path.View());
+                }
+
+                (void)Reload(views.View(), everything);
+            }
+
             pending.Clear();
+            everything = false;
+            collecting = false;
         }
 
         for (UniquePtr<WatchRoot>& root : roots) {
