@@ -51,12 +51,11 @@ ROCKS_MATERIALCOOK_API Result<void>
 ReadMaterialTranslationNugget(Span<const NuggetValue> parts,
                               MaterialTranslationValue& out) noexcept;
 
-// 셰이더 집합 id다(8.6절): SHA-256(형식 버전, 생성 원문, layout 서명 = part 2 바이트의 SHA-256,
-// traits 정규 바이트). 오류: 할당 실패.
+// 셰이더 집합 id다(8.6절): SHA-256(형식 버전, 생성 원문(길이 앞붙임), layout 서명, traits 정규
+// 바이트). layout 서명은 상수 블록 모양(float4 수와 멤버마다 칸 종류·float4 번호·첫 성분·성분 수)의
+// SHA-256이다(IR 값 번호 제외). 라이브러리 묶음 id는 shader::MaterialShaderBundleId다. 오류: 할당
+// 실패.
 ROCKS_MATERIALCOOK_API Result<Sha256Digest>
 MaterialShaderSetId(const MaterialTranslationValue& value) noexcept;
-
-// 라이브러리 묶음 id다(셰이더 집합 id 앞 8 byte little-endian, 0이면 1 — 0은 엔진 묶음, 12.8절).
-ROCKS_MATERIALCOOK_API uint64 MaterialShaderBundleId(const Sha256Digest& shaderSet) noexcept;
 
 } // namespace rocks

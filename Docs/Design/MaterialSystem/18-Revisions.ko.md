@@ -4,6 +4,7 @@
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 39(초안) | 2026-11-28 | 12.8절 MS3c 리뷰 반영(traits 품질 정규화·UE 그림자·velocity 규칙 8.3절, layout 서명·길이 앞붙임 8.6절, 키 세부·해석 의미 검사·MS3d로 넘기는 것)과 셰이더 시스템 MSR17·MSR18·MSR19·MRD18 반영(16절): platformClass는 집합, 묶음 id는 ShaderCore, 묶음 원천 등록, 조합 열거 |
 | 38(초안) | 2026-11-27 | 6.13절 MS2f4 ColorRamp: 원본 공급 `FindColorCurve`·`MaterialColorCurveSnapshot`(19.4.2절 이름 정정), 번역 의존 ColorCurve·Build 의존 hook, 상수 입력은 CurveAssets `EvaluateAdjustedColorCurve`(비트 동일), 연결 입력은 UE 키 구간 합(조정·보간 무시, 키 0개 알파 0). MS2f 교차 리뷰 반영(V13 우회 차단 목록, Noise CameraRelative 3성분·quality 클램프, RotateAboutAxis 스칼라 축 UE 오류, return 대소문자 무시, SceneTexture 입력 문법 후속). engine-runtime 병합: RenderBase 개정 48 문구(2절 `TextureSampleKind`)·UnrealExchange 장 파일 링크 |
 | 37(초안) | 2026-11-27 | 6.13절 MS2f5 CustomHlsl: 모듈 Custom 함수 표와 IR 연산 CustomArguments·CustomCall·CustomOutput(94–96), 함수 모양(문맥 c 첫 인자·텍스처 두 인자·Double 한 인자·inout 추가 출력·return 감싸기·정의·include), V13 토큰·include·clip 검사, MaterialAttributes 출력 거부(편차) |
 | 36(초안) | 2026-11-27 | UE Substrate 전체 지원을 필수 후속으로(사용자 결정 2026-11-27, 렌더 세션 요청): MD1·SF4·MS9·13장 표를 LayeredSurface.ko.md에 잇는다(범위·MD1 (나)·SF1–SF3 순서는 그대로), MS2f3 노드 표의 Noise 속성 선행 |

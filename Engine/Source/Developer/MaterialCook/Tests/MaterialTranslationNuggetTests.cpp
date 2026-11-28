@@ -9,6 +9,7 @@
 #include <MaterialCook/MaterialTranslationKey.h>
 #include <MaterialCook/MaterialTranslationNugget.h>
 #include <MaterialSchema/MaterialAttributeTable.h>
+#include <ShaderCore/ShaderLibrary.h>
 
 // 번역 너겟 시험이다(Docs/Design/MaterialSystem 12.8절 MS3c "번역 너겟", MS-T1·MS-T5 번역 부분):
 // 같은 그래프는 같은 키(노드 저장 순서와 무관), 그래프·기본 속성·static 값·번역 대상·custom 속성
@@ -250,7 +251,7 @@ TEST(MaterialCook_TranslationValueRoundTrip) {
     REQUIRE(set);
     REQUIRE(readSet);
     CHECK(set.Value() == readSet.Value());
-    CHECK(MaterialShaderBundleId(set.Value()) != 0);
+    CHECK(shader::MaterialShaderBundleId(set.Value()) != 0);
 
     // 셰이더 집합 id: 상수 멤버의 IR 값 번호는 넣지 않고 float4 번호(모양)는 넣는다.
     {

@@ -722,13 +722,4 @@ Result<Sha256Digest> MaterialShaderSetId(const MaterialTranslationValue& value) 
     return Result<Sha256Digest>::Success(hasher.Finish());
 }
 
-uint64 MaterialShaderBundleId(const Sha256Digest& shaderSet) noexcept {
-    uint64 bundle = 0;
-    for (usize at = 0; at < sizeof(uint64); ++at) {
-        bundle |= static_cast<uint64>(shaderSet.bytes[at]) << (at * 8);
-    }
-
-    return bundle == 0 ? 1 : bundle;
-}
-
 } // namespace rocks
