@@ -95,6 +95,12 @@ public:
     // 읽을 수 없으면 거짓). 오류: Begin 전 InvalidArgument, 할당 실패.
     Result<bool> ArtifactFileMatches(const CookedManifestArtifact& artifact) noexcept;
 
+    // 이번 쿠킹의 패키지 항목(Put·Reuse 순 — Finish 전)이다. 비에셋 산출물 단계가 쿠킹 패키지 목록
+    // (CookArtifactRequest::packages)을 만드는 데 쓴다.
+    Span<const CookedManifestEntry> Entries() const noexcept {
+        return entries_.View();
+    }
+
     // 이번 쿠킹의 artifact 항목(PutArtifact·ReuseArtifact 순 — Finish 전)이다.
     Span<const CookedManifestArtifact> Artifacts() const noexcept {
         return artifacts_.View();

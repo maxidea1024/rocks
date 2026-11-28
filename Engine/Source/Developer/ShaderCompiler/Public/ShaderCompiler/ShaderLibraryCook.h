@@ -10,6 +10,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
+#include <ShaderCompiler/MaterialShaderBundleSource.h>
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCore/ShaderLibrary.h>
 #include <ShaderCore/ShaderLibraryContents.h>
@@ -25,6 +26,13 @@
 // 타입의 hlsl2021, 레이아웃 서명 = 타입 표 목록의 서명) 관리자 Compile로 한 번에 컴파일하고, 결과로
 // 라이브러리 v1 byte(BuildShaderLibrary)를 만들어 쓴다.
 //
+// - Project 라이브러리는 desc.materialBundles의 머티리얼 묶음을 더한다(16.5절 SSD88): 형식마다 그
+// 형식의
+//   묶음을 (묶음 id, 셰이더 집합 id, asset) 순으로 정규화하고(같은 집합 id는 합침 — 원문·traits가
+//   달라야 하면 Inconsistent, 같은 묶음 id의 다른 집합 id는 Collision, 등록부에 없는 정점 입력
+//   타입은 UnknownVertexInput — report.bundleProblems와 Log Error, 그 형식은 BundleFailed),
+//   묶음마다 EnumerateMaterialShaderCombinations로 조합을 곱한다. 머티리얼 job은 생성 원문을
+//   materialSource로, warningsAsErrors를 끄고(16.4절 SSD79) 항목 키에 묶음 id를 쓴다.
 // - job 실패는 report.failures에 모으고 그 형식의 파일은 쓰지 않는다(JobsFailed).
 // - 파일: <outputDirectory>/<Engine|Project>-<형식 id>-<파일 SHA-256 앞 16 hex>.rshl. 임시 파일에
 // 다 쓰고
@@ -51,8 +59,8 @@ namespace rocks::shader {
 // 셰이더 라이브러리 쿠커의 처리기 Guid다(cookKey 머리 — Docs/Design/ShaderSystem 16.1절 SSD46,
 // 비에셋 산출물 단계 정체성의 processor). 바꾸면 모든 라이브러리 cookKey가 바뀐다.
 inline constexpr Guid ShaderLibraryCookerGuid{0x52534c434f4f4b31ull, 0x9d2e4b7a1c3f5e01ull};
-// cookKey byte 배치 버전이다(SSD46 — 배치를 바꾸면 올린다).
-inline constexpr uint32 ShaderLibraryCookKeyVersion = 1;
+// cookKey byte 배치 버전이다(SSD46 — 배치를 바꾸면 올린다). 2: 항목마다 묶음 id(16.5절 SSD88).
+inline constexpr uint32 ShaderLibraryCookKeyVersion = 2;
 
 struct ShaderLibraryCookDesc {
     Allocator* allocator = nullptr;
@@ -78,6 +86,9 @@ struct ShaderLibraryCookDesc {
     // 형식마다의 관리자 Compile에 넘기는 취소·진행이다(ShaderSystem 11.1절 PG5 메모). 취소면 그
     // 형식을 쓰지 않고 Cancelled다.
     ShaderCompileControl control{};
+    // Project 라이브러리에 더할 머티리얼 셰이더 묶음이다(16.5절 SSD88 — 형식 id로 고른다). Engine
+    // 라이브러리면 비어 있어야 한다. 가리키는 값은 쿠킹이 끝날 때까지 살아 있어야 한다.
+    Span<const MaterialShaderBundle> materialBundles{};
 };
 
 enum class ShaderLibraryCookOutcome : uint8 {
@@ -94,7 +105,9 @@ enum class ShaderLibraryCookOutcome : uint8 {
     // 파일 쓰기·이동이 실패했다.
     WriteFailed,
     // 메모리에 만들었다(CompileShaderLibrary — 파일을 쓰지 않는다).
-    Built
+    Built,
+    // 머티리얼 묶음 정규화가 실패해 만들지 않았다(report.bundleProblems — 16.5절 SSD88).
+    BundleFailed
 };
 
 ROCKS_SHADERCOMPILER_API const char*
@@ -109,8 +122,39 @@ struct ShaderLibraryCookJobFailure {
     char typeName[MaxShaderTypeNameBytes + 1] = {};
     VertexInputTypeId vertexInputType = NoVertexInputType;
     uint32 permutationId = 0;
+    // 머티리얼 job이면 묶음 id와 그 묶음의 머티리얼이다(엔진 셰이더는 0·null).
+    uint64 bundleId = EngineShaderBundleId;
+    AssetId asset{};
     ShaderCompileStatus status = ShaderCompileStatus::InvalidJob;
     String diagnostics;
+};
+
+// 머티리얼 묶음 정규화 문제의 종류다(16.5절 SSD88).
+enum class ShaderLibraryBundleProblemKind : uint8 {
+    // 같은 묶음 id에 다른 셰이더 집합 id가 있다(64-bit 앞부분 충돌).
+    Collision,
+    // 같은 셰이더 집합 id인데 생성 원문이나 traits byte가 다르다(원천 계약 위반).
+    Inconsistent,
+    // 등록부에 없는 정점 입력 타입을 쓴다.
+    UnknownVertexInput
+};
+
+ROCKS_SHADERCOMPILER_API const char*
+ShaderLibraryBundleProblemKindName(ShaderLibraryBundleProblemKind kind) noexcept;
+
+// 머티리얼 묶음 정규화 문제 하나다.
+struct ShaderLibraryBundleProblem {
+    char formatId[MaxShaderFormatIdBytes] = {};
+    ShaderLibraryBundleProblemKind kind = ShaderLibraryBundleProblemKind::Collision;
+    uint64 bundleId = EngineShaderBundleId;
+    // 문제의 셰이더 집합과 그 머티리얼이다(Collision이면 먼저 정렬된 쪽).
+    Sha256Digest shaderSetId{};
+    AssetId asset{};
+    // Collision의 다른 쪽이다(그 밖은 0·null).
+    Sha256Digest otherShaderSetId{};
+    AssetId otherAsset{};
+    // UnknownVertexInput의 정점 입력 타입 id다.
+    VertexInputTypeId vertexInputType = NoVertexInputType;
 };
 
 // 형식 하나의 결과다.
@@ -137,6 +181,8 @@ struct ShaderLibraryCookFormat {
     uint32 symbolFiles = 0;
     uint32 symbolsUnchanged = 0;
     uint32 symbolFailures = 0;
+    // 정규화한 머티리얼 묶음 수(같은 셰이더 집합 id는 하나 — Project 라이브러리)다.
+    uint32 materialBundles = 0;
     // BuildFailed·WriteFailed의 영어 이유(정적 수명)다.
     const char* reason = "";
 };
@@ -154,11 +200,13 @@ struct ShaderLibrarySourceUse {
 
 struct ShaderLibraryCookReport {
     explicit ShaderLibraryCookReport(Allocator& allocator) noexcept
-        : formats(allocator), failures(allocator), sources(allocator) {
+        : formats(allocator), failures(allocator), bundleProblems(allocator), sources(allocator) {
     }
 
     Array<ShaderLibraryCookFormat> formats;
     Array<ShaderLibraryCookJobFailure> failures;
+    // 머티리얼 묶음 정규화 문제다(형식 순, 형식 안에서는 정렬 순 — 결정적).
+    Array<ShaderLibraryBundleProblem> bundleProblems;
     // 모든 형식 job의 전처리 include 폐포(엔트리·Platform.rsh·include·정점 입력 원문 — 전처리까지
     // 간 job은 컴파일이 실패해도 들어간다)를 원문별로 모은 것이다(가상 경로 처음 나온 순서).
     Array<ShaderLibrarySourceUse> sources;
@@ -166,11 +214,11 @@ struct ShaderLibraryCookReport {
 
 // desc대로 형식마다 라이브러리를 쿠킹한다(위 설명). report는 먼저 비우고 형식마다 한 줄을 남긴다.
 // 반환: 모든 형식이 Written·Unchanged면 성공. 아니면 첫 실패 형식의 오류(JobsFailed
-// DependencyFailed, CorruptEntry AlreadyExists, BuildFailed InvalidArgument, WriteFailed 파일
-// 오류)다. 입력 오류: allocator·registry·manager가 null이거나 출력 디렉터리가 비었거나 정점 입력
-// 타입이 잘못됨(id 0·이름 해시 불일치·중복) InvalidArgument, 등록부가 Freeze되지 않았으면 NotReady.
-// 할당 실패는 OutOfMemory다. Compile 자체의 오류(관리자 미시작 등)와 취소(Cancelled)는 그대로
-// 돌려준다.
+// DependencyFailed, CorruptEntry AlreadyExists, BuildFailed·BundleFailed InvalidArgument,
+// WriteFailed 파일 오류)다. 입력 오류: allocator·registry·manager가 null이거나 출력 디렉터리가
+// 비었거나 정점 입력 타입이 잘못됨(id 0·이름 해시 불일치·중복)이거나 Engine 라이브러리에 머티리얼
+// 묶음 InvalidArgument, 등록부가 Freeze되지 않았으면 NotReady. 할당 실패는 OutOfMemory다. Compile
+// 자체의 오류(관리자 미시작 등)와 취소(Cancelled)는 그대로 돌려준다.
 ROCKS_SHADERCOMPILER_API Result<void> CookShaderLibraries(const ShaderLibraryCookDesc& desc,
                                                           ShaderLibraryCookReport& report) noexcept;
 
