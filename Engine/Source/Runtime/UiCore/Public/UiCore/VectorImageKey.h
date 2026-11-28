@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/StringView.h>
 
 namespace rocks::ui {

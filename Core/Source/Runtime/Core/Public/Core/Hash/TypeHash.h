@@ -3,7 +3,7 @@
 #include <Base/TypeTraits.h>
 #include <Base/Endian.h>
 #include <Base/Guid.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 

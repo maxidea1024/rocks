@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/StringView.h>
 
 // Json.cpp·JsonParser.cpp·JsonWriter.cpp가 같이 쓰는 내부 도구다(공개 API가 아니다).

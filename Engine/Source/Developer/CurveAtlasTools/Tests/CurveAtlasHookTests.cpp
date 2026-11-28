@@ -2,7 +2,7 @@
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Tests/AssetTestSupport.h>
 #include <Base/InitializerList.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <CurveAssets/ColorCurveAsset.generated.h>
 #include <CurveAtlas/ColorCurveAtlas.generated.h>
 #include <CurveAtlas/CurveAtlasModule.h>

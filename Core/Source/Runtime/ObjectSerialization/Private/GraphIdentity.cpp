@@ -1,5 +1,5 @@
 #include "GraphInternal.h"
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Memory.h>

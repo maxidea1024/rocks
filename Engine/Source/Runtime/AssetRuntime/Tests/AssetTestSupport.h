@@ -7,7 +7,7 @@
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <AssetTestFixtures/TestAssets.h>
 #include <Base/Endian.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/NamePool.h>

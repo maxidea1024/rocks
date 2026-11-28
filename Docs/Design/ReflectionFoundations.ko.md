@@ -187,7 +187,7 @@ UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 �
 
 ### 3.2 `Sha256Digest`
 
-- Core의 `Sha256Digest`(`Core/Encoding/Sha256.h`, 32 byte)를 쓴다. `ValueKind::Digest256`, wire `Bytes`(9), 길이 정확히 32(아니면 InvalidArgument). `FieldValue`에 `digest` 칸을 더한다.
+- Core의 `Sha256Digest`(`Core/Hash/Sha256.h`, 32 byte)를 쓴다. `ValueKind::Digest256`, wire `Bytes`(9), 길이 정확히 32(아니면 InvalidArgument). `FieldValue`에 `digest` 칸을 더한다.
 
 ### 3.3 `SoftObjectRef<T>`
 
@@ -862,10 +862,10 @@ Transaction·Undo 기록·병합(CU4 — B6은 옛 값 출력까지), 변경 통
   toolchain-target: x86_64-pc-windows-msvc19.29.30159
   toolchain-abi: <AbiFields — 정렬된 key=value 목록을 ;로 이음>
   host-dependent: no
-  action: Compile src:Core/Source/Runtime/Core/Private/Encoding/Sha256.cpp
+  action: Compile src:Core/Source/Runtime/Core/Private/Hash/Sha256.cpp
   arg: /nologo
   …
-  input: src:Core/Source/Runtime/Core/Public/Core/Encoding/Sha256.h <64 hex>
+  input: src:Core/Source/Runtime/Core/Public/Core/Hash/Sha256.h <64 hex>
   ```
   액션은 (종류, Compile이면 소스 키·나머지는 모듈 이름)의 ordinal 순, 인자는 원래 순서, 입력은 키 ordinal 순·중복 제거. ID는 진단·캐시 무효화용이며 호스트에 따라 달라질 수 있는 `toolchain-target`·`toolchain-abi`를 일부러 담는다(호환·병합 판정에 쓰지 않는다). 형식 2는 `executable:` 다음 줄에 `engine-version:`(요청의 엔진 버전, 정규 10진 "주.부.패치" — 8.2절)을 더했다.
 - 입력: 1단계 액션의 `Inputs`, `DeclaredInputs`(액션 key와 같이 `headersOnly:false`·제외 없음으로 열되 `<out>/BuildInfo`는 명시적으로 뺀다), `HeaderDirectories`를 `Fingerprints.TreeFiles(dir, headersOnly:true, …)`로 연 파일(액션 key·InputSnapshot과 같은 열거). 액션 출력·`<out>/BuildInfo`·`OwnedRoots` 아래 파일은 뺀다. MetaCompiler 생성 헤더(`out:Generated/…`)는 넣는다(액션 그래프보다 앞 단계의 출력이므로 입력이다 — identity 명세 ID 재배정과 MetaCompiler 변경이 ID에 보인다). 규칙 원본(`*.Build.cs`)은 해시하지 않는다(규칙의 영향은 모두 액션의 소스 목록·인자·include 순서·라이브러리로 나타나고, Program.cs는 컴파일된 규칙 어셈블리만 갖는다). depfile은 쓰지 않는다.

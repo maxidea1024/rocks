@@ -4,7 +4,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/HashMap.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Object/ObjectRefs.h>
 #include <Object/PreparedReferences.h>
 #include <Object/PreparedStructElements.h>

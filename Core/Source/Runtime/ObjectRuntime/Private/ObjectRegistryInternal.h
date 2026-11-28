@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/Containers/HashMap.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Fatal.h>
 

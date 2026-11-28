@@ -1,7 +1,7 @@
 #include "ImageCodecInternal.h"
 
 #include <Compression/Compression.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 
 // PNG 디코더다(Docs/Design/AssetSystem 15·12.2·12.9절): 색 형식 0·2·3·4·6, 비트 깊이 1–16, Adam7,
 // PLTE·tRNS, chunk CRC, zlib(Core Compression — Adler-32 포함), 해제 크기 = IHDR 계산값. 결과

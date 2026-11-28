@@ -5,7 +5,7 @@
 #include <Platform/Cpu.h>
 
 // SHA-256 압축 커널(Docs/Design/CoreDataFoundations.ko.md 6절)이다.
-// Sha256(Core/Encoding/Sha256.h)이 이 프로세스의 커널 하나를 골라 쓰고, 시험은 커널마다 스칼라와
+// Sha256(Core/Hash/Sha256.h)이 이 프로세스의 커널 하나를 골라 쓰고, 시험은 커널마다 스칼라와
 // 대조한다.
 //
 // 사용 예(시험):

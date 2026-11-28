@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/Compiler.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 #include <Object/AssetId.h>

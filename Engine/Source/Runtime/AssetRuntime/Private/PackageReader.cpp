@@ -6,8 +6,8 @@
 #include <Compression/Compression.h>
 #include <Core/Algorithms.h>
 #include <Core/Assert.h>
-#include <Core/Encoding/Crc32.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Crc32.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Text/NameComponent.h>
 #include <Object/ObjectIdentity.h>
 #include <Object/TypeRegistry.h>

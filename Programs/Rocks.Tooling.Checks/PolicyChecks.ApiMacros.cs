@@ -25,7 +25,7 @@ public static partial class PolicyChecks
         "Core/Source/Runtime/Compression/Private/CompressedBlocksInternal.h",
         "Core/Source/Runtime/Core/Private/App/CommandLineStorage.h",
         "Core/Source/Runtime/Core/Private/Diagnostics/LogInternal.h",
-        "Core/Source/Runtime/Core/Private/Encoding/Sha256Kernels.h",
+        "Core/Source/Runtime/Core/Private/Hash/Sha256Kernels.h",
         "Core/Source/Runtime/Core/Private/Memory/AddressLedger.h",
         "Core/Source/Runtime/Core/Private/Memory/BinnedAllocatorTestHooks.h",
         "Core/Source/Runtime/Core/Private/Text/DecimalConversion.h",

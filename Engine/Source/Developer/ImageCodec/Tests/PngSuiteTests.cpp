@@ -1,6 +1,6 @@
 #include "ImageFuzz.h"
 
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/FileRead.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>

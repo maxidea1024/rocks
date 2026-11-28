@@ -290,7 +290,7 @@
 //                            정의한다.
 //   ROCKS_TARGET_ARM64_SHA2  NEON·SHA2(SHA256H·SHA256H2·SHA256SU0·SHA256SU1). 감지 조건: armSha2.
 //                            ROCKS_ARCH_ARM64에서만 정의한다.
-// - 정책 검사 target-intrinsics: 이 매크로와 SHA 계열 intrinsics는 Core/Private/Encoding/에서만
+// - 정책 검사 target-intrinsics: 이 매크로와 SHA 계열 intrinsics는 Core/Private/Hash/에서만
 // 쓴다.
 #if ROCKS_ARCH_X64
 #define ROCKS_TARGET_X64_SHA __attribute__((target("sha,sse4.1")))

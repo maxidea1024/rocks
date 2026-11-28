@@ -3,7 +3,7 @@
 #include <AssetDatabase/ProjectLayout.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>

@@ -4,7 +4,7 @@
 #include <Object/ReferenceLayout.h>
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Move.h>
 #include <Core/Text/Name.h>

@@ -55,7 +55,7 @@ public static partial class PolicyChecks
                     "|\\b_mm(?:256|512)?_(?:sha|sm3|sm4)[a-z0-9_]*\\b|\\bv(?:sha1|sha256|sha512|sm3|sm4)[a-z0-9_]*\\b" +
                     "|\\b(?:veor3q|vrax1q|vxarq|vbcaxq)_[a-z0-9]+\\b|\\b__builtin_ia32_(?:sha|vsha512|vsm3|vsm4)[a-z0-9_]*\\b" +
                     "|\\b__builtin_neon_v(?:sha1|sha256|sha512|sm3|sm4|eor3q|rax1q|xarq|bcaxq)[a-z0-9_]*\\b"),
-            ["Core/Source/Runtime/Core/Private/Encoding/"]),
+            ["Core/Source/Runtime/Core/Private/Hash/"]),
     ];
 
     /// <summary>
@@ -67,7 +67,7 @@ public static partial class PolicyChecks
     /// Base/Compiler.h 밖에서 직접 쓴다. 허용 디렉터리 안에서도 대신 <c>ROCKS_TARGET_*</c> 매크로를 쓴다.</item>
     /// <item>target-intrinsics: 계열의 target 매크로·intrinsics를 그 계열의 디렉터리 밖에서 쓰거나(주석·리터럴 제외), 어느 계열에도
     /// 속하지 않은 <c>ROCKS_TARGET_*</c> 매크로를 정의·사용한다. AES·carry-less 곱셈과 <c>ROCKS_TARGET_X64_AES</c>·
-    /// <c>ROCKS_TARGET_ARM64_AES</c>는 Crypto/Private/Aes/, SHA 계열은 Core/Private/Encoding/이다. 시험 소스도 같다(시험의 기준
+    /// <c>ROCKS_TARGET_ARM64_AES</c>는 Crypto/Private/Aes/, SHA 계열은 Core/Private/Hash/이다. 시험 소스도 같다(시험의 기준
     /// 구현은 스칼라다).</item>
     /// </list>
     /// 외부 라이브러리 원본은 <see cref="NativeSources"/>가 제외한다(libsodium의 target pragma는 manifest pragmaDirectives가

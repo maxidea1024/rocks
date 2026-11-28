@@ -16,7 +16,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | GraphicsTypes | RGBA8 2종, 2D, 필터 4종(`PixelFormat.h:12–16`, `Sampler.h:11–20`) | A0-G(다른 문서, 5.2절 요구) |
 | 수학 타입 | `Matrix4`·`Vector3`는 정렬 지정 없음(`Core/Source/Runtime/Core/Public/Core/Math/Matrix4.h:56–61`, `Vector3.h:19–24`) | 셰이더 전용 정렬 타입(7.2절 5항) → SH2 |
 | 플랫폼 | `Platform/Process.h`(P1 구현), `Platform/DirectoryWatch.h:88`(A0-P 구현). `Platform/DynamicLibrary.h`(P10 구현, Windows 검증, XInput이 이 API로 연다). PlatformWindow는 Win32만이고 다른 플랫폼은 Unsupported(`PlatformWindow.Build.cs`) | P10, P12, P13 |
-| Core | SHA-256(`Core/Encoding/Sha256.h:23,40`), JSON(`Core/Text/Json.h`), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`), 툴체인 지문·도구 빌드 ID(`Core/Build/BuildInfo.h:24,30`), Archive·Record·RecordList, `WorkerScheduler`, `CommandletRegistry` | 그대로 쓴다(5.2절) |
+| Core | SHA-256(`Core/Hash/Sha256.h:23,40`), JSON(`Core/Text/Json.h`), 결정적 수학 버전 `rocks::deterministic::Version`(`DeterministicMath/DeterministicMath.h:31`), 툴체인 지문·도구 빌드 ID(`Core/Build/BuildInfo.h:24,30`), Archive·Record·RecordList, `WorkerScheduler`, `CommandletRegistry` | 그대로 쓴다(5.2절) |
 | 리플렉션 | A0-B B1–B8 구현(`ROCKS_STRUCT`·identity·배열·지정자·World 타입, `e405c37`) | 셰이더 파라미터 종류 → P7 |
 | ThirdParty | 루트 `Core/Source/ThirdParty` 하나(`Programs/Rocks.Tooling.Common/ThirdPartyManifest.cs:76`), `kind`는 `code`·`data`(`:28`), `code`는 `.c` 번역 단위만(`:357–364`), 미리 빌드된 바이너리 필드 없음(`:132–136`, 모르는 필드는 오류 `:45`) | P3 |
 | 빌드 | 모듈 종류는 StaticLibrary·Executable(`Programs/Rocks.Build/NativeBuildModels.cs:38`), 언어는 C·C++(`:57`), `PrebuiltLibraries`(`:147`), 런타임 파일 복사는 Asan DLL만(`ActionGraph.cs:329–337`), rpath 처리 없음, 생성 코드 `<out>/Generated/<Module>`·`<out>/BuildInfo` | P4·P12 |

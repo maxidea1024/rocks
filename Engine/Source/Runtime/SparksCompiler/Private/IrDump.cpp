@@ -2,7 +2,7 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <SparksVm/BytecodeFile.h>
 
 #include "BcEncoder.h"

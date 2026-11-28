@@ -1,6 +1,6 @@
 #include <Base/Compiler.h>
-#include <Core/Encoding/Sha256.h>
-#include <Core/Private/Encoding/Sha256Kernels.h>
+#include <Core/Hash/Sha256.h>
+#include <Core/Private/Hash/Sha256Kernels.h>
 #include <Platform/Cpu.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>

@@ -1315,7 +1315,7 @@ internal static partial class SelfTests
             using TemporaryDirectory temporary = new();
             const string compiler = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
             const string aes = "Core/Source/Runtime/Crypto/Private/Aes/AesKernels.cpp";
-            const string sha = "Core/Source/Runtime/Core/Private/Encoding/Sha256Hardware.cpp";
+            const string sha = "Core/Source/Runtime/Core/Private/Hash/Sha256Hardware.cpp";
             const string probe = "Engine/Source/Runtime/Probe/Private/Probe.cpp";
             const string test = "Core/Source/Runtime/Crypto/Tests/ProbeTests.cpp";
             const string math = "Core/Source/Runtime/PlatformBase/Public/Platform/Math/ClangPlatformMath.h";

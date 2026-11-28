@@ -4,7 +4,7 @@
 #include <TextLayout/GlyphCache.h>
 
 #include <Core/Diagnostics/Log.h>
-#include <Core/Hash.h>
+#include <Core/Hash/TypeHash.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/Memory.h>
 #include <string.h>

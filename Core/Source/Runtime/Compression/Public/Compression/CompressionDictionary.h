@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Compression/Compression.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/SharedPtr.h>
 
 // 압축 사전이다(Docs/Design/Compression.ko.md 11절). 작은 입력(수십 byte–수십 KiB)이 많을 때 공통

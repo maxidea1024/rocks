@@ -3,7 +3,7 @@
 #include "LiveCountingAllocator.h"
 
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Crc32.h>
+#include <Core/Hash/Crc32.h>
 #include <ImageCodec/ImageDecode.h>
 #include <Texture/TextureSource.h>
 

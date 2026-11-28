@@ -1,6 +1,6 @@
 # Core 데이터 기반 보강(A0-C) 설계
 
-기준일: 2026-11-28, 초안 5(6절 SHA-256 하드웨어 경로 C7 — 셰이더 워커 시작 비용 측정 근거, Rockpile R0 항목을 앞당김). 초안 4(2026-11-27, 2.2절 `Cos`·`Atan` 추가 — 커브 쿠킹 평가 CurveData D22). 초안 3(2026-11-12, 교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Encoding/Sha256.h`).
+기준일: 2026-11-28, 초안 5(6절 SHA-256 하드웨어 경로 C7 — 셰이더 워커 시작 비용 측정 근거, Rockpile R0 항목을 앞당김). 초안 4(2026-11-27, 2.2절 `Cos`·`Atan` 추가 — 커브 쿠킹 평가 CurveData D22). 초안 3(2026-11-12, 교차검증 2건·최종 검증 반영, C1 구현 반영). [에셋 시스템 설계](AssetSystem/01-Stages.ko.md) 1절 A0-C 단계의 상세다. 에셋 경로 키(Unicode 정규화·case folding), 쿠킹 결정성(결정적 수학), 설정 파일(JSON), 패키지 Record 목록(`RecordList`)이 이 기반을 쓴다. [Core 상세 사양](CoreDetailedSpec.ko.md) T03(Unicode normalization·case folding 후속)을 이 문서가 구체화한다. SHA-256은 구현되어 있다(`Core/Hash/Sha256.h`).
 
 원칙: 표준 라이브러리 없이 Core에 구현한다. 외부 데이터(UCD·시험 데이터)는 고정 버전 원본을 저장소에 두고 생성기로 표를 만든다(라이선스 고지 포함). 결과가 호스트·CRT·locale에 따라 달라질 수 있는 연산은 쓰지 않는다.
 
@@ -219,14 +219,14 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 Debug 워커 하나가 시작에 쓰는 약 1.5 s 가운데 약 1.2 s가 이 해시다. 너겟 키·에셋 원본 해시·쿠킹 결과 대조도 같은 `Sha256`을 쓰므로, 워커 쪽만 우회하지 않고 Core 구현에 하드웨어 경로를 넣는다. Rockpile R0(12.6절)가 계획한 항목과 같은 것이다.
 
 **구조.**
-- 내부 헤더 `Core/Private/Encoding/Sha256Kernels.h`(namespace `rocks::detail`)는 블록 함수 `Sha256BlocksFunction = void(*)(uint32* state, const uint8* blocks, usize count) noexcept`를 정의한다. 64 byte 블록 `count`개를 차례로 압축하며, 경계는 블록 하나가 아니라 버퍼 단위다(Compiler.h target 속성 규칙).
+- 내부 헤더 `Core/Private/Hash/Sha256Kernels.h`(namespace `rocks::detail`)는 블록 함수 `Sha256BlocksFunction = void(*)(uint32* state, const uint8* blocks, usize count) noexcept`를 정의한다. 64 byte 블록 `count`개를 차례로 압축하며, 경계는 블록 하나가 아니라 버퍼 단위다(Compiler.h target 속성 규칙).
 - 커널은 셋이다.
   - `Scalar`: 지금 구현이다.
   - `X64Sha`: SHA-NI(`SHA256RNDS2`·`SHA256MSG1`·`SHA256MSG2`)와 SSSE3 `PSHUFB`, SSE4.1 `PBLENDW`를 쓴다. 조건은 `cpu.sha && cpu.sse42`이다(SSE4.2 보고는 SSSE3·SSE4.1을 포함한다).
   - `Arm64Sha2`: ARMv8 `SHA256H`·`SHA256H2`·`SHA256SU0`·`SHA256SU1`을 쓴다. 조건은 `cpu.armSha2`이다.
 - `SelectSha256Kernel(cpu)`는 조건을 만족하는 이 아키텍처의 커널을, 아니면 `Scalar`를 돌려준다. `Sha256KernelBlocks(kernel)`는 블록 함수를 돌려준다.
 - `CheckSha256Kernel(blocks)`는 알려진 답으로 자가 시험한다: 한 블록(`"abc"`), 두 블록(448 bit NIST 메시지), 여러 블록을 한 번에 넘긴 결과와 블록마다 넘긴 결과의 동치.
-- target 매크로는 `Base/Compiler.h`에 둔다: `ROCKS_TARGET_X64_SHA`(`"sha,sse4.1"`), `ROCKS_TARGET_ARM64_SHA2`(`"neon,sha2"`). 정책 `target-intrinsics`의 SHA 계열에 넣고, 쓰는 곳은 `Core/Private/Encoding/`뿐이다(Crypto 5.3절).
+- target 매크로는 `Base/Compiler.h`에 둔다: `ROCKS_TARGET_X64_SHA`(`"sha,sse4.1"`), `ROCKS_TARGET_ARM64_SHA2`(`"neon,sha2"`). 정책 `target-intrinsics`의 SHA 계열에 넣고, 쓰는 곳은 `Core/Private/Hash/`뿐이다(Crypto 5.3절).
 
 **선택.**
 - 첫 `Compress` 때 함수 안 static으로 한 번 고른다. 순서는 `QueryCpuFeatures()` → `SelectSha256Kernel` → `Scalar`가 아니면 `CheckSha256Kernel`이다. 결과는 프로세스 끝까지 같다.
