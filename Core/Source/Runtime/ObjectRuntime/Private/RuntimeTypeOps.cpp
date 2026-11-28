@@ -4,10 +4,70 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/SoftObjectRef.h>
 #include <Object/TypeRegistry.h>
+#include <Platform/Memory.h>
 
 // RuntimeTypeOps.h의 필드 쓰기 경로다. FieldWriteOperation 호출(문맥·대상 타입·필드 검사 뒤
-// callback)과 공용 검증(detail::ValidateFieldWrite·ValidateArrayLength·ValidateArrayEdit)을 둔다.
+// callback, Notify 필드의 변경 통지)과 공용 검증(detail::ValidateFieldWrite·ValidateArrayLength·
+// ValidateArrayEdit)을 둔다.
 namespace rocks {
+
+namespace {
+
+// 최상위 쓰기의 같은 값 판정이다(Docs/Design/ChangeNotification.ko.md CN-D15): 스칼라·enum은 비트
+// 같음(0.0과 -0.0은 다름, NaN payload 구별), 문자열은 byte, 참조는 대상 정체성(null끼리 같음),
+// Name은 토큰과 표시 문자열. Text와 그 밖의 형식은 늘 다르다.
+bool SameFieldValue(const FieldValue& current, const FieldValue& next) noexcept {
+    if (current.kind != next.kind || current.present != next.present) {
+        return false;
+    }
+
+    if (!current.present) {
+        return true;
+    }
+
+    switch (current.kind) {
+    case ValueKind::Bool:
+        return current.boolean == next.boolean;
+    case ValueKind::UInt8:
+    case ValueKind::UInt16:
+    case ValueKind::UInt32:
+    case ValueKind::UInt64:
+        return current.unsignedInteger == next.unsignedInteger;
+    case ValueKind::Int8:
+    case ValueKind::Int16:
+    case ValueKind::Int32:
+    case ValueKind::Int64:
+        return current.signedInteger == next.signedInteger;
+    case ValueKind::Enum:
+        return current.type == next.type && current.signedInteger == next.signedInteger;
+    case ValueKind::Float32:
+        return platform::BitCast<uint32>(current.float32) ==
+               platform::BitCast<uint32>(next.float32);
+    case ValueKind::Float64:
+        return platform::BitCast<uint64>(current.float64) ==
+               platform::BitCast<uint64>(next.float64);
+    case ValueKind::Guid:
+    case ValueKind::AssetId:
+    case ValueKind::ClassReference:
+        return current.guid == next.guid;
+    case ValueKind::Utf8String:
+        return current.string.View() == next.string.View();
+    case ValueKind::SoftObjectReference:
+        return current.guid == next.guid && current.string.View() == next.string.View();
+    case ValueKind::ObjectReference:
+    case ValueKind::WeakObjectReference:
+        return current.reference.IsNull() ? next.reference.IsNull()
+                                          : current.reference == next.reference;
+    case ValueKind::Digest256:
+        return current.digest == next.digest;
+    case ValueKind::Name:
+        return current.name == next.name && current.name.displayId == next.name.displayId;
+    default:
+        return false;
+    }
+}
+
+} // namespace
 
 Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
                                              const ObjectAccessContext& access, ObjectHandle handle,
@@ -173,18 +233,41 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         classLease = Move(found.Value());
     }
 
+    // 변경 통지(Docs/Design/ChangeNotification.ko.md CN-D10): Notify 필드의 쓰기가 성공하면 알린다.
+    // 강한 참조는 생성 write가 부르는 SetReference가 알린다(handle이 바뀐 때만). 구독자가 있을 때만
+    // 쓰기 전 값을 등록된 read로 읽어 같은 값이면 알리지 않는다(CN-D15 — 읽지 못하면 다르다로
+    // 본다, Text는 늘 다르다로 보므로 읽지 않는다).
+    const bool notify = HasFlag(actual->flags, FieldFlags::Notify) &&
+                        actual->value.kind != ValueKind::ObjectReference;
+    bool unchanged = false;
+    if (notify && value.kind != ValueKind::Text && registry.NotifyWatched(handle)) {
+        const RuntimeFieldOps* ops = type.Value().FieldOps(actualIndex);
+        FieldValue current(value.GetAllocator());
+        unchanged = ops && ops->read && ops->read(registry, access, handle, current) &&
+                    SameFieldValue(current, value);
+    }
+
     // 수동 함수표가 비정규 handle을 저장하지 않게 callback에는 정규 null 사본을 넘긴다(참조 값의
     // 문자열은 비어 있으므로 할당하지 않는다).
+    Result<void> written = Result<void>::Success();
     if ((value.kind == ValueKind::ObjectReference ||
          value.kind == ValueKind::WeakObjectReference) &&
         value.reference.IsNull() && value.reference != ObjectHandle{}) {
         FieldValue normalized(value.GetAllocator());
         normalized.kind = value.kind;
         normalized.reference = ObjectHandle{};
-        return callback_(registry, access, handle, normalized);
+        written = callback_(registry, access, handle, normalized);
+    } else {
+        written = callback_(registry, access, handle, value);
     }
 
-    return callback_(registry, access, handle, value);
+    // 쓰기는 이미 성공했다 — 통지의 실패는 쓰기 결과를 바꾸지 않는다(접근·종료는 위에서 보았고,
+    // callback이 owner를 파괴 요청했으면 통지는 Success로 아무도 부르지 않는다).
+    if (written && notify && !unchanged) {
+        (void)registry.NotifyChecked(access, handle, fieldId_, NotifyIndexNone);
+    }
+
+    return written;
 }
 
 namespace detail {

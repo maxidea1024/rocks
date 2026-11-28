@@ -97,9 +97,10 @@ void JoltPhysicsScene::UpdateBodySettings(PhysicsBodyHandle handle, const BodySe
     switch (change) {
     case BodySettingsChange::Gravity:
         bodies.SetGravityFactor(slot.body, settings.enableGravity ? 1.0f : 0.0f);
-        // 켜면 깨운다(UE SetEnableGravity → WakeInstance — Dynamic만).
+        // 켜면 깨운다(UE SetEnableGravity → WakeInstance — Dynamic만). 이벤트는 없고 쌓인 것을
+        // 지운다(WakeUp_AssumesLocked — 7.1.19절).
         if (settings.enableGravity && slot.motion == BodyMotion::Dynamic) {
-            bodies.ActivateBody(slot.body);
+            WithoutWakeEvents(slot, true, [&]() noexcept { bodies.ActivateBody(slot.body); });
         }
 
         break;

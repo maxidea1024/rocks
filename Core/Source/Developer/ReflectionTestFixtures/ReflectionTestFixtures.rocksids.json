@@ -3142,6 +3142,69 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::byKey",
+      "id": "e63cf31b3f0848ad9bc5fde41a27caf1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::byKind",
+      "id": "d5321caf5e7e4707842b71aab2667960",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::members",
+      "id": "5bf777280560458397cb817bd33b74ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::numbers",
+      "id": "159bf261f353414e8ebe5efe1c679eb2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::point",
+      "id": "c6a4651dcea342aabff37bc4cf05492d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::quiet",
+      "id": "e8e584b637a14593ade9ca421fd72b5c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::ratio",
+      "id": "1e17587f8292476195999734ffb37de3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::slots",
+      "id": "24fc5e3b9c9c4ab78a1800f03aea15b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyHolder::target",
+      "id": "e57f5a83cf2048849ae6b8b24abd3493",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::NotifyModel::health",
       "id": "05c7decc427d474ab38e1e1de5607445",
       "aliases": [],
@@ -3172,6 +3235,41 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::NotifyModelChild::speed",
       "id": "f3732e4641c842f38d03adb252b0e61a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyPoint::pin",
+      "id": "77bc876646ac4e268f4739d3decb70a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyPoint::x",
+      "id": "6c2a95a31285445ba8eb093129c5ffb9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifyPoint::y",
+      "id": "93ae7321222e4808967b67d1ed6f7a7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifySlot::count",
+      "id": "7266901970d346568b23ec7193c08239",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::NotifySlot::item",
+      "id": "43484c569ec44f7c8fd97f88508cc468",
       "aliases": [],
       "retired": false
     },
@@ -5566,6 +5664,27 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyHolder",
+      "id": "7ab1fdd62738464bad6db900ba915a1d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyHolderChild",
+      "id": "132e06765e9044d29f058747614c356f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyKind",
+      "id": "ba62ff1d2b5b465e97129501be5b67ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::NotifyModel",
       "id": "6cafbaba4f1242f2840676209bbf285e",
       "aliases": [],
@@ -5575,6 +5694,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::NotifyModelChild",
       "id": "d4f82027e0d04ba5ba78ec48555a3b89",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifyPoint",
+      "id": "f8e8c69436e84f268e2a74d8aab12de2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::NotifySlot",
+      "id": "f3177802656b4cc0bf3850caf1a6a738",
       "aliases": [],
       "retired": false
     },

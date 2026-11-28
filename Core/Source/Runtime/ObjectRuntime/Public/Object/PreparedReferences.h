@@ -70,6 +70,11 @@ struct PreparedReferencesAccess;
 // 소유 스레드 전용이다. 한 사본은 처음 묶은 컨테이너 하나에만 쓴다 — 다른 컨테이너에 닿는 연산은
 // InvalidArgument(InvalidValue)다. 준비와 게시 사이에 그 객체의 컨테이너를 바꾸면 계약 위반이다
 // (리플렉션 쓰기·Registry 참조 변경은 변경 표지가 잡아 BeginBatchPublish가 Busy다).
+//
+// 변경 통지: 구간 안의 게시는 Notify 필드를 알리지 않는다(그 구간의 통지는 Busy다 —
+// Docs/Design/ChangeNotification.ko.md CN-D10·CN-D11). 게시한 호출자가 End 뒤에 게시한 최상위
+// 필드를 ObjectRegistry::NotifyIfTarget으로 알린다(여러 자리면 NotifyGroup으로 한 번씩 — 경로
+// 진입점과 ReflectionText 대입 묶음이 그렇게 한다). 알리지 않으면 구독자는 그 변경을 놓친다.
 class ROCKS_OBJECTRUNTIME_API PreparedReferences {
 public:
     // allocator는 handle 목록(배열 사본·Previous·Current)의 allocator다. Map 사본과 새 배열 버퍼는

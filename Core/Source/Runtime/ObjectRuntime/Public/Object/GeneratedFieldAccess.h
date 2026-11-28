@@ -887,6 +887,16 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
     }
 }
 
+// 생성 RuntimeFieldOps::storage thunk다(Docs/Design/ChangeNotification.ko.md CN-D10): object(Owner
+// 또는 파생 타입)의 멤버 주소와 크기. offsetof는 표준 배치가 아닌 클래스에서 쓸 수 없으므로 실제
+// 객체에서 잰다(참조 위치 표 Object/ReferenceLayout.h와 같다).
+template <class Owner, auto Member>
+Span<const uint8> FieldStorage(const Object& object) noexcept {
+    const auto& member = static_cast<const Owner&>(object).*Member;
+    return Span<const uint8>(reinterpret_cast<const uint8*>(platform::AddressOf(member)),
+                             sizeof(member));
+}
+
 template <class Owner, class MemberOwner, class Member>
 Result<void> WriteGeneratedStagedField(ConstructionContext& construction, ObjectHandle handle,
                                        Member MemberOwner::* member,

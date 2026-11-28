@@ -154,6 +154,15 @@ Result<void> PhysicsWorldSubsystem::ApplyResults(World& world) noexcept {
         }
     }
 
+    // 자세 반영 뒤 깨움·잠듦 이벤트를 칸 번호 순으로 발행한다(UE OnSyncBodies — 이동 뒤
+    // DispatchWakeEvents, 7.1.19절). 꺼낸 목록은 hook이 장면을 바꿔도 그대로다.
+    for (const physics::WakeEvent& event : scene.TakeWakeEvents()) {
+        (void)world.With<PrimitiveComponent>(event.component,
+                                             [&](PrimitiveComponent& primitive) noexcept {
+                                                 primitive.DispatchWakeEvents(event.awake);
+                                             });
+    }
+
     // 결과 반영 뒤 시뮬레이션 접촉 hit를 스텝 순서대로 발행한다(3.1절 (2), 7.1.12절). 결과 반영이
     // 실패해도 발행한다(쌓인 hit는 다음 프레임으로 미루지 않는다). 꺼낸 목록은 hook이 장면을 바꿔도
     // 그대로다.
