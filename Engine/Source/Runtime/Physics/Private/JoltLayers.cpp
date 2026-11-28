@@ -38,6 +38,11 @@ bool ObjectVsBroadPhaseFilter::ShouldCollide(JPH::ObjectLayer layer,
         return false;
     }
 
+    // QueryOnly 묶음(시뮬레이션하는 부분이 없는 compound 포함 — 7.1.24절)은 쌍을 만들지 않는다.
+    if (ObjectLayerMotion(layer) == LayerMotion::QueryOnly) {
+        return false;
+    }
+
     const auto other = static_cast<JPH::BroadPhaseLayer::Type>(broadPhase);
     if (other == static_cast<JPH::BroadPhaseLayer::Type>(LayerMotion::QueryOnly)) {
         return false;
@@ -56,6 +61,13 @@ bool ObjectLayerPairFilter::ShouldCollide(JPH::ObjectLayer first, JPH::ObjectLay
     if (ObjectLayerMotion(first) == LayerMotion::Static &&
         ObjectLayerMotion(second) == LayerMotion::Static) {
         return false;
+    }
+
+    // compound body(weld)는 부분 층으로 잎 단계에서 판정한다(SimShapeFilter — 7.1.24절).
+    // 시뮬레이션하는 부분이 없는 compound(QueryOnly 묶음)는 쌍이 없다.
+    if (IsCompoundLayer(first) || IsCompoundLayer(second)) {
+        return ObjectLayerMotion(first) != LayerMotion::QueryOnly &&
+               ObjectLayerMotion(second) != LayerMotion::QueryOnly;
     }
 
     // 서로의 object type에 대한 응답의 최소가 Block일 때만 시뮬레이션 접촉이다(6.2절 2–3단계 — UE

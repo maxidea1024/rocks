@@ -1,11 +1,14 @@
 #include "AudioDeviceContext.h"
 
 #include <Core/Assert.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Math/MathUtility.h>
 
 namespace rocks {
 
 namespace {
+
+inline constexpr LogCategory LogAudioStreamClips{"AudioStreamClips"};
 
 // CollectFinished 한 번에 받는 terminal 수다(다 받을 때까지 반복한다).
 constexpr usize TerminalBatch = 64;
@@ -1063,6 +1066,19 @@ Result<uint32> AudioDeviceContext::AcquireStreamClip(const SoundPlayable& playab
     }
 
     const SoundStreamData& data = *playable.stream;
+    // sidecar 형태(청크 0만 상주)는 청크 캐시가 읽는다(AU6b2 — 3.46.4절). 그 전에는 재생하지
+    // 않는다.
+    if (!data.HasAllPayload()) {
+        if (!sidecarPlaybackLogged_) {
+            sidecarPlaybackLogged_ = true;
+            Log::Warning(LogAudioStreamClips,
+                         "Sidecar streamed sound playback needs the chunk cache (AU6b2); the "
+                         "playback ends as Failed");
+        }
+
+        return Acquired::Failure(ErrorCode::Unsupported);
+    }
+
     auto slot = streams_->AcquireSlot(data.ChannelCount());
     if (!slot) {
         slotRejected = slot.Error() == ErrorCode::CapacityExceeded;

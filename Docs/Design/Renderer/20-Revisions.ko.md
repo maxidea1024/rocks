@@ -1,0 +1,24 @@
+# 렌더러(Renderer) 설계 — 20. 개정 이력
+
+[목차](README.ko.md)
+
+## 20. 개정 이력
+
+- 개정 1(2026-11-18): 초안. 사용자 지시 "스펙 지금 시작해"에 따라 작성했다. UE 5.8.4 Renderer 네 갈래 조사(프레임 흐름·desktop forward·light grid·모바일 선택 / GBuffer·Substrate·shading model·deferred 조명·그림자·정적 조명 / 장면 표현·그리기 명령·GPU Scene·view·가시성·투명·하늘·안개·후처리 / GI·RT·path tracing 진입점)를 종합하고, 핵심 근거 약 40곳을 원문 줄로 다시 대조했다. 사용자 결정(렌더 경로 Forward+·Deferred 둘, GI 두 축, PathTracing 별도 모드, UE 좌표·행렬, Rocks 이름, 레거시 제외, 5개 backend와 지원표)을 1절에 반영했다. 머티리얼 쪽 계약은 동시에 작성 중인 머티리얼 시스템 스펙과 겹치지 않게 14.6절 경계표로 나눴다. 독립 리뷰 1건(UE 인용 약 75곳 대조, 차단 2·중요 11·사소 다수)을 반영했다: GLES image 형식에 맞춰 grid를 `R32Uint` 하나로(8.1절), 큰 월드 위치를 GPU Scene 상위·하위 + view 이동 보정으로(5.1절), light grid 셀 상한 없음과 넘침 보수 대체(8.1절), 그림자 깊이를 UE와 같은 보통 Z·`D16Unorm`으로(9.2절), 단계당 SRV 16 예산표(7.4절, 결정 RN13), 공유 상수와 자원 묶음 분리(15.2절), 간접 draw의 인스턴스 offset(15.2절), 조명 pass의 깊이·스텐실 attachment 제거(GLES feedback loop, 7.3절), Forward+ DBuffer decal(6.2절), skinned 단계 RS12, 텍스처 스트리밍 요구 RQ21, 인용 경로·줄 번호 정정, PostChain ID를 PC로 변경.
+- 개정 2(2026-11-18): 사용자 지시 "결정사항들은 권장안대로 하면됨"으로 RN1–RN11·RN13을 권장안으로 확정했다(19.1절). RN12는 RS10에서 정하고, RN5는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
+- 개정 3(2026-11-18): 머티리얼 시스템 개정 1과 교차 검증해 두 문서를 맞췄다(머티리얼 시스템 10.4절 "정합 결과"). 사용자 결정 반영: RN13을 형식별 SRV 상한으로 개정(1·7.4·13.1·19.1절, RQ22), RN5 번호표의 C++ 정의를 `RenderData`·HLSL 상수를 `/Engine/Shared/`로(3.2·14.2절, 순환 해소). D1–D9 반영: WPO를 정점 함수로 분리하고 머티리얼 생성 함수 표를 둠(14.1절), `AlphaHoldout`을 후속 값으로 명시(14.2·10.2절), 거르기 인자를 `MaterialShaderTraits`로(14.3·14.5·15.3절), "static switch 차원"을 "static 변형"으로(14.6절), pass 표에 경로 열·`RENDER_PATH_*` 정의, depth·그림자 pass의 마스크 전용 함수(14.1·14.3절). 그 밖의 불일치 수정: Render Path Switch의 깊이 일치 규칙, 마스크를 퍼뮤테이션 차원에서 뺌, PDO 함수와 depth PS 조건, 노드 미리보기 pass `MaterialPreview`, 조회 키에 단계·SX5, mask clip 값이 static 정의임, 노멀 공간 변환 위치, `GBuffer`·depth 계열 pass의 렌더러 SRV 합계, 짝 규칙과 샘플러 상한(RQ23), 확정된 RN3을 지원표에 반영, 머티리얼 단계(MS)와 RS 선후(17절), 머티리얼 요구 MRD1–MRD12 처리(14.7절), 대체 계수(16.2절).
+- 개정 4(2026-11-18): 셰이더 시스템 개정 13의 RQ22·RQ23 반영 상태를 적었다(7.4절, 19.1절 표, 18절 RQ22·RQ23).
+- 개정 5(2026-11-18): 19.2절 미확인 3건(GLES texel buffer 형식 RQ9 확인, Vulkan `maxColorAttachments`·단계당 SRV·샘플러 분포)에 RenderBase GX1 측정을 적었다. RQ11·RQ22 값 결정은 하지 않았다.
+- 개정 6(2026-11-18): 셰이더 시스템 개정 14 반영(RQ11·RQ22 Vulkan 값, 19.1절 MRT 행).
+- 개정 7(2026-11-18): 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17(RenderBase 개정 15)과 RQ13·RQ14(셰이더 시스템 개정 16) 반영 상태를 18.1·18.2절에 적었다. RQ14를 반영하면서 MRT 상한을 프로필 공통 상한으로 검사하던 빈틈을 셰이더 시스템에서 고쳤다.
+- 개정 8(2026-11-18): RenderBase 개정 16·셰이더 시스템 개정 17(교차 검증 반영)에 맞췄다. 8.1절 원소 상한과 셀 좌표 clamp, 8.2절 MSAA resolve 범위(결정 R17), 8.3절 반사 capture 알파, 9.2절과 결정 RN10의 point 한 번 그리기를 layer가 아니라 viewport 출력으로 바로잡음, 13.1절 지원표 행, 15.2절 `PrecomputedLighting` 그리기별 바인딩·`ForwardLight` local 광원 수·`Scene`의 `ViewSet` 단위·상수 버퍼 예산, 결정 RN9 재검토 조건, 19.2절 측정 두 건, 18.1절 RQ4·7·8·14–17 행.
+- 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
+- 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.
+- 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
+- 개정 12(2026-11-23): [컴포넌트 도입](../ComponentCatalog/11-Revisions.ko.md) 개정 2 반영 — 3.2절 `WorldIntegration` 행에 컴포넌트 목록 링크(CR12), 4.2절 디버그·편집 표시(CR23).
+- 개정 13(2026-11-23): 디버그·편집 표시 결정(컴포넌트 도입 CD12, 권장안) — 4.2절을 UE와 같은 세 경로(디버그 합성·편집 합성·Shipping base pass)로 고침(개정 12의 "Shipping 처리기 미등록"은 UE와 달라 버림), 11.2절 PC9a·PC9b와 자리, 17절 RS13.
+- 개정 14(2026-11-28): 3.2절 — MaterialCook은 `RendererShaders`를 링크하지 않고 ShaderCore 셰이더 타입 등록부 원천에서 `ShaderTypeMaterialShader` 타입을 본다(머티리얼 시스템 MRD18, 셰이더 시스템 16.5절 SSD92). 2절 용어 표 `RendererShaders` 행과 의존 그림을 고쳤다. pass 타입 거르기는 traits 정규 바이트(셰이더 시스템 SSD86).
+- 개정 15(2026-11-28): 17절 RS0을 RS0a(렌더 단독)·RS0b(머티리얼 사용)로 나누고 머티리얼 최소 선행을 적었다(머티리얼 세션 질문).
+- 개정 16(2026-11-28): 21장 RS0a 설계 — `RendererShaders` 모듈, pass 타입(`DepthPassVertex`·`DepthPassPixel`·`ForwardOpaqueVertex`·`ForwardOpaquePixel`)과 엔진 타입 `DepthPositionOnlyVertex`(UE 위치 전용 depth 판정), traits 거르기, `StaticMeshVertexInput`, GPU Scene 인스턴스 항목 10 float4(MRD7 확정)와 격자 2,097,152 cm(MRD6 확정, UE `UE_LWC_RENDER_TILE_SIZE`), `View`·`Scene`·`SceneResources` RS0 멤버, RS0a2 순서. 문서를 장별 폴더로 옮겼다(내용 변경 없음).
+- 개정 17(2026-11-28): 21.10절 타일 기반 GPU 고려 — 반영된 것 정리, depth prepass를 경로·프로필 선택으로(모바일 Forward+ 기본 없음, UE `r.Mobile.EarlyZPass` 기본 0, RS0a 코드는 prepass 유무를 인자로), 메모리 없는 attachment 요구 RQ24.
+- 개정 18(2026-11-28): 21장 교차 리뷰 반영(막는 문제 4·중요 12·사소 6) — 정점 입력 이름 = 머티리얼 사용 대상 이름(`StaticMesh`, usage→id 표 불필요), 머티리얼 문맥 공급 VIEW·VERTEX·PRIMITIVE와 함수 출처 표, 고정 location 표와 공용 기본 stream(stride 0 금지), 머티리얼 단위 대체(지원 머티리얼 판정), `EvaluateMaterialNormal` 순서·`MaterialCommon.rsh` include(MRD17 닫음), 위치 전용 fetch `.rsh` 분리, 위치 불변(`precise`), UE 위치 전용 판정 보완(PDO·위치 전용 stream·컬 모드), base pass 마스크 clip·PDO `SV_Depth`, 형식 등급 유도, 기본 머티리얼·손상 traits 검사 자리(묶음 단계 `Inconsistent`), 할당 없는 traits 읽기 요구 MSR20, GPU Scene 큰 월드를 격자에서 UE와 같은 double-float으로, 법선은 여인수 행렬, 엔진 타입 velocity·HZB·`parameterLayouts`, RR9를 RS0b로, RenderBase 10.5 완료 기준 포함. 17.2절 표·14.3절 Depth 행 갱신.

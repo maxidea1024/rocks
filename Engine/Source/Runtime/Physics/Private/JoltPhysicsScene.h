@@ -395,9 +395,11 @@ private:
     // 필터는 부분이 둘 이상인 body의 무시 목록·제외를 부분마다 본다(7.1.22절 — Jolt mBodyID2).
     class ElementQueryFilter final : public JPH::ShapeFilter {
     public:
+        // layerFilter는 부분 층의 채널·응답 판정이다(compound body — 7.1.24절).
         ElementQueryFilter(const JoltPhysicsScene& scene, const QueryParams& params,
-                           const QueryExclusion& exclusion) noexcept
-            : scene_(scene), params_(params), exclusion_(exclusion) {
+                           const QueryExclusion& exclusion,
+                           const JPH::ObjectLayerFilter& layerFilter) noexcept
+            : scene_(scene), params_(params), exclusion_(exclusion), layerFilter_(layerFilter) {
         }
 
         bool ShouldCollide(const JPH::Shape* shape2, const JPH::SubShapeID&) const override;
@@ -408,14 +410,37 @@ private:
         const JoltPhysicsScene& scene_;
         const QueryParams& params_;
         const QueryExclusion& exclusion_;
+        const JPH::ObjectLayerFilter& layerFilter_;
     };
 
     class ElementSimFilter final : public JPH::SimShapeFilter {
     public:
+        explicit ElementSimFilter(const JoltPhysicsScene& scene) noexcept : scene_(scene) {
+        }
+
         bool ShouldCollide(const JPH::Body& body1, const JPH::Shape* shape1, const JPH::SubShapeID&,
                            const JPH::Body& body2, const JPH::Shape* shape2,
                            const JPH::SubShapeID&) const override;
+
+    private:
+        const JoltPhysicsScene& scene_;
     };
+
+    // body 하위 형상(잎)의 부분 층이다(compound body면 칸의 parts[part].layer, 아니면 body 층 —
+    // 7.1.24절). step 중 worker가 읽는다(칸 쓰기는 step 밖).
+    JPH::ObjectLayer PartLayer(const JPH::Body& body, uint32 part) const noexcept;
+    // 질의 hit의 판정 층이다(compound body면 잎 부분 층).
+    JPH::ObjectLayer HitLayer(const JPH::BodyID& body, const JPH::SubShapeID& subShape,
+                              JPH::ObjectLayer bodyLayer) const noexcept;
+    // 원소 잎의 실효 충돌 켬이다(부분 층 참여 ∩ 원소 값 — 7.1.21·7.1.24절). 잎이 아니면 거짓이다.
+    bool ElementEffective(const JPH::Body& body, JPH::uint64 shapeUserData,
+                          CollisionEnabled& effective) const noexcept;
+    // 접촉한 원소의 실효 값이 probe인지다.
+    bool IsProbeElement(const JPH::Body& body, const JPH::SubShapeID& subShape) const noexcept;
+    // 원소가 시뮬레이션 접촉을 만드는지다(UE bEnableSim |= bEnableProbe). 잎이 아니면 참이다.
+    bool ElementSimulates(const JPH::Body& body, const JPH::Shape* shape) const noexcept;
+    // 부분 층·body 층(부분이 둘 이상이면 compound)·알림 표지 합을 다시 만든다(7.1.24절).
+    void RefreshPartLayers(BodySlot& slot) noexcept;
 
     // 질의 Jolt 필터·수집기다(JoltPhysicsSceneQueries.cpp — 칸을 읽는다).
     class QueryBodyFilter;
@@ -565,7 +590,7 @@ private:
     // PhysicsSystem이 가리키므로 그보다 먼저 생기고 늦게 사라진다.
     ActivationListener activations_;
     ContactCollector contacts_;
-    ElementSimFilter simShapeFilter_;
+    ElementSimFilter simShapeFilter_{*this};
     JPH::PhysicsSystem system_;
     uint64 steps_ = 0;
     uint64 floatingPointCorrections_ = 0;

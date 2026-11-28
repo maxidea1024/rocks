@@ -7,6 +7,7 @@
 #include <ShaderCompiler/ShaderCompileManager.h>
 #include <ShaderCompiler/ShaderLibraryCook.h>
 #include <ShaderCompiler/ShaderLibraryReloader.h>
+#include <ShaderCompiler/ShaderWatchSettle.h>
 #include <ShaderCompilerCommon/ShaderDebugSymbols.h>
 #include <ShaderCore/ShaderLibrary.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
@@ -446,6 +447,38 @@ TEST(ShaderLibraryReloader_RebuildsDependentsAndKeepsTheOldLibraryOnFailure) {
     CHECK(libraries.Revision("D3D12_SM6") == 3 && libraries.Revision("VULKAN_SM5") == 2);
     CHECK(StringView(ShaderReloadOutcomeName(ShaderReloadOutcome::Failed)) == "Failed");
     manager.Shutdown();
+}
+
+// 감시 변경 묶기 판정(ShaderSystem 16.6절 SSD100)이다. 시각을 넣어 보므로 실제 시간에 기대지
+// 않는다.
+TEST(ShaderWatchSettle_WaitsForQuietOrLimit) {
+    constexpr uint64 Millisecond = 1000000;
+    constexpr uint32 Settle = ShaderWatchSettleMilliseconds;
+    constexpr uint32 Limit = ShaderWatchSettleLimitMilliseconds;
+    static_assert(ShaderWatchSettlePollMilliseconds < ShaderWatchSettleMilliseconds &&
+                      ShaderWatchSettleMilliseconds < ShaderWatchSettleLimitMilliseconds,
+                  "watch poll < settle < limit");
+
+    // 사건 하나: settle 전에는 기다리고, settle이 지나면 시작한다.
+    const uint64 first = 1000 * Millisecond;
+    CHECK(!ShaderWatchSettled(first, first, first, Settle, Limit));
+    CHECK(!ShaderWatchSettled(first, first, first + (Settle - 1) * Millisecond, Settle, Limit));
+    CHECK(ShaderWatchSettled(first, first, first + Settle * Millisecond, Settle, Limit));
+
+    // 사건이 이어지면 마지막 사건 기준으로 다시 기다린다.
+    const uint64 last = first + 40 * Millisecond;
+    CHECK(!ShaderWatchSettled(first, last, first + Settle * Millisecond, Settle, Limit));
+    CHECK(ShaderWatchSettled(first, last, last + Settle * Millisecond, Settle, Limit));
+
+    // 사건이 계속 와도 첫 사건 뒤 limit이 지나면 시작한다.
+    const uint64 busy = first + (Limit - 1) * Millisecond;
+    CHECK(!ShaderWatchSettled(first, busy, busy, Settle, Limit));
+    CHECK(ShaderWatchSettled(first, first + Limit * Millisecond, first + Limit * Millisecond,
+                             Settle, Limit));
+
+    // 순서가 어긋난 시각은 기다림이 끝나지 않지 않도록 바로 시작한다.
+    CHECK(ShaderWatchSettled(last, first, last, Settle, Limit));
+    CHECK(ShaderWatchSettled(first, last, first, Settle, Limit));
 }
 
 } // namespace shader_reload_tests_file

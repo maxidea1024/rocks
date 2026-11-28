@@ -1,4 +1,4 @@
-// 표면 속성 SurfaceAttributes다(Docs/Design/Renderer.ko.md 14.1절 — 렌더러가 머티리얼에서 읽는 유일한
+// 표면 속성 SurfaceAttributes다(Docs/Design/Renderer 14.1절 — 렌더러가 머티리얼에서 읽는 유일한
 // 구조체, 엔진 셰이더 4.4절 A04·7.5절·SLR6). 필드 순서·타입은 RN 14.1절 표 순서다. 값은 선형이고
 // 법선·tangent는 world 공간 단위 벡터다(머티리얼 번역기가 tangent 공간 노멀을 바꿔 넣는다).
 // Material/MaterialCommon.rsh가 include한다(MS 7.2절).

@@ -1,18 +1,12 @@
+#include "AudioAssetsValidation.h"
+
 #include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundConcurrencySettings.h>
-#include <Core/Math/MathUtility.h>
 
 namespace rocks {
 
-namespace {
-
-bool IsNonNegativeFinite(float value) noexcept {
-    return math::IsFinite(value) && value >= 0.0f;
-}
-
-} // namespace
-
 Result<void> ValidateSoundConcurrencySettings(const SoundConcurrencySettings& settings) noexcept {
+    using audio_assets_detail::IsNonNegativeFinite;
     const bool valid =
         settings.maxCount >= 1 &&
         static_cast<uint8>(settings.resolutionRule) <=

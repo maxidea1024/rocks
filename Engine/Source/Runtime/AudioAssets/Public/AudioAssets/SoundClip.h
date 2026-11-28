@@ -21,15 +21,16 @@
 // 재생 원본(pcm_ 또는 stream_)은 실행 데이터다. 시험·Sandbox는 SetPcm으로 메모리에서 만들고,
 // 에디터·Tryout은 LoadEditorPcm으로 원본 bulk에서, 쿠킹된 실행은 LoadCooked로 플랫폼 데이터에서
 // 만든다 (AD25 — 3.36.4·3.37.4·3.40.3절). LoadCooked는 상주 압축 실시간 디코드(LoadCookedStream)를
-// 쓰고, 1 s 미만 loop만 통째 디코드(LoadCookedPcm)한다. sidecar 청크 스트리밍은 AU6b다.
+// 쓰고, 1 s 미만 loop만 통째 디코드(LoadCookedPcm)한다. 스트리밍 clip의 payload는 sidecar
+// (streamedPayload)에 있고 엔진 로드 도우미(AudioEngineSubsystem::LoadCookedClip)가 연다(AU6b —
+// 3.46절).
 //
 // 사용 예(에디터 재생):
 //   (void)clip.LoadEditorPcm(allocator, bulkSource);   // 같은 원본이면 다시 올리지 않는다
 //   auto sound = clip.MakePlayable(allocator, registry, registry.OwnerAccess());
 //
-// 사용 예(쿠킹된 실행 — reader는 Package::BulkBytes를 부른다):
-//   (void)clip.LoadCooked(allocator, &ReadPackageBulk, &package, audio->DecoderTable(),
-//                         audio->CookedLoadOptions());
+// 사용 예(쿠킹된 실행 — 엔진 로드 도우미가 sidecar를 열고 LoadCooked를 부른다):
+//   (void)audio->LoadCookedClip(clip, package, assets, lease);
 //
 // 스레드: 에셋 객체 Registry의 소유 스레드(게임 스레드) 전용이다.
 namespace rocks {
@@ -126,8 +127,12 @@ public:
 
     // --- 쿠킹 결과 ---
 
-    // 쿠킹 플랫폼 데이터(3.30.1절 형식)다. 에디터 패키지에서는 비어 있다.
+    // 쿠킹 플랫폼 데이터(3.30.1절 형식)다. 에디터 패키지에서는 비어 있다. 스트리밍 clip이면 메타 +
+    // 청크 0(플랫폼 데이터 앞부분)이다(3.46.2절).
     ROCKS_PROPERTY() BulkDataRef platformData;
+    // 스트리밍 clip의 payload 영역 전체(sidecar bulk — 3.46.2절)다. 패키지만인 clip·에디터
+    // 패키지에서는 비어 있다. sidecar 출력이 없는 쿠킹(서버 프로필)에서는 패키지 안 bulk다.
+    ROCKS_PROPERTY() BulkDataRef streamedPayload;
 
 #if ROCKS_WITH_EDITOR_DATA
     // --- 에디터 원본 ---
@@ -137,6 +142,22 @@ public:
     // 재생 loop 구간이다: loopOverride.enabled면 그 구간, 아니면 hasFileLoop면 파일 구간, 둘 다
     // 아니면 (0, 0) = clip 전체.
     void EffectiveLoop(uint32& begin, uint32& end) const noexcept;
+
+    // looping이고 재생 loop 길이가 sampleRate × StreamMinLoopSeconds보다 짧으면 true다(로드 때 통째
+    // 디코드 — 바퀴마다 디코더를 다시 여는 비용 상한, 3.40.2절).
+    bool UsesWholeDecode() const noexcept;
+
+    // 통째 디코드 판정 식이다: looping이고 loop 길이(begin·end가 0·0이면 frames)가 sampleRate ×
+    // StreamMinLoopSeconds보다 짧다. 쿠킹은 쿠킹 값(인코딩 rate·옮긴 loop)으로 같은 식을 불러
+    // sidecar 여부를 정한다(3.46.2절 — 쿠킹과 런타임 판정이 같은 입력을 본다).
+    static bool IsWholeDecodeLoop(bool looping, uint32 loopBegin, uint32 loopEnd, uint32 frames,
+                                  uint32 sampleRate) noexcept;
+
+    // 쿠킹이 payload를 sidecar에 둘 수 있는 clip이다(ForceInline·통째 디코드가 아님 — 3.46.2절).
+    // 청크가 하나뿐이면 쿠킹이 패키지에만 둔다.
+    bool StreamsFromSidecar() const noexcept {
+        return loadingBehavior != SoundLoadingBehavior::ForceInline && !UsesWholeDecode();
+    }
 
     // 재생 PCM을 바꾸고 channelCount·sampleRate·frameCount를 그 PCM으로 채운다(메모리 생성 —
     // 시험·Sandbox). 이미 시작한 재생은 이전 PCM을 끝까지 쓴다(스냅숏). 비유한 표본이 있으면
@@ -163,7 +184,9 @@ public:
     // - reader 오류, 할당 실패.
     // 하부(Parse·디코더)의 오류 값은 그대로 넘긴다(3.38절).
     // 실패하면 앞 PCM을 그대로 둔다. 게임 스레드에서 동기로 디코드한다(긴 clip은 로드 때 디코드
-    // 비용이 든다 — 청크 스트리밍은 AU6).
+    // 비용이 든다 — 청크 스트리밍은 AU6). streamedPayload가 있으면 그 bulk가 패키지 안이어야 하고
+    // (sidecar 출력이 없는 쿠킹) platformData의 메타 뒤에 이어 읽는다. sidecar면 reader 오류다
+    // (Package::BulkBytes는 Unsupported).
     Result<void> LoadCookedPcm(Allocator& allocator, SoundBulkReader reader, void* context,
                                const audio::AudioDecoderTable& decoders) noexcept;
 
@@ -173,7 +196,7 @@ public:
     // MaxClipChannels보다 많음 Unsupported, 형식·청크 손상(모든 청크 SHA를 여기서 본다)·잘림·머리와
     // 필드 불일치 CorruptData, 모르는 형식 판·codec Unsupported, decoders에 그 codec 디코더가 없음
     // NotFound(LoadCookedPcm과 같다 — 재생 때마다 실패하지 않게 로드 때 거부한다), reader 오류,
-    // 할당 실패. 실패하면 앞 원본을 그대로 둔다.
+    // 할당 실패. 실패하면 앞 원본을 그대로 둔다. streamedPayload는 LoadCookedPcm과 같이 읽는다.
     Result<void> LoadCookedStream(Allocator& allocator, SoundBulkReader reader, void* context,
                                   const audio::AudioDecoderTable& decoders) noexcept;
 
@@ -182,18 +205,26 @@ public:
     SoundLoadingBehavior
     EffectiveLoadingBehavior(const SoundCookedLoadOptions& options) const noexcept;
 
-    // 디코드 방식을 골라 LoadCookedPcm 또는 LoadCookedStream을 부른다(3.40.3절 표):
-    // - looping이고 재생 loop 길이가 sampleRate × StreamMinLoopSeconds보다 짧으면 통째(바퀴마다
-    // 다시
-    //   여는 비용 상한 — UE에는 없는 Rocks 규칙).
-    // - 나머지는 로딩 동작과 상관없이 상주 압축 실시간 디코드다. UE 5.8도
-    // non-streaming(ForceInline)
-    //   경로는 길이와 상관없이 DTYPE_RealTime이다. 스트리밍 세 동작의 청크 캐시 차이는 AU6b에서
-    //   나뉜다(EffectiveLoadingBehavior).
-    // 오류는 고른 함수의 것이다.
+    // 쿠킹 데이터를 올린다(3.40.3·3.46.3절). 경로:
+    // - streamed가 null이면 상주 경로다: 통째 디코드 대상(UsesWholeDecode)이면 LoadCookedPcm,
+    // 아니면
+    //   LoadCookedStream이다. streamedPayload가 있으면 그 bulk가 패키지 안이어야 한다(sidecar
+    //   출력이 없는 쿠킹 — 서버 프로필). reader가 payload bulk를 주지 못하면(sidecar라 메모리에
+    //   없음) 그 오류다.
+    // - streamed가 있는데 streamedPayload가 비었거나 통째 디코드 대상이면 InvalidArgument다.
+    // - 그 밖은 sidecar 경로다: platformData(메타 + 청크 0)로
+    //   sidecar 형태 SoundStreamData를 만든다(SoundStreamData::TryCreateStreamed — 청크 0 검증,
+    //   Bytes() 불일치 InvalidArgument). 재생은 청크 캐시가 나머지를 읽는다(AU6b2).
+    // options(로딩 동작)는 엔진 로드 도우미가 청크 1 후크에 쓴다(3.46.5절). 그 밖 오류는
+    // LoadCookedPcm·LoadCookedStream과 같다. 실패하면 앞 원본을 둔다.
     Result<void> LoadCooked(Allocator& allocator, SoundBulkReader reader, void* context,
                             const audio::AudioDecoderTable& decoders,
-                            const SoundCookedLoadOptions& options) noexcept;
+                            const SoundCookedLoadOptions& options,
+                            SharedPtr<SoundStreamedPayload> streamed = {}) noexcept;
+
+    // 키(platformData 내용·채널·rate·frame)가 마지막으로 올린 쿠킹 데이터와 같은지다(엔진 로드
+    // 도우미가 sidecar를 열기 전에 본다 — 3.46.3절).
+    bool HasCookedData() const noexcept;
 
     const SharedPtr<const SoundPcm>& Pcm() const noexcept {
         return pcm_;
@@ -214,6 +245,19 @@ protected:
     Result<void> FillPlayable(SoundPlayable& playable) const noexcept override;
 
 private:
+    // 플랫폼 데이터 전체 byte로 PCM·상주 스트림을 올린다(LoadCookedPcm·LoadCookedStream·패키지 안
+    // payload 경로가 같이 쓴다).
+    Result<void> LoadPcmBytes(Allocator& allocator, Span<const uint8> bytes,
+                              const audio::AudioDecoderTable& decoders) noexcept;
+    Result<void> LoadStreamBytes(Allocator& allocator, Span<const uint8> bytes,
+                                 const audio::AudioDecoderTable& decoders) noexcept;
+    Result<void> AdoptStream(SharedPtr<SoundStreamData> made,
+                             const audio::AudioDecoderTable& decoders) noexcept;
+    // 플랫폼 데이터 전체 byte를 읽는다. streamedPayload가 있으면(패키지 안 payload) 메타와
+    // payload를 joined에 이어 붙이고 그 보기를 준다.
+    Result<Span<const uint8>> ReadResidentBytes(SoundBulkReader reader, void* context,
+                                                Array<uint8>& joined) const noexcept;
+
     ROCKS_NATIVE() SharedPtr<const SoundPcm> pcm_;
     ROCKS_NATIVE() SharedPtr<const SoundStreamData> stream_;
     ROCKS_NATIVE() uint64 pcmRevision_ = 0;

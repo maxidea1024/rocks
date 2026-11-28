@@ -822,6 +822,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundClip::streamedPayload",
+      "id": "71bb558ade8f44c38680632eceb3743b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundClipImportOptions::channelHandling",
       "id": "5b4953fc709e4b418ce671a9b88ce59a",
       "aliases": [],

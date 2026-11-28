@@ -118,6 +118,11 @@ public:
     }
 
     bool ShouldCollide(JPH::ObjectLayer layer) const override {
+        // compound body(weld)는 원소 필터가 부분 층으로 본다(7.1.24절).
+        if (IsCompoundLayer(layer)) {
+            return true;
+        }
+
         return ClassifyQueryHit(responseSets_, filter_, params_, rule_, layer).keep;
     }
 
@@ -236,7 +241,8 @@ public:
         const JPH::BodyInterface& bodies = scene_.system_.GetBodyInterfaceNoLock();
         const QueryHitKind kind =
             ClassifyQueryHit(scene_.responseSets_, filter_, params_, RuleOf(mode_),
-                             bodies.GetObjectLayer(result.mBodyID));
+                             scene_.HitLayer(result.mBodyID, result.mSubShapeID2,
+                                             bodies.GetObjectLayer(result.mBodyID)));
         if (!kind.keep) {
             return;
         }
@@ -320,7 +326,8 @@ public:
         const JPH::BodyInterface& bodies = scene_.system_.GetBodyInterfaceNoLock();
         const QueryHitKind kind =
             ClassifyQueryHit(scene_.responseSets_, filter_, params_, RuleOf(mode_),
-                             bodies.GetObjectLayer(result.mBodyID2));
+                             scene_.HitLayer(result.mBodyID2, result.mSubShapeID2,
+                                             bodies.GetObjectLayer(result.mBodyID2)));
         if (!kind.keep) {
             return;
         }
@@ -466,7 +473,7 @@ Result<bool> JoltPhysicsScene::TraceLine(const Vec3d& start, const Vec3d& end,
         queryHits_.Clear();
     }
 
-    const ElementQueryFilter shapeFilter(*this, params, none);
+    const ElementQueryFilter shapeFilter(*this, params, none, layerFilter);
     system_.GetNarrowPhaseQuery().CastRay(ray, settings, collector, {}, layerFilter, bodyFilter,
                                           shapeFilter);
     if (collector.failed) {
@@ -498,6 +505,19 @@ int32 JoltPhysicsScene::HitElementIndex(const QueryHitRecord& record) const noex
     ElementTag tag;
     const JPH::uint64 data = lock.GetBody().GetShape()->GetSubShapeUserData(record.subShape);
     return UnpackElementUserData(data, tag) ? static_cast<int32>(tag.index) : 0;
+}
+
+JPH::ObjectLayer JoltPhysicsScene::HitLayer(const JPH::BodyID& body,
+                                            const JPH::SubShapeID& subShape,
+                                            JPH::ObjectLayer bodyLayer) const noexcept {
+    if (!IsCompoundLayer(bodyLayer)) {
+        return bodyLayer;
+    }
+
+    const JPH::uint64 userData = system_.GetBodyInterfaceNoLock().GetUserData(body);
+    const BodySlot* slot = FindSlot({UserDataIndex(userData), UserDataGeneration(userData)});
+    const uint32 part = PartOfHit(body, subShape);
+    return slot != nullptr && part < slot->parts.Size() ? slot->parts[part].layer : bodyLayer;
 }
 
 uint32 JoltPhysicsScene::PartOfHit(const JPH::BodyID& body,
@@ -721,7 +741,7 @@ Result<bool> JoltPhysicsScene::TraceJoltShape(
     const JPH::Vec3 scale = JPH::Vec3::sReplicate(1.0f);
     QueryLayerFilter layerFilter(responseSets_, filter, params, RuleOf(mode));
     QueryBodyFilter bodyFilter(*this, params, exclusion);
-    const ElementQueryFilter shapeFilter(*this, params, exclusion);
+    const ElementQueryFilter shapeFilter(*this, params, exclusion, layerFilter);
     if (mode == TraceMode::All) {
         queryHits_.Clear();
     }
@@ -874,7 +894,8 @@ public:
         const JPH::BodyInterface& bodies = scene_.system_.GetBodyInterfaceNoLock();
         const QueryHitKind kind =
             ClassifyQueryHit(scene_.responseSets_, filter_, params_, RuleOf(mode_),
-                             bodies.GetObjectLayer(result.mBodyID2));
+                             scene_.HitLayer(result.mBodyID2, result.mSubShapeID2,
+                                             bodies.GetObjectLayer(result.mBodyID2)));
         if (!kind.keep) {
             return;
         }
@@ -916,7 +937,7 @@ Result<bool> JoltPhysicsScene::CollectOverlap(const JPH::Shape& joltShape, const
         JPH::RMat44::sRotationTranslation(ToJoltRotation(rotation), base) * local;
     QueryLayerFilter layerFilter(responseSets_, filter, params, RuleOf(mode));
     QueryBodyFilter bodyFilter(*this, params, exclusion);
-    const ElementQueryFilter shapeFilter(*this, params, exclusion);
+    const ElementQueryFilter shapeFilter(*this, params, exclusion, layerFilter);
     // 닿기만 한 형상(깊이 0)도 겹침이다(분리 거리 0).
     JPH::CollideShapeSettings settings;
     settings.mMaxSeparationDistance = 0.0f;

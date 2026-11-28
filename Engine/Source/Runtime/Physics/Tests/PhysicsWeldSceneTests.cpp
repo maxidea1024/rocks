@@ -169,10 +169,11 @@ struct WeldScene {
                      Handle(RootActorSlot), Vec3d::Zero(), motion, gravity, notify);
     }
 
-    // 반폭 ChildHalf 상자 자식을 루트 기준 at에 weld한다(component 기본은 자식 표지).
-    Result<void> WeldChild(PhysicsBodyHandle root, const Vec3d& at,
-                           uint32 component = ChildComponentSlot,
-                           const BodySettings* childSettings = nullptr) noexcept {
+    // 반폭 ChildHalf 상자 자식을 루트 기준 at에 weld한다(component 기본은 자식 표지). configure는
+    // weld 설명(object type·응답)을 고친다.
+    template <class Configure>
+    Result<void> WeldChildWith(PhysicsBodyHandle root, const Vec3d& at, uint32 component,
+                               const BodySettings* childSettings, Configure&& configure) noexcept {
         const BodyShapeElement box = BodyShapeElement::Box(Vec3d(ChildHalf, ChildHalf, ChildHalf));
         BodyWeldDesc weld;
         weld.component = Handle(component);
@@ -180,7 +181,14 @@ struct WeldScene {
         weld.geometry = Span<const BodyShapeElement>(&box, 1);
         weld.relative.translation = at;
         weld.settings = childSettings;
+        configure(weld);
         return scene->WeldBody(root, weld);
+    }
+
+    Result<void> WeldChild(PhysicsBodyHandle root, const Vec3d& at,
+                           uint32 component = ChildComponentSlot,
+                           const BodySettings* childSettings = nullptr) noexcept {
+        return WeldChildWith(root, at, component, childSettings, [](BodyWeldDesc&) noexcept {});
     }
 
     Result<void> WeldChild(PhysicsBodyHandle root, double offset) noexcept {
@@ -377,7 +385,9 @@ TEST(Physics_WeldContactHitComponent) {
     const PhysicsBodyHandle root =
         scene.Add(BodyShapeElement::Sphere(RootRadius), Handle(RootComponentSlot),
                   Handle(RootActorSlot), high, BodyMotion::Dynamic, true, true);
-    REQUIRE(scene.WeldChild(root, -ChildOffset));
+    BodySettings notify(scene.allocator);
+    notify.notifyRigidBodyCollision = true;
+    REQUIRE(scene.WeldChild(root, Vec3d(0.0, 0.0, -ChildOffset), ChildComponentSlot, &notify));
     scene.Steps(FallSteps);
     int childHits = 0;
     int rootHits = 0;
@@ -570,7 +580,9 @@ TEST(Physics_WeldContactHitPerBodyPair) {
     const PhysicsBodyHandle root = scene.AddAt(
         BodyShapeElement::Box(Vec3d(ChildHalf, ChildHalf, ChildHalf)), Handle(RootComponentSlot),
         Handle(RootActorSlot), Vec3d(0.0, 0.0, ChildHalf), BodyMotion::Dynamic, true, true);
-    REQUIRE(scene.WeldChild(root, Vec3d(SideOffset, 0.0, 0.0)));
+    BodySettings notify(scene.allocator);
+    notify.notifyRigidBodyCollision = true;
+    REQUIRE(scene.WeldChild(root, Vec3d(SideOffset, 0.0, 0.0), ChildComponentSlot, &notify));
     int maxPerStep = 0;
     int total = 0;
     for (int step = 0; step < SettleSteps; ++step) {
@@ -608,6 +620,199 @@ TEST(Physics_WeldFailureKeepsState) {
     HitResult hit;
     REQUIRE(scene.TraceDown(Vec3d::Zero(), hit));
     CHECK(hit.component == Handle(ChildComponentSlot));
+}
+
+// weld 부분은 자기 object type으로 질의된다(UE 형상 filter data의 원래 body 값 — 7.1.24절): 자식이
+// Pawn이면 Pawn 질의는 자식을, WorldStatic 질의는 자식을 지나 루트를 맞힌다.
+TEST(Physics_WeldPartObjectType) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    const PhysicsBodyHandle root = scene.Root(BodyMotion::Static);
+    REQUIRE(scene.WeldChildWith(
+        root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+        [](BodyWeldDesc& weld) noexcept { weld.objectType = CollisionChannel::Pawn; }));
+    HitResult hit;
+    const QueryFilter pawns =
+        QueryFilter::ByObjectTypes(CollisionObjectTypeBit(CollisionChannel::Pawn));
+    auto traced = scene.scene->TraceLine(Vec3d(0.0, 0.0, RayStart), Vec3d(0.0, 0.0, -RayStart),
+                                         pawns, {}, TraceMode::First, &hit, nullptr);
+    REQUIRE(traced);
+    REQUIRE(traced.Value());
+    CHECK(hit.component == Handle(ChildComponentSlot));
+    REQUIRE(scene.TraceDown(Vec3d::Zero(), hit));
+    CHECK(hit.component == Handle(RootComponentSlot));
+}
+
+// weld 부분은 자기 응답으로 채널 질의를 거른다: 자식이 Visibility를 무시하면 Visibility 질의는
+// 자식을 지나 루트를 맞힌다.
+TEST(Physics_WeldPartChannelResponse) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    const PhysicsBodyHandle root = scene.Root(BodyMotion::Static);
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+                                [](BodyWeldDesc& weld) noexcept {
+                                    (void)weld.responses.Set(CollisionChannel::Visibility,
+                                                             CollisionResponse::Ignore);
+                                }));
+    HitResult hit;
+    auto traced = scene.scene->TraceLine(Vec3d(0.0, 0.0, RayStart), Vec3d(0.0, 0.0, -RayStart),
+                                         QueryFilter::ByChannel(CollisionChannel::Visibility), {},
+                                         TraceMode::First, &hit, nullptr);
+    REQUIRE(traced);
+    REQUIRE(traced.Value());
+    CHECK(hit.component == Handle(RootComponentSlot));
+}
+
+// weld 부분은 자기 응답으로 시뮬레이션 쌍을 정한다: 바닥 채널을 무시하는 자식은 바닥을 지나고 루트
+// 구가 바닥에 놓인다.
+TEST(Physics_WeldPartSimulationPair) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    (void)scene.AddAt(BodyShapeElement::Box(Vec3d(FloorHalf, FloorHalf, FloorHalfThickness)),
+                      Handle(OtherComponentSlot), Handle(OtherActorSlot),
+                      Vec3d(0.0, 0.0, -FloorHalfThickness), BodyMotion::Static);
+    Transform high;
+    high.translation = Vec3d(0.0, 0.0, DropHeight);
+    const PhysicsBodyHandle root =
+        scene.Add(BodyShapeElement::Sphere(RootRadius), Handle(RootComponentSlot),
+                  Handle(RootActorSlot), high, BodyMotion::Dynamic, true);
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, -ChildOffset), ChildComponentSlot, nullptr,
+                                [](BodyWeldDesc& weld) noexcept {
+                                    (void)weld.responses.Set(CollisionChannel::WorldStatic,
+                                                             CollisionResponse::Ignore);
+                                }));
+    scene.Steps(FallSteps);
+    const double z = scene.Read(root).location.z;
+    // 자식이 바닥에 막혔다면 루트 중심은 ChildOffset + ChildHalf 위에 멈춘다.
+    CHECK(z < ChildOffset);
+    CHECK(z > 0.0);
+}
+
+// 접촉 hit는 받는 쪽 부분의 알림 표지를 본다: 루트만 알리면 자식 원소 접촉은 hit가 없다.
+TEST(Physics_WeldPartNotify) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    (void)scene.AddAt(BodyShapeElement::Box(Vec3d(FloorHalf, FloorHalf, FloorHalfThickness)),
+                      Handle(OtherComponentSlot), Handle(OtherActorSlot),
+                      Vec3d(0.0, 0.0, -FloorHalfThickness), BodyMotion::Static);
+    Transform high;
+    high.translation = Vec3d(0.0, 0.0, DropHeight);
+    const PhysicsBodyHandle root =
+        scene.Add(BodyShapeElement::Sphere(RootRadius), Handle(RootComponentSlot),
+                  Handle(RootActorSlot), high, BodyMotion::Dynamic, true, true);
+    REQUIRE(scene.WeldChild(root, Vec3d(0.0, 0.0, -ChildOffset)));
+    scene.Steps(FallSteps);
+    int childHits = 0;
+    for (const PhysicsContactHit& contact : scene.scene->TakeContactHits()) {
+        childHits += contact.myComponent == Handle(ChildComponentSlot) ? 1 : 0;
+    }
+
+    CHECK(childHits == 0);
+}
+
+// 부분 응답 묶음 참조 수가 weld·같은 부분 다시 weld·unweld·삭제에서 맞는다(7.1.24절).
+TEST(Physics_WeldResponseSetBalance) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    const uint32 initial = scene.scene->Stats().responseSets;
+    const PhysicsBodyHandle root = scene.Root(BodyMotion::Static);
+    const uint32 withRoot = scene.scene->Stats().responseSets;
+    auto ignoreVisibility = [](BodyWeldDesc& weld) noexcept {
+        (void)weld.responses.Set(CollisionChannel::Visibility, CollisionResponse::Ignore);
+    };
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+                                ignoreVisibility));
+    const uint32 welded = scene.scene->Stats().responseSets;
+    CHECK(welded > withRoot);
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, MovedChildOffset), ChildComponentSlot,
+                                nullptr, ignoreVisibility));
+    CHECK(scene.scene->Stats().responseSets == welded);
+    scene.scene->UnweldBody(root, Handle(ChildComponentSlot));
+    CHECK(scene.scene->Stats().responseSets == withRoot);
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+                                ignoreVisibility));
+    scene.scene->DestroyBody(root);
+    CHECK(scene.scene->Stats().responseSets == initial);
+}
+
+// 루트와 자식이 함께 바닥에 닿고 자식만 알리면 자식 hit가 난다(받는 쪽 부분이 알리는 첫 통지 —
+// 7.1.24절).
+TEST(Physics_WeldChildOnlyNotify) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    (void)scene.AddAt(BodyShapeElement::Box(Vec3d(FloorHalf, FloorHalf, FloorHalfThickness)),
+                      Handle(OtherComponentSlot), Handle(OtherActorSlot),
+                      Vec3d(0.0, 0.0, -FloorHalfThickness), BodyMotion::Static);
+    const PhysicsBodyHandle root = scene.AddAt(
+        BodyShapeElement::Box(Vec3d(ChildHalf, ChildHalf, ChildHalf)), Handle(RootComponentSlot),
+        Handle(RootActorSlot), Vec3d(0.0, 0.0, ChildHalf), BodyMotion::Dynamic, true, false);
+    BodySettings notify(scene.allocator);
+    notify.notifyRigidBodyCollision = true;
+    REQUIRE(scene.WeldChild(root, Vec3d(SideOffset, 0.0, 0.0), ChildComponentSlot, &notify));
+    int childHits = 0;
+    int rootHits = 0;
+    for (int step = 0; step < SettleSteps; ++step) {
+        CHECK(scene.scene->Step(StepSeconds));
+        for (const PhysicsContactHit& contact : scene.scene->TakeContactHits()) {
+            childHits += contact.myComponent == Handle(ChildComponentSlot) ? 1 : 0;
+            rootHits += contact.myComponent == Handle(RootComponentSlot) ? 1 : 0;
+        }
+    }
+
+    CHECK(childHits > 0);
+    CHECK(rootHits == 0);
+}
+
+// 놓인 compound body의 루트 응답을 바꾸면 접촉 cache가 버려져 새 응답대로 바닥을 지난다(7.1.24절).
+TEST(Physics_WeldRootResponseInvalidatesContactCache) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    (void)scene.AddAt(BodyShapeElement::Box(Vec3d(FloorHalf, FloorHalf, FloorHalfThickness)),
+                      Handle(OtherComponentSlot), Handle(OtherActorSlot),
+                      Vec3d(0.0, 0.0, -FloorHalfThickness), BodyMotion::Static);
+    const PhysicsBodyHandle root =
+        scene.AddAt(BodyShapeElement::Sphere(RootRadius), Handle(RootComponentSlot),
+                    Handle(RootActorSlot), Vec3d(0.0, 0.0, RootRadius), BodyMotion::Dynamic, true);
+    // 자식은 처음부터 바닥 채널을 무시한다(루트만 바닥에 닿아 있다).
+    REQUIRE(scene.WeldChildWith(root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+                                [](BodyWeldDesc& weld) noexcept {
+                                    (void)weld.responses.Set(CollisionChannel::WorldStatic,
+                                                             CollisionResponse::Ignore);
+                                }));
+    scene.Steps(SettleSteps);
+    REQUIRE(scene.Read(root).location.z > 0.0);
+    ResolvedCollision ignoring;
+    ignoring.collisionEnabled = CollisionEnabled::QueryAndPhysics;
+    (void)ignoring.responses.Set(CollisionChannel::WorldStatic, CollisionResponse::Ignore);
+    scene.scene->SetBodyCollision(root, ignoring);
+    scene.Steps(FallSteps);
+    CHECK(scene.Read(root).location.z < -FloorHalfThickness);
+}
+
+// shape sweep·overlap도 부분 object type으로 거른다(수집기·원소 필터의 부분 층 — 7.1.24절).
+TEST(Physics_WeldPartObjectTypeShapeQueries) {
+    WeldScene scene;
+    REQUIRE(scene.scene);
+    const PhysicsBodyHandle root = scene.Root(BodyMotion::Static);
+    REQUIRE(scene.WeldChildWith(
+        root, Vec3d(0.0, 0.0, ChildOffset), ChildComponentSlot, nullptr,
+        [](BodyWeldDesc& weld) noexcept { weld.objectType = CollisionChannel::Pawn; }));
+    const QueryFilter pawns =
+        QueryFilter::ByObjectTypes(CollisionObjectTypeBit(CollisionChannel::Pawn));
+    HitResult swept;
+    auto traced = scene.scene->TraceShape(Vec3d(0.0, 0.0, RayStart), Vec3d(0.0, 0.0, -RayStart),
+                                          Quatd::Identity(), CollisionShape::Sphere(ShortHalf),
+                                          pawns, {}, TraceMode::First, &swept, nullptr);
+    REQUIRE(traced);
+    REQUIRE(traced.Value());
+    CHECK(swept.component == Handle(ChildComponentSlot));
+    Array<OverlapResult> overlaps(scene.allocator);
+    REQUIRE(
+        scene.scene->OverlapShape(Vec3d(0.0, 0.0, ChildOffset * 0.5), Quatd::Identity(),
+                                  CollisionShape::Box(Vec3d(TargetHalf, TargetHalf, ChildOffset)),
+                                  pawns, {}, OverlapMode::All, &overlaps));
+    REQUIRE(overlaps.Size() == 1u);
+    CHECK(overlaps[0].component == Handle(ChildComponentSlot));
 }
 
 } // namespace physics_weld_scene_tests_file
