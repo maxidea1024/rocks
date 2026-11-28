@@ -42,6 +42,12 @@ struct CookArtifactRequest {
     // 이전 매니페스트의 같은 종류 artifact 중 게시 파일 크기·SHA-256이 맞는 것이다(10.3절 6항).
     // 같은 (이름, 형식)·같은 cookKey면 Reuse로 그대로 쓴다.
     Span<const CookedManifestArtifact> reusable{};
+    // 이번 게시가 담을 패키지 항목이다(Docs/Design/ShaderSystem 16.5절 SSD87): 이번에 쿠킹한 것,
+    // 재사용한 것, 부분 쿠킹이면 이전 매니페스트에서 바뀌지도 지워지지도 않은 것. AssetId 엄격
+    // 오름차순이고 엔진 전용 쿠킹은 빈다. 단계가 도는 때 패키지 파일은 이미 게시 위치에 있다 —
+    // cookedRoot + "/" + AppendCookedPackagePath(asset, packageSha256). 머티리얼 셰이더 묶음 원천이
+    // 쿠킹 머티리얼 패키지를 읽는 데 쓴다(재사용 대상도 같은 길).
+    Span<const CookedManifestEntry* const> packages{};
 };
 
 // 새로 만든 artifact 하나다.

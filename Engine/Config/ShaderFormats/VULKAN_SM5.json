@@ -28,5 +28,6 @@
   },
   "features": ["compute", "vertexViewportLayerOutput", "debugPixelUav"],
   "deviceRequirements": ["VULKAN_1_1"],
+  "platformClass": ["Pc"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

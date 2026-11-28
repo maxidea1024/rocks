@@ -1107,6 +1107,225 @@ TEST(ShaderLibraryCook_VertexInputIncludeSelectsTheTypeSource) {
     manager.Shutdown();
 }
 
+namespace {
+
+// 머티리얼 pass 시험 원문이다(16.5절 SSD88): 생성 원문 include가 묶음의 materialSource로 이어진다.
+constexpr char MaterialPassSource[] = "#include \"/Engine/Generated/Material.rsh\"\n"
+                                      "float4 PSMain() : SV_Target { return MaterialColor(); }\n";
+constexpr char MaterialRed[] = "float4 MaterialColor() { return float4(1.0, 0.0, 0.0, 1.0); }\n";
+// 경고(벡터 암시적 잘림)가 있는 생성 원문이다 — 머티리얼 job은 경고를 오류로 다루지 않는다.
+constexpr char MaterialGreen[] = "float4 MaterialColor() {\n"
+                                 "    float2 rg = float4(0.0, 1.0, 0.0, 1.0);\n"
+                                 "    return float4(rg, 0.0, 1.0);\n"
+                                 "}\n";
+
+ROCKS_SHADER_TYPE_NAME(MaterialPassName, "CookMaterialPass");
+ROCKS_SHADER_TYPE_NAME(MaterialFullscreenName, "CookMaterialFullscreen");
+
+constexpr ShaderPermutationDimension MaterialPassDimensions[] = {
+    ShaderPermutationDimension::Bool("MATERIAL_TEST_SECOND")};
+
+// 시험 traits 해석(실제 해석기는 RendererShaders): 첫 byte가 1이면 모든 퍼뮤테이션, 아니면 0만.
+bool MaterialTraitsSelect(Span<const uint8> traits, VertexInputTypeId, uint32 permutationId,
+                          const ShaderFormatFacts&) noexcept {
+    return permutationId == 0 || (!traits.IsEmpty() && traits[0] == 1);
+}
+
+constexpr ShaderTypeDesc MakeMaterialPass() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(MaterialPassName, "/Project/MaterialPass.rsf",
+                                             "PSMain", ShaderStagePixel, ShaderTypeOwner::Project);
+    desc.flags = ShaderTypeMaterialShader | ShaderTypeVertexInputAxis;
+    desc.permutation = ShaderPermutationDomain{MaterialPassDimensions};
+    desc.materialShouldCompile = &MaterialTraitsSelect;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MakeMaterialFullscreen() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(MaterialFullscreenName, "/Project/MaterialPass.rsf",
+                                             "PSMain", ShaderStagePixel, ShaderTypeOwner::Project);
+    desc.flags = ShaderTypeMaterialShader;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MaterialPass = MakeMaterialPass();
+constexpr ShaderTypeDesc MaterialFullscreen = MakeMaterialFullscreen();
+
+// fill로 채우고 앞 8 byte 뒤의 한 byte만 tail로 바꾼 셰이더 집합 id다(같은 fill = 같은 묶음 id).
+Sha256Digest MaterialSetId(uint8 fill, uint8 tail = 0) noexcept {
+    Sha256Digest digest;
+    memset(digest.bytes, fill, sizeof(digest.bytes));
+    digest.bytes[Sha256Digest::Bytes - 1] ^= tail;
+    return digest;
+}
+
+// 시험 머티리얼 AssetId다.
+AssetId MaterialAsset(uint64 low) noexcept {
+    return AssetId{Guid{0, low}};
+}
+
+MaterialShaderBundle MakeBundle(StringView format, const Sha256Digest& set, const char* source,
+                                Span<const uint8> traits, Span<const VertexInputTypeId> inputs,
+                                uint64 asset) noexcept {
+    MaterialShaderBundle bundle;
+    bundle.formatId = format;
+    bundle.shaderSetId = set;
+    bundle.materialSource = StringView(source);
+    bundle.traits = traits;
+    bundle.vertexInputTypes = inputs;
+    bundle.asset = MaterialAsset(asset);
+    return bundle;
+}
+
+} // namespace
+
+// 머티리얼 묶음의 Project 라이브러리(16.5절 SSD85·SSD88): 같은 셰이더 집합의 합침(정점 입력 합집합·
+// 작은 asset), 묶음 id 키, traits 거르기, 축 없는 타입, 경고를 오류로 다루지 않는 머티리얼 job,
+// 묶음 id만 다른 쿠킹의 cookKey 차이(job 키는 같음), Engine 라이브러리 거부, 정규화 문제 셋
+// (Collision·Inconsistent·UnknownVertexInput — 결정적 순서).
+TEST(ShaderLibraryCook_MaterialBundlesFillTheProjectLibrary) {
+    ManagerCase test;
+    const char* skip = nullptr;
+    if (!test.Make("librarycookmaterial", skip)) {
+        if (skip != nullptr) {
+            printf("[SKIP] ShaderLibraryCook_MaterialBundlesFillTheProjectLibrary: %s\n", skip);
+        }
+
+        return;
+    }
+
+    REQUIRE(test.fixture.Write("Project/Shaders/MaterialPass.rsf", MaterialPassSource));
+    ShaderCompileManager manager(test.Config("CookMaterialWork"));
+    REQUIRE(manager.Start());
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&MaterialPass, &MaterialFullscreen};
+    REQUIRE(registry.Register(types));
+    REQUIRE(registry.RegisterVertexInputTypes(VertexAxisInputs));
+    REQUIRE(registry.Freeze());
+
+    const uint8 allPermutations[] = {1};
+    const uint8 firstPermutation[] = {0};
+    const VertexInputTypeId onlyA[] = {VertexInputAName.hash};
+    const VertexInputTypeId bothReversed[] = {VertexInputBName.hash, VertexInputAName.hash};
+    const Sha256Digest red = MaterialSetId(0x21);
+    const Sha256Digest green = MaterialSetId(0x42);
+    // 같은 집합 red를 두 머티리얼이 쓴다(asset 7이 작다), 다른 형식의 묶음은 무시된다.
+    const MaterialShaderBundle bundles[] = {
+        MakeBundle("D3D12_SM6", red, MaterialRed, allPermutations, onlyA, 9),
+        MakeBundle("D3D12_SM6", green, MaterialGreen, firstPermutation, onlyA, 3),
+        MakeBundle("D3D12_SM6", red, MaterialRed, allPermutations, bothReversed, 7),
+        MakeBundle("VULKAN_SM5", red, MaterialRed, allPermutations, onlyA, 9)};
+    const ShaderFormatSnapshot* const formats[] = {&test.d3d12};
+    ShaderLibraryCookDesc desc;
+    desc.allocator = &TestAllocator();
+    desc.registry = &registry;
+    desc.formats = formats;
+    desc.library = ShaderLibraryKind::Project;
+    desc.manager = &manager;
+    desc.materialBundles = bundles;
+    ShaderLibraryCookReport report(TestAllocator());
+    Array<uint8> bytes(TestAllocator());
+    const Result<void> built = CompileShaderLibrary(desc, report, bytes);
+    for (const ShaderLibraryCookJobFailure& failure : report.failures) {
+        fprintf(stderr, "material job %s: %s\n", failure.typeName, failure.diagnostics.Data());
+    }
+
+    REQUIRE(built);
+    REQUIRE(report.formats.Size() == 1);
+    const ShaderLibraryCookFormat& line = report.formats[0];
+    // red: pass × {A, B} × 퍼뮤테이션 둘 + 전체 화면 하나 = 5, green: pass × {A} × 퍼뮤테이션 0 +
+    // 전체 화면 하나 = 2.
+    CHECK(line.materialBundles == 2u && line.jobs == 7u && line.entries == 7u);
+    ShaderLibraryView view;
+    REQUIRE(view.Open(bytes.View()));
+    CHECK(view.Kind() == ShaderLibraryKind::Project);
+    const uint64 redBundle = MaterialShaderBundleId(red);
+    const uint64 greenBundle = MaterialShaderBundleId(green);
+    ShaderLibraryEntry entry;
+    for (const VertexInputTypeId input : {VertexInputAName.hash, VertexInputBName.hash}) {
+        for (uint32 permutation = 0; permutation < 2; ++permutation) {
+            CHECK(view.Find(ShaderLibraryKey{redBundle, MaterialPassName.hash, input, permutation},
+                            entry));
+        }
+    }
+
+    CHECK(view.Find(ShaderLibraryKey{redBundle, MaterialFullscreenName.hash, NoVertexInputType, 0},
+                    entry));
+    CHECK(view.Find(ShaderLibraryKey{greenBundle, MaterialPassName.hash, VertexInputAName.hash, 0},
+                    entry));
+    CHECK(!view.Find(ShaderLibraryKey{greenBundle, MaterialPassName.hash, VertexInputAName.hash, 1},
+                     entry));
+    CHECK(!view.Find(ShaderLibraryKey{greenBundle, MaterialPassName.hash, VertexInputBName.hash, 0},
+                     entry));
+    // 원문이 다르면 코드가 다르다.
+    ShaderLibraryEntry redPass;
+    ShaderLibraryEntry greenPass;
+    REQUIRE(view.Find(ShaderLibraryKey{redBundle, MaterialPassName.hash, VertexInputAName.hash, 0},
+                      redPass));
+    REQUIRE(view.Find(
+        ShaderLibraryKey{greenBundle, MaterialPassName.hash, VertexInputAName.hash, 0}, greenPass));
+    CHECK(redPass.codeIndex != greenPass.codeIndex);
+
+    // Engine 라이브러리는 머티리얼 묶음을 받지 않는다.
+    ShaderLibraryCookDesc engineDesc = desc;
+    engineDesc.library = ShaderLibraryKind::Engine;
+    ShaderLibraryCookReport engineReport(TestAllocator());
+    Array<uint8> engineBytes(TestAllocator());
+    CHECK(CompileShaderLibrary(engineDesc, engineReport, engineBytes).Error() ==
+          ErrorCode::InvalidArgument);
+
+    // green의 집합 id만 바꾸면(원문 같음) 코드는 같고 묶음 id 열과 cookKey가 다르다.
+    const Sha256Digest greenRenamed = MaterialSetId(0x43);
+    const MaterialShaderBundle renamed[] = {
+        bundles[0],
+        MakeBundle("D3D12_SM6", greenRenamed, MaterialGreen, firstPermutation, onlyA, 3),
+        bundles[2]};
+    desc.materialBundles = renamed;
+    ShaderLibraryCookReport renamedReport(TestAllocator());
+    Array<uint8> renamedBytes(TestAllocator());
+    REQUIRE(CompileShaderLibrary(desc, renamedReport, renamedBytes));
+    REQUIRE(renamedReport.formats.Size() == 1);
+    CHECK(renamedReport.formats[0].jobs == line.jobs &&
+          renamedReport.formats[0].codes == line.codes);
+    CHECK(!(renamedReport.formats[0].cookKey == line.cookKey));
+    CHECK(!(renamedBytes.Size() == bytes.Size() &&
+            memcmp(renamedBytes.Data(), bytes.Data(), bytes.Size()) == 0));
+
+    // 정규화 문제: 앞 8 byte가 같은 두 집합(Collision), 같은 집합의 다른 원문(Inconsistent),
+    // 등록되지 않은 정점 입력 타입(UnknownVertexInput). 정렬 순으로 남고 그 형식은 만들지 않는다.
+    const Sha256Digest redTwin = MaterialSetId(0x21, 0x01);
+    const VertexInputTypeId unknownInput[] = {ShaderTypeNameHash("NoSuchVertexInput")};
+    const MaterialShaderBundle broken[] = {
+        MakeBundle("D3D12_SM6", redTwin, MaterialRed, allPermutations, onlyA, 5),
+        MakeBundle("D3D12_SM6", red, MaterialRed, allPermutations, onlyA, 9),
+        MakeBundle("D3D12_SM6", green, MaterialRed, firstPermutation, onlyA, 4),
+        MakeBundle("D3D12_SM6", green, MaterialGreen, firstPermutation, unknownInput, 3)};
+    desc.materialBundles = broken;
+    ShaderLibraryCookReport problems(TestAllocator());
+    Array<uint8> none(TestAllocator());
+    const Result<void> refused = CompileShaderLibrary(desc, problems, none);
+    CHECK(!refused && refused.Error() == ErrorCode::InvalidArgument && none.IsEmpty());
+    REQUIRE(problems.formats.Size() == 1);
+    CHECK(problems.formats[0].outcome == ShaderLibraryCookOutcome::BundleFailed &&
+          problems.formats[0].jobs == 0);
+    REQUIRE(problems.bundleProblems.Size() == 3);
+    // 같은 묶음 id 안에서는 SHA 순이다: redTwin(마지막 byte 0x20)이 red(0x21)보다 앞이다.
+    const ShaderLibraryBundleProblem& collision = problems.bundleProblems[0];
+    CHECK(collision.kind == ShaderLibraryBundleProblemKind::Collision &&
+          collision.bundleId == redBundle && collision.shaderSetId == redTwin &&
+          collision.asset == MaterialAsset(5) && collision.otherShaderSetId == red &&
+          collision.otherAsset == MaterialAsset(9) &&
+          StringView(collision.formatId) == "D3D12_SM6");
+    // green은 asset 3(green 원문, 모르는 정점 입력)이 먼저이고 asset 4(red 원문)가 Inconsistent다.
+    CHECK(problems.bundleProblems[1].kind == ShaderLibraryBundleProblemKind::UnknownVertexInput &&
+          problems.bundleProblems[1].vertexInputType == unknownInput[0] &&
+          problems.bundleProblems[1].asset == MaterialAsset(3));
+    CHECK(problems.bundleProblems[2].kind == ShaderLibraryBundleProblemKind::Inconsistent &&
+          problems.bundleProblems[2].asset == MaterialAsset(4));
+    CHECK(StringView(ShaderLibraryBundleProblemKindName(
+              ShaderLibraryBundleProblemKind::Collision)) == "Collision");
+    manager.Shutdown();
+}
+
 TEST(ShaderLibraryCook_JobFailuresKeepTheFormatUnwritten) {
     ManagerCase test;
     const char* skip = nullptr;

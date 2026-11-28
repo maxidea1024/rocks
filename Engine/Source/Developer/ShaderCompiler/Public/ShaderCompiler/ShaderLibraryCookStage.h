@@ -4,6 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/StringView.h>
+#include <ShaderCompiler/MaterialShaderBundleSource.h>
 #include <ShaderCompiler/ShaderCookRegistrySource.h>
 #include <ShaderCompiler/ShaderLibraryCook.h>
 
@@ -18,6 +19,13 @@
 // 라이브러리와 cookKey(SSD46) → 같은 cookKey의 재사용 후보면 Reuse, 아니면 staging 파일 + Produce.
 // job 실패는 형식마다 진단 하나(UnsupportedCapability 또는 DependencyFailed — 상세는 Log)이고
 // 게시하지 않는다. verify 쿠킹은 캐시 없이 다시 만든 byte와 대조한다(다르면 NuggetMismatch).
+//
+// Project 라이브러리(16.5절 SSD87·SSD88): 엔진 전용이 아니고 머티리얼 셰이더 묶음
+// 원천(config.bundles, 없으면 MaterialShaderBundleSources()의 원천)이 있으면, 원천에서
+// request.packages의 묶음을 받아 Engine 라이브러리 뒤에 형식마다 Project 라이브러리(묶음이 없으면
+// 빈 라이브러리)를 만든다. 원천이 없으면 Log Info를 남기고 Project 라이브러리를 만들지 않는다. 묶음
+// 문제는 문제마다 진단 하나 (Collision은 code None·error AlreadyExists·asset·related, 그 밖은
+// InvalidArgument·asset), 머티리얼 job 실패는 머티리얼마다 진단 하나(asset)다.
 //
 // 보통은 ShaderCompiler 모듈 수명 객체가 만들어 CookArtifactStages()에 등록한다(직접 만들 일은
 // 시험뿐).
@@ -35,7 +43,7 @@ namespace rocks::shader {
 
 // 단계 정체성이다(processor = cookKey 머리 Guid, version은 단계 흐름·cookKey 배치가 바뀌면 바꾼다).
 inline constexpr NuggetProcessorId ShaderLibraryCookStageId{
-    ShaderLibraryCookerGuid, Guid{0x52534c434f4f4b31ull, 0x0000000000000001ull}};
+    ShaderLibraryCookerGuid, Guid{0x52534c434f4f4b31ull, 0x0000000000000002ull}};
 
 // 단계가 원문 트리에 더 mount하는 디렉터리 하나다(시험 원문 루트 — 제품은 /Engine만).
 struct ShaderCookSourceDirectory {
@@ -57,6 +65,9 @@ struct ShaderLibraryCookStageConfig {
     Span<const ShaderCookSourceDirectory> sourceDirectories{};
     // 워커 수(0이면 관리자 기본값)다.
     uint32 workerCount = 0;
+    // 머티리얼 셰이더 묶음 원천이다(시험용 — null이면 Run마다 MaterialShaderBundleSources()의
+    // 원천, 16.5절 SSD87).
+    MaterialShaderBundleSource* bundles = nullptr;
 };
 
 class ROCKS_SHADERCOMPILER_API ShaderLibraryCookStage final : public CookArtifactStage {

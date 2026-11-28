@@ -2,7 +2,9 @@
 #include <Base/NumericLimits.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <ModuleLoader/HostServices.h>
+#include <ShaderCore/ShaderFormatFacts.h>
 #include <ShaderCore/ShaderFormatTypes.h>
+#include <ShaderCore/ShaderLibraryContents.h>
 #include <ShaderCore/ShaderPermutation.h>
 #include <ShaderCore/ShaderType.h>
 #include <ShaderCore/ShaderTypeRegistry.h>
@@ -470,6 +472,119 @@ TEST(ShaderCore_RegistryVertexInputTypes) {
           registry.FindVertexInputType(InputBName.hash) == nullptr &&
           registry.VertexInputTypes().Size() == 1);
     CHECK(services.Unregister(registry));
+}
+
+namespace {
+
+ROCKS_SHADER_TYPE_NAME(MaterialPassName, "TestMaterialPass");
+ROCKS_SHADER_TYPE_NAME(MaterialFullscreenName, "TestMaterialFullscreen");
+
+constexpr ShaderPermutationDimension MaterialPassDimensions[] = {
+    ShaderPermutationDimension::Bool("TEST_SECOND_PERMUTATION")};
+
+// 시험 traits 해석(16.5절 SSD86 — 실제 해석기는 RendererShaders): 첫 byte가 1이면 모든 퍼뮤테이션,
+// 아니면 퍼뮤테이션 0만 컴파일한다.
+bool FirstTraitByteSelects(Span<const uint8> traits, VertexInputTypeId, uint32 permutationId,
+                           const ShaderFormatFacts&) noexcept {
+    return permutationId == 0 || (!traits.IsEmpty() && traits[0] == 1);
+}
+
+bool NeverCompiles(VertexInputTypeId, uint32, const ShaderFormatFacts&) noexcept {
+    return false;
+}
+
+constexpr ShaderTypeDesc MakeMaterialPass() noexcept {
+    ShaderTypeDesc desc = MakeShaderTypeDesc(MaterialPassName, "/Engine/Private/MaterialPass.rsf",
+                                             "MainPS", ShaderStagePixel, ShaderTypeOwner::Engine);
+    desc.flags = ShaderTypeMaterialShader | ShaderTypeVertexInputAxis;
+    desc.permutation = ShaderPermutationDomain{MaterialPassDimensions};
+    desc.materialShouldCompile = &FirstTraitByteSelects;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MakeMaterialFullscreen() noexcept {
+    ShaderTypeDesc desc =
+        MakeShaderTypeDesc(MaterialFullscreenName, "/Engine/Private/MaterialPass.rsf", "MainPS",
+                           ShaderStagePixel, ShaderTypeOwner::Engine);
+    desc.flags = ShaderTypeMaterialShader;
+    return desc;
+}
+
+constexpr ShaderTypeDesc MaterialPass = MakeMaterialPass();
+constexpr ShaderTypeDesc MaterialFullscreen = MakeMaterialFullscreen();
+
+} // namespace
+
+// 머티리얼 셰이더 타입(16.5절 SSD86·SSD88): 거르기 칸과 표지의 짝 검사, 엔진 열거가 머티리얼 타입을
+// 건너뜀, 머티리얼 열거의 traits 전달·사용 대상 정점 입력 타입·묶음 id·덧붙임·묶음 id 0 거부.
+TEST(ShaderCore_MaterialShaderTypesFilterWithTraits) {
+    ShaderTypeRegistry rejecting(TestAllocator());
+    ShaderTypeDesc engineFilter = MaterialPass;
+    engineFilter.shouldCompile = &NeverCompiles;
+    CHECK(RegisterOne(rejecting, engineFilter).Error() == ErrorCode::InvalidArgument);
+    CHECK(strstr(rejecting.LastFailure().reason, "materialShouldCompile") != nullptr);
+    ShaderTypeDesc materialFilter = TestPixel;
+    materialFilter.materialShouldCompile = &FirstTraitByteSelects;
+    CHECK(RegisterOne(rejecting, materialFilter).Error() == ErrorCode::InvalidArgument);
+    CHECK(rejecting.Types().IsEmpty());
+
+    ShaderTypeRegistry registry(TestAllocator());
+    const ShaderTypeDesc* const types[] = {&TestPixel, &MaterialPass, &MaterialFullscreen};
+    const ShaderVertexInputType inputs[] = {InputA, InputB};
+    REQUIRE(registry.Register(types));
+    REQUIRE(registry.RegisterVertexInputTypes(inputs));
+    REQUIRE(registry.Freeze());
+    ShaderFormatFacts facts;
+    REQUIRE(SetShaderFormatFactsId(facts, "D3D12_SM6"));
+
+    // 엔진 열거에는 머티리얼 타입이 없다(Engine·Project 둘 다).
+    Array<ShaderLibraryCombination> plans(TestAllocator());
+    REQUIRE(EnumerateShaderLibraryCombinations(registry.Types(), registry.VertexInputTypes(), facts,
+                                               ShaderLibraryKind::Engine, false, plans));
+    REQUIRE(plans.Size() == 1);
+    CHECK(plans[0].type == registry.Find(TestPixelName.hash) &&
+          plans[0].bundleId == EngineShaderBundleId);
+    REQUIRE(EnumerateShaderLibraryCombinations(registry.Types(), registry.VertexInputTypes(), facts,
+                                               ShaderLibraryKind::Project, false, plans));
+    CHECK(plans.IsEmpty());
+
+    // traits 첫 byte 1: 축 타입 = 정점 입력 A × 퍼뮤테이션 둘, 축 없는 타입 = 없음 하나.
+    constexpr uint64 Bundle = 0x77;
+    const uint8 allPermutations[] = {1};
+    const ShaderVertexInputType* inputA = registry.FindVertexInputType(InputAName.hash);
+    REQUIRE(inputA != nullptr);
+    plans.Clear();
+    REQUIRE(EnumerateMaterialShaderCombinations(registry.Types(),
+                                                Span<const ShaderVertexInputType>(inputA, 1), facts,
+                                                allPermutations, Bundle, false, plans));
+    REQUIRE(plans.Size() == 3);
+    usize axisCombinations = 0;
+    for (const ShaderLibraryCombination& plan : plans) {
+        CHECK(plan.bundleId == Bundle && (plan.type->flags & ShaderTypeMaterialShader) != 0);
+        CHECK(ShaderLibraryCombinationKey(plan).bundleId == Bundle);
+        if (plan.type->nameHash == MaterialPassName.hash) {
+            CHECK(plan.vertexInputType == InputAName.hash);
+            ++axisCombinations;
+        } else {
+            CHECK(plan.vertexInputType == NoVertexInputType && plan.permutationId == 0);
+        }
+    }
+
+    CHECK(axisCombinations == 2u);
+
+    // traits가 거르기를 바꾼다(첫 byte 0이면 퍼뮤테이션 0만). 결과는 덧붙는다.
+    const uint8 firstPermutation[] = {0};
+    REQUIRE(EnumerateMaterialShaderCombinations(registry.Types(), registry.VertexInputTypes(),
+                                                facts, firstPermutation, Bundle + 1, false, plans));
+    REQUIRE(plans.Size() == 3u + 3u);
+    for (usize index = 3; index < plans.Size(); ++index) {
+        CHECK(plans[index].bundleId == Bundle + 1 && plans[index].permutationId == 0);
+    }
+
+    // 묶음 id 0은 엔진 셰이더 묶음이라 받지 않는다.
+    CHECK(EnumerateMaterialShaderCombinations(registry.Types(), registry.VertexInputTypes(), facts,
+                                              allPermutations, EngineShaderBundleId, false, plans)
+              .Error() == ErrorCode::InvalidArgument);
 }
 
 } // namespace shader_core_tests_file

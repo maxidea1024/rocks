@@ -58,12 +58,14 @@ constexpr char FixtureVulkan[] =
     "  },\n"
     "  \"features\": [\"compute\", \"vertexViewportLayerOutput\"],\n"
     "  \"deviceRequirements\": [\"VULKAN_1_1\"],\n"
+    "  \"platformClass\": [\"Pc\"],\n"
     "  \"producers\": [{ \"host\": \"windows-x64\" }, { \"host\": \"macos-arm64\" }]\n"
     "}\n";
 
 // 리터럴 키 golden(공통 머리의 결정적 수학 버전 = GoldenMathVersion, 툴체인 지문 = 0x5a×32)이다.
-// 기록 순서·태그·번호 표를 바꾸면 이 값이 바뀐다(그때는 ShaderJobProcessor 버전 Guid도 바꾼다).
-constexpr char GoldenKey[] = "fa371bc629da03e2830307a570ed80bf11b2e394b4dc77932128fd4f7ffde178";
+// 기록 순서·태그·번호 표를 바꾸면 이 값이 바뀐다(그때는 ShaderJobProcessor 버전 Guid도 바꾼다). 위
+// 형식 정의 byte(키 3행)가 바뀌어도 바뀐다(개정 65 platformClass).
+constexpr char GoldenKey[] = "50b4240058a5a70acfbf88018064139646170cd1554ac1a06851b539fd623bd1";
 constexpr uint32 GoldenMathVersion = 7;
 constexpr uint8 GoldenToolchainByte = 0x5a;
 
