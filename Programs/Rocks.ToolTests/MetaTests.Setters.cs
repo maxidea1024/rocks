@@ -53,14 +53,22 @@ internal static partial class MetaTests
             Verify.That(header.Contains("ValueSame<decltype(::probe::Shade::tone)>::Same(left.tone,right.tone)", StringComparison.Ordinal), "struct member comparison");
             Verify.That(compact.Contains("auto::probe::Value::SetLabel(::rocks::detail::SetterParam<decltype(::probe::Value::label)>value)noexcept->::rocks::Result<void>{", StringComparison.Ordinal),
                 "setter definition:\n" + source);
-            Verify.That(compact.Contains("(this->*static_cast<void(::probe::Value::*)()noexcept>(&::probe::Value::Relayout))();returnAccess::templateNotify<&::probe::Value::label>(*this);",
+            Verify.That(compact.Contains("(self.*static_cast<void(Self::*)()noexcept>(&Self::Relayout))();}}(static_cast<::probe::Value&>(object));returnAccess::templateNotify<&::probe::Value::label>(object);",
                 StringComparison.Ordinal), "Apply before notify");
-            Verify.That(compact.Contains("SetCount(") && compact.Contains("Access::Prepare(*this)", StringComparison.Ordinal), "Notify setter checks access first");
+            Verify.That(compact.Contains("SetCount(") && compact.Contains("::rocks::Object&object=*this;usingAccess", StringComparison.Ordinal) && compact.Contains("Access::Prepare(object)", StringComparison.Ordinal), "Notify setter checks access first");
             int plainAt = compact.IndexOf("::probe::Value::SetPlain(", StringComparison.Ordinal);
             Verify.That(plainAt >= 0 && !compact[plainAt..].Split("::probe::Value::SetShade(")[0].Contains("Prepare", StringComparison.Ordinal), "a setter without Notify has no access check");
             Verify.That(compact.Contains("#ifROCKS_WITH_EDITOR_DATA//", StringComparison.Ordinal) && compact.Contains("::probe::Value::SetNote(", StringComparison.Ordinal),
                 "EditorOnly setter is guarded");
             Verify.That(!compact.Contains("::probe::Value::GetLabel(", StringComparison.Ordinal), "getters have no generated definition");
+            // 리플렉션 쓰기의 setter thunk(CN-D14): 생성 헤더의 SetterOf가 상자 값을 교환으로 넣고(AssignOwned) Apply·통지하며, 함수표의 끝 칸이
+            // SetterOf를 부른다(setter 없는 필드는 칸이 없다).
+            Verify.That(header.Contains("staticconstexprFieldSetterFunctionSetterOf()noexcept{", StringComparison.Ordinal) &&
+                header.Contains("Access::templateAssignOwned<&::probe::Value::label>(object,*static_cast<decltype(::probe::Value::label)*>(value))", StringComparison.Ordinal),
+                "SetterOf thunk swaps the boxed value in:\n" + header);
+            Verify.That(compact.Contains("GeneratedType<::probe::Value>::templateSetterOf<&::probe::Value::label>()}", StringComparison.Ordinal),
+                "the ops table carries the setter thunk");
+            Verify.That(!compact.Contains("SetterOf<&::probe::Value::partner>", StringComparison.Ordinal), "a field without a setter has no setter slot");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated code compiles: " + compiled.StdOut + compiled.StdErr);
         });
@@ -99,6 +107,15 @@ internal static partial class MetaTests
             Verify.Equal(0, overloaded.ExitCode, "an overloaded Apply method compiles: " + overloaded.StdOut + overloaded.StdErr);
             await probe.RejectAsync(SetterValue("ROCKS_SETTER(SetLabel, label)", label: "ROCKS_PROPERTY(Notify, Apply = \"Missing\") rocks::String label;"),
                 "RMC3000", "RMC2904");
+        });
+        // ReadOnly 필드도 setter가 있으면 ScriptWritable일 수 있다(SparksBinding B1 — 리플렉션 쓰기가 setter로 간다, CN-D14). setter가 없으면
+        // 그대로 RMC2603이다(Meta.SparksBindingRejectsConflictingSpecifiers).
+        suite.Add("Meta.SetterAllowsReadOnlyScriptWritable", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(BindingThing("ROCKS_PROPERTY(ReadOnly, ScriptWritable) rocks::int32 count = 0;\nROCKS_SETTER(SetCount, count)"));
+            ProcessResult compiled = await probe.CompileGeneratedAsync();
+            Verify.Equal(0, compiled.ExitCode, "generated code compiles: " + compiled.StdOut + compiled.StdErr);
         });
         // Apply(RMC2904): setter 없는 필드, 식별자가 아닌 값.
         AddRejectGroup(context, "Meta.SetterApply", [

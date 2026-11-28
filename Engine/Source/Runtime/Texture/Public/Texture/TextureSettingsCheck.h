@@ -2,6 +2,7 @@
 
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <Core/Containers/Array.h>
+#include <Core/Math/Vector4.h>
 #include <Object/PropertyPath.h>
 
 // 텍스처 설정 판정이다(Docs/Design/AssetSystem 12.8절 판정): 계약 설정(12.4.1절 — 스키마에 있지만
@@ -23,15 +24,17 @@ struct TextureSettingIssue {
 // 순, 결정적).
 // - 계약 필드가 기본값과 다르면 UnsupportedSetting이다(FindChangedFields — 차이 저장과 같은 같음).
 //   영향 조건이 거짓인 필드는 보지 않는다: chromaKeyThreshold·chromaKeyColor(chromaKeyTexture일
-//   때), alphaCoverageThresholds(doScaleMipsForAlphaCoverage일 때), compositeTextureMode·
+//   때), compositeTextureMode·
 //   compositePower(compositeTexture가 non-null일 때), 색도 좌표
 //   넷·chromaticAdaptationMethod(colorSpace = Custom일 때), VT
 //   우선순위·useVirtualTextureStreamingPriority·virtualTexturePrefetchMips
-//   (virtualTextureStreaming일 때). oodleTextureSdkVersion·useNewMipFilter·normalizeNormals는
-//   기록만 한다(판정 없음).
-// - 값 판정: mipGenSettings Sharpen·Blur·Angular·LeaveExistingMips, encodingOverride가 None·Linear·
-//   sRGB 밖, colorSpace가 None·sRGB 밖, mipLoadOptions OnlyFirstMip은 UnsupportedSetting,
-//   compressionSettings LQ·EncodedReflectionCapture는 InvalidSetting이다.
+//   (virtualTextureStreaming일 때). oodleTextureSdkVersion은 기록만 한다(판정 없음).
+// - 값 판정: mipGenSettings LeaveExistingMips와 TextureCube의 Angular(그 밖 클래스의 Angular는
+// 빌드가
+//   SimpleAverage로 바꾼다 — 12.18 TP1), encodingOverride가 None·Linear·sRGB 밖, colorSpace가
+//   None·sRGB 밖, mipLoadOptions OnlyFirstMip은 UnsupportedSetting, compressionSettings LQ·
+//   EncodedReflectionCapture와 doScaleMipsForAlphaCoverage일 때 잘못된 alphaCoverageThresholds
+//   (TextureAlphaCoverageThresholdsValid)는 InvalidSetting이다.
 // - 레코드 없는 타입(손 함수표 파생)은 값 판정만 한다.
 //
 // 오류(out은 빈다): 에디터 데이터가 없는 빌드(ROCKS_WITH_EDITOR_DATA 0) Unsupported, Texture가 아닌
@@ -42,6 +45,13 @@ struct TextureSettingIssue {
 //   auto checked = CheckTextureSettings(registry, access, texture, allocator, issues);
 //   if (!checked) { return checked; }
 //   if (!issues.IsEmpty()) { /* 진단으로 내고 빌드하지 않는다 */ }
+// alpha coverage 임계값이 쓸 수 있는 값인지다(12.18 TP1 — UE는 잘못된 값에서 check로 멈춘다):
+// 넷 모두 0 이상의 유한한 값이고, float로 바꾸면 0이거나 정규 수여야 하며(비정규 수 거부), 0이 아닌
+// 칸이 있으면 float로 바꾼 뒤에도 0이 아닌 칸이 남아야 한다. 넷 모두 0이면 참이다(coverage 꺼짐).
+// UE보다 엄격하다 — UE는 mip 생성이 돌 때만 멈추고 NoMipmaps·최대 크기 축소 없음이면 그대로
+// 빌드한다(판정은 그룹·크기를 모른다).
+ROCKS_TEXTURE_API bool TextureAlphaCoverageThresholdsValid(const Vec4d& thresholds) noexcept;
+
 ROCKS_TEXTURE_API Result<void> CheckTextureSettings(ObjectRegistry& registry,
                                                     const ObjectAccessContext& access,
                                                     ObjectHandle texture, Allocator& scratch,

@@ -1240,6 +1240,12 @@ internal static partial class SchemaValidator
                 CheckStaticArray(field);
                 CheckContainer(field);
                 CheckInstanced(model, field);
+                // struct 멤버에는 setter가 없으므로 ReadOnly와 ScriptWritable을 함께 쓸 수 없다(RMC2603 — 클래스 필드는 CheckAccessors).
+                if (field.Spec.ScriptWritable && field.Spec.ReadOnly)
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: a ReadOnly field without a ROCKS_SETTER cannot be ScriptWritable", "RMC2603",
+                        "Reflection writes refuse ReadOnly fields without a setter; use ScriptReadOnly or remove ReadOnly.").At(field.Site);
+                }
             }
         }
 
@@ -1296,6 +1302,14 @@ internal static partial class SchemaValidator
                         : field.Bitfield ? "A bitfield has no member pointer; write it in code and announce it with ObjectRegistry::Notify."
                         : "Registry reference fields are written in place through the ObjectRegistry API, which also announces Notify fields.").At(accessor.Site);
                 }
+            }
+
+            // 리플렉션 ReadOnly 필드는 setter 없이 ScriptWritable일 수 없다(Docs/Design/SparksBinding.ko.md B1 — setter가 있으면 리플렉션 쓰기가
+            // setter로 가서 ReadOnly가 막지 않는다, ChangeNotification CN-D14).
+            foreach (FieldModel field in model.OwnFields.Where(own => own.Spec.ScriptWritable && own.Spec.ReadOnly && !seen.Contains((own.Name, true))))
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: a ReadOnly field without a ROCKS_SETTER cannot be ScriptWritable", "RMC2603",
+                    "Reflection writes refuse ReadOnly fields without a setter; use ScriptReadOnly, remove ReadOnly, or declare ROCKS_SETTER for the field.").At(field.Site);
             }
 
             foreach (FieldModel field in model.OwnFields.Where(own => own.Spec.Apply.Length != 0))

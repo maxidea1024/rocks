@@ -88,7 +88,9 @@ struct TextureBuildResult {
 // 빌드 규칙 버전이다(12.5·12.13·12.17절 규칙이 바뀌면 올린다 — 쿠킹 너겟 키에 들어간다, 12.14절).
 // 3: 압축 형식 선택·채널 복제·BC 인코딩(12.17.5 — TC2).
 // 4: 빌드 설정 compressionQuality(ASTC 블록 크기 — 12.17.8 7).
-inline constexpr uint32 TextureBuildVersion = 4;
+// 5: mip 필터 Sharpen·Blur·alpha coverage·useNewMipFilter 두 경로, 테두리 평균 역수 곱, Volume 깊이
+//    1 평균, 키의 주소 칸(12.18 TP1).
+inline constexpr uint32 TextureBuildVersion = 5;
 
 // 빌드 경고 수
 // 상한이다(SrgbIgnored·PreserveBorderWithWrap·EncoderUnavailable·PlatformFormatFallback).

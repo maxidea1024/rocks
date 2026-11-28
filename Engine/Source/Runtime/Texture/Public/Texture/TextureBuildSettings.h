@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Math/Color.h>
+#include <Core/Math/Vector4.h>
 #include <Meta/Annotations.h>
 #include <Texture/TextureEnums.h>
 
@@ -33,10 +34,18 @@ struct TextureBuildSettings {
     ROCKS_PROPERTY() bool padWithBorderColor = false;
     ROCKS_PROPERTY() uint32 resizeX = 0;
     ROCKS_PROPERTY() uint32 resizeY = 0;
-    // SimpleAverage·NoMipmaps·Unfiltered 하나다(FromTextureGroup은 그룹 값으로 바뀐 뒤).
+    // SimpleAverage·NoMipmaps·Unfiltered·Sharpen0–10·Blur1–5 하나다(FromTextureGroup은 그룹 값으로,
+    // Cube가 아닌 Angular는 SimpleAverage로 바뀐 뒤 — 12.18 TP1).
     ROCKS_PROPERTY()
     TextureMipGenSettings mipGenSettings = TextureMipGenSettings::SimpleAverage;
     ROCKS_PROPERTY() bool preserveBorder = false;
+    // 새 이미지 처리 경로인지다(UE bUseNewMipFilter — 주소 방식·최대 크기·커널 mip이 갈린다, 12.18
+    // TP-D1).
+    ROCKS_PROPERTY() bool useNewMipFilter = false;
+    // alpha coverage 보존이다(텍스처 칸이 켜지고 임계값이 0이 아닐 때만 참 — 아니면 거짓·임계값 0,
+    // UE GetTextureBuildSettings).
+    ROCKS_PROPERTY() bool alphaCoverage = false;
+    ROCKS_PROPERTY() Vec4 alphaCoverageThresholds { 0.0f, 0.0f, 0.0f, 0.0f };
     // Normalmap일 때만 켠다(UE bNormalizeNormals && IsNormalMap()).
     ROCKS_PROPERTY() bool normalizeNormals = false;
     // 축별 주소다(Cube·CubeArray는 Clamp — PreserveBorder Wrap 경고만 본다, 재표본은 늘 clamp).

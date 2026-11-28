@@ -3,6 +3,7 @@
 #include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
+#include <Core/Containers/OrderedSet.h>
 #include <Core/Optional.h>
 #include <Object/SoftObjectRef.h>
 #include <Core/Text/String.h>
@@ -13,6 +14,7 @@
 #include <Object/ObjectRefMap.h>
 #include <Object/ObjectRefs.h>
 #include <Object/StructRefArray.h>
+#include <ReflectionTestFixtures/ValidateFixture.h>
 
 // 실행 중 필드 변경 통지 시험 대상이다(Docs/Design/ChangeNotification.ko.md CN1 — CN-D1·CN-D2):
 // Notify 필드(값·문자열·참조)와 통지하지 않는 필드, Notify 계산 값 함수, 그 클래스를 물려받고
@@ -149,14 +151,17 @@ struct NotifyCached {
 // virtual Notify 계산 값 함수. 생성 setter와 .cpp의 진입점을 모듈 밖(시험 실행 파일)에서 부르므로
 // 클래스를 export한다(Modular 빌드 — 생성 setter는 모듈 생성 소스에 정의된다). 생성자가 setter를
 // 불러 Registry 없는 경로를 남긴다(NATIVE 기록).
+// NotifyWidget::grid의 칸 수다(상자 인라인 저장소 64 byte보다 크다 — Object/DetachedPath.h).
+inline constexpr usize GridCells = 24;
+
 ROCKS_CLASS()
 class ROCKS_REFLECTIONTESTFIXTURES_API NotifyWidget : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
     explicit NotifyWidget(Allocator& allocator) noexcept
-        : label(allocator), style(allocator), values(allocator), link(allocator),
-          scores(allocator) {
+        : label(allocator), style(allocator), values(allocator), link(allocator), scores(allocator),
+          stack(allocator), tags(allocator) {
         constructorScale = SetScale(2.0f);
         auto caption = Text::Invariant(allocator, "constructed");
         constructorCaption = caption ? SetCaption(caption.Value()) : Result<void>::Success();
@@ -173,6 +178,14 @@ public:
     ROCKS_PROPERTY(Notify) SoftObjectRef<NotifyModel> link;
     ROCKS_PROPERTY(Notify) Optional<String> nickname;
     ROCKS_PROPERTY(Notify) OrderedMap<int32, int32> scores;
+    // ReadOnly이지만 setter가 있어 리플렉션 쓰기가 setter로 간다(CN-D14).
+    ROCKS_PROPERTY(ReadOnly, Notify) int32 locked = 0;
+    // 검증 hook struct(값 트리 검증 — StructValidation), 상자 인라인 저장소보다 큰 정적 배열(heap
+    // 상자), 배열·Set(원소 연산)을 setter로 쓴다(CN-D14).
+    ROCKS_PROPERTY(Notify) ValidRange span;
+    ROCKS_PROPERTY(Notify) int32 grid[GridCells] = {};
+    ROCKS_PROPERTY(Notify) Array<int32> stack;
+    ROCKS_PROPERTY(Notify) OrderedSet<int32> tags;
 #if ROCKS_WITH_EDITOR_DATA
     ROCKS_PROPERTY(EditorOnly) int32 note = 0;
     ROCKS_SETTER(SetNote, note)
@@ -193,6 +206,11 @@ public:
     ROCKS_SETTER(SetLink, link)
     ROCKS_SETTER(SetNickname, nickname)
     ROCKS_SETTER(SetScores, scores)
+    ROCKS_SETTER(SetLocked, locked)
+    ROCKS_SETTER(SetSpan, span)
+    ROCKS_SETTER(SetGrid, grid)
+    ROCKS_SETTER(SetStack, stack)
+    ROCKS_SETTER(SetTags, tags)
 
     // count + quiet이다(virtual 계산 값 — NotifyChanged가 템플릿 인자 동등성으로 ID를 찾는다).
     ROCKS_FUNCTION(Pure, Notify) virtual int32 Total() const noexcept {

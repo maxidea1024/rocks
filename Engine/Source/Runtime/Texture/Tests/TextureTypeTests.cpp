@@ -318,10 +318,10 @@ TEST(Texture_CheckSettings) {
                                        other.Value().Handle()));
         });
         REQUIRE(CheckTextureSettings(objects, access, handle, allocator, issues));
-        // 스키마 필드 순이다(선언 순이 아니다 — TypeSchema fields 배열 순).
-        const StringView conditioned[] = {
-            "doScaleMipsForAlphaCoverage", "compositeTextureMode", "compositeTexture",
-            "chromaKeyThreshold",          "chromaKeyTexture",     "alphaCoverageThresholds"};
+        // 스키마 필드 순이다(선언 순이 아니다 — TypeSchema fields 배열 순). alpha coverage는
+        // 구현이라 이슈가 아니다(12.18 TP1 — 임계값 (0,0,0,0.75)은 쓸 수 있는 값).
+        const StringView conditioned[] = {"compositeTextureMode", "compositeTexture",
+                                          "chromaKeyThreshold", "chromaKeyTexture"};
         REQUIRE(issues.Size() == sizeof(conditioned) / sizeof(conditioned[0]));
         for (usize index = 0; index < issues.Size(); ++index) {
             CHECK(issues[index].code == AssetDiagnosticCode::UnsupportedSetting);
@@ -332,7 +332,7 @@ TEST(Texture_CheckSettings) {
         auto values = objects.NewObject<Texture2D>(access, TypeIdOf<Texture2D>());
         REQUIRE(values);
         EditTexture(objects, values.Value().Handle(), [](Texture2D& texture) noexcept {
-            texture.mipGenSettings = TextureMipGenSettings::Sharpen4;
+            texture.mipGenSettings = TextureMipGenSettings::LeaveExistingMips;
             texture.sourceColorSettings.encodingOverride = TextureSourceEncoding::Gamma22;
             texture.sourceColorSettings.colorSpace = TextureColorSpace::Rec2020;
             texture.mipLoadOptions = TextureMipLoadOptions::OnlyFirstMip;
@@ -350,9 +350,62 @@ TEST(Texture_CheckSettings) {
                                                     : AssetDiagnosticCode::UnsupportedSetting));
         }
 
+        // Sharpen·Blur와 Texture2D의 Angular는 받고(빌드가 SimpleAverage로 바꾼다), 잘못된 alpha
+        // coverage 임계값은 InvalidSetting이다(12.18 TP1).
+        const Vec4d invalidThresholds[] = {
+            Vec4d{0.0, 0.0, 0.0, -0.5}, Vec4d{0.0, 1.0e-50, 0.0, 0.0},
+            Vec4d{0.0, 0.0, 0.0, 1.0e-40}, Vec4d{0.0, 0.0, 0.0, 1.0e300}};
+        for (const Vec4d& thresholds : invalidThresholds) {
+            CHECK(!TextureAlphaCoverageThresholdsValid(thresholds));
+            EditTexture(objects, values.Value().Handle(), [&](Texture2D& texture) noexcept {
+                texture.mipGenSettings = TextureMipGenSettings::Angular;
+                texture.sourceColorSettings.encodingOverride = TextureSourceEncoding::None;
+                texture.sourceColorSettings.colorSpace = TextureColorSpace::None;
+                texture.mipLoadOptions = TextureMipLoadOptions::Default;
+                texture.compressionSettings = TextureCompressionSettings::Default;
+                texture.doScaleMipsForAlphaCoverage = true;
+                texture.alphaCoverageThresholds = thresholds;
+            });
+            REQUIRE(
+                CheckTextureSettings(objects, access, values.Value().Handle(), allocator, issues));
+            REQUIRE(issues.Size() == 1);
+            CHECK(issues[0].code == AssetDiagnosticCode::InvalidSetting &&
+                  PathIs(lease.Value(), issues[0].path, "alphaCoverageThresholds"));
+        }
+
+        CHECK(TextureAlphaCoverageThresholdsValid(Vec4d{0.0, 0.0, 0.0, 0.0}) &&
+              TextureAlphaCoverageThresholdsValid(Vec4d{0.25, 0.0, 0.75, 0.5}));
+        const double nan = platform::BitCast<double>(uint64{0x7FF8000000000000ull});
+        CHECK(!TextureAlphaCoverageThresholdsValid(Vec4d{nan, 0.0, 0.0, 0.5}));
+        EditTexture(objects, values.Value().Handle(), [](Texture2D& texture) noexcept {
+            texture.mipGenSettings = TextureMipGenSettings::Blur3;
+            texture.doScaleMipsForAlphaCoverage = false;
+            texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, 0.0, -1.0};
+        });
+        REQUIRE(CheckTextureSettings(objects, access, values.Value().Handle(), allocator, issues));
+        CHECK(issues.IsEmpty());
+
+        // TextureCube의 Angular는 TP6까지 계약이다.
+        auto cube = objects.NewObject<TextureCube>(access, TypeIdOf<TextureCube>());
+        REQUIRE(cube);
+        {
+            auto borrowed =
+                objects.Resolve<TextureCube>(objects.OwnerAccess(), cube.Value().Handle());
+            REQUIRE(borrowed);
+            auto value = borrowed.Value().Get();
+            REQUIRE(value);
+            value.Value()->mipGenSettings = TextureMipGenSettings::Angular;
+        }
+        REQUIRE(CheckTextureSettings(objects, access, cube.Value().Handle(), allocator, issues));
+        REQUIRE(issues.Size() == 1);
+        CHECK(issues[0].code == AssetDiagnosticCode::UnsupportedSetting &&
+              PathIs(lease.Value(), issues[0].path, "mipGenSettings"));
+        cube.Value().Reset();
+
         // Custom 색 공간이면 색도 좌표가 계약으로 판정된다.
         EditTexture(objects, values.Value().Handle(), [](Texture2D& texture) noexcept {
             texture.mipGenSettings = TextureMipGenSettings::FromTextureGroup;
+            texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, 0.0, 0.0};
             texture.sourceColorSettings.encodingOverride = TextureSourceEncoding::None;
             texture.sourceColorSettings.colorSpace = TextureColorSpace::Custom;
             texture.sourceColorSettings.redChromaticityCoordinate = Vec2d{0.64, 0.33};
