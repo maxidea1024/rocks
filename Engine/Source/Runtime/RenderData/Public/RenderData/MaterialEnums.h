@@ -3,7 +3,7 @@
 #include <Base/Types.h>
 #include <Meta/Annotations.h>
 
-// 머티리얼 번호표다(Docs/Design/Renderer.ko.md 14.2절, 결정 RN5). 정의 권한은 Renderer 스펙에 있다.
+// 머티리얼 번호표다(Docs/Design/Renderer 14.2절, 결정 RN5). 정의 권한은 Renderer 스펙에 있다.
 // 머티리얼 스키마·에셋·pass 셰이더가 이 열거를 참조한다. HLSL 상수는 `/Engine/Shared/` 공용 헤더에
 // 두고 static_assert로 맞춘다(MS2a에서 더한다).
 //

@@ -58,7 +58,7 @@
 - 개정 12(2026-11-18): GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 부분(버퍼 용도·버퍼 view·`ReadBuffer`·그리기 slot) 1단계 구현을 반영했다(4.2절 GX1·GX2 상태, 4.4절 구현 메모와 장치 측정 표). 스펙과 다르게 정한 것: 버퍼 view 묶기는 GX6 전 개발 경로 고정 배치(slot 0–3 = `t1–t4`)이고, Vulkan 그리기 descriptor는 파이프라인별 layout과 기록 단위 pool로 바꿨다.
 - 개정 13(2026-11-18): [CVar·치트 명령 설계](../CVarSystem.ko.md) 개정 2를 반영했다(4.2절 CP4 행, 12절 CVar 이관 메모). RB1의 설정 snapshot 연결은 CVar 구현 때 `Acquire()`·모든 CVar 포함·렌더 lane `SnapshotBinding`으로 바뀐다.
 - 개정 14(2026-11-18): CP7(엔진 전역 `Name` pool)을 권장안으로 정했다: 전역 pool 없음, 렌더 이름은 정적 문자열 리터럴 + 64 bit 해시 조회, 등록 때 충돌·중복은 실패, 쿠킹 형식은 이름 정렬·SHA-256 그대로(4.3절, CP 표).
-- 개정 15(2026-11-18): [렌더러](../Renderer.ko.md) 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17을 설계로 반영했다(구현은 화면 마일스톤 뒤 렌더러 단계).
+- 개정 15(2026-11-18): [렌더러](../Renderer/README.ko.md) 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17을 설계로 반영했다(구현은 화면 마일스톤 뒤 렌더러 단계).
   - RQ7: 9.5절에 렌더러 공유 상수 slot 여섯(`View`·`Scene`·`ForwardLight`·`Shadow`·`Fog`·`PrecomputedLighting`)과 상수 버퍼 예산, 9.6절에 자원 묶음 규칙(펼쳐 넣기·이름·쓰는 멤버만 의존·view마다).
   - RQ8: 10.5절 인스턴스 데이터 읽기(GPU Scene typed buffer, 인스턴스 번호 목록 + `SV_InstanceID`, 루트 상수 `MeshDrawConstants`, 행렬식 부호별 그리기, 결정 R13).
   - RQ15: 7.5절 렌더러 사용 요구(`GraphSharedData`와 `SceneTextureSet`, history export 성공 조건과 무효 표시, mip view와 GLES view 기준 mip, view 여럿의 한 그래프와 pass 묶음 구간). 렌더 그래프 별도 문서가 없어 이 문서에 두었다.

@@ -2,7 +2,7 @@
 
 #include <Core/Result.h>
 
-// RenderData 모듈의 리플렉션 타입 등록이다(Docs/Design/Renderer.ko.md 3.2절).
+// RenderData 모듈의 리플렉션 타입 등록이다(Docs/Design/Renderer 3.2절).
 namespace rocks {
 
 class ModuleRegistration;

@@ -4,7 +4,7 @@
 
 이 문서는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 `Engine/Source/Runtime/Engine/Classes/Components` 폴더(헤더 73개)에 있는 컴포넌트를 Rocks에 들이는 범위와 순서를 정한다. 사용자 지시(2026-11-23): 기본은 전부 가져오되 폐기된 것과 BSP는 제외한다. 필수 컴포넌트 목록(3절)과 선행 작업 목록(4절)을 따로 둔다. 1–7절(1부)은 이 폴더, 8절(2부)은 폴더 밖(Engine 모듈의 다른 폴더, Runtime의 다른 모듈), 9절(3부)은 엔진 플러그인이다.
 
-- 근거 문서: [엔진 런타임](../EngineRuntime/README.ko.md)(이하 ER) 7절, [엔진 구현 계획](../EngineImplementationPlan.ko.md)(이하 EIP) 10·13–16·18·20절, [렌더러](../Renderer.ko.md)(이하 RN) 3·4·17절, [오디오](../AudioSystem/README.ko.md)(이하 AU) 3.8·3.15절, [Prefab](../Prefab/README.ko.md)(이하 PF) 5절, [Sparks 엔진 연동](../SparksEngineIntegration.ko.md)(이하 SE) 2.3절, [메시·애니메이션 에셋](../MeshAnimationAssets/README.ko.md)(이하 MA), [물리 어댑터](../PhysicsJoltAdapter.ko.md), [Cylinder](../CylinderShape.ko.md), [커브](../CurveData/README.ko.md), [공간 색인](../SpatialIndex.ko.md), [텍스처 스트리밍](../TextureStreaming.ko.md).
+- 근거 문서: [엔진 런타임](../EngineRuntime/README.ko.md)(이하 ER) 7절, [엔진 구현 계획](../EngineImplementationPlan.ko.md)(이하 EIP) 10·13–16·18·20절, [렌더러](../Renderer/README.ko.md)(이하 RN) 3·4·17절, [오디오](../AudioSystem/README.ko.md)(이하 AU) 3.8·3.15절, [Prefab](../Prefab/README.ko.md)(이하 PF) 5절, [Sparks 엔진 연동](../SparksEngineIntegration.ko.md)(이하 SE) 2.3절, [메시·애니메이션 에셋](../MeshAnimationAssets/README.ko.md)(이하 MA), [물리 어댑터](../PhysicsJoltAdapter.ko.md), [Cylinder](../CylinderShape.ko.md), [커브](../CurveData/README.ko.md), [공간 색인](../SpatialIndex.ko.md), [텍스처 스트리밍](../TextureStreaming.ko.md).
 - UE 경로 약어: `EC/` = `Engine/Source/Runtime/Engine/Classes/Components/`, `EE/` = `Engine/Source/Runtime/Engine/Classes/Engine/`.
 - 좌표·단위·행렬은 UE 5.8과 같다(ER 7.3절). 이 문서의 모든 Transform·bounds·감쇠 거리는 cm다.
 

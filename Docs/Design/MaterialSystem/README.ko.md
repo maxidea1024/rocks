@@ -28,7 +28,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - [렌더 기반](../RenderBase/README.ko.md)(개정 9): 셰이더 집합·바인딩 지도·상수 블록·공유 상수 slot·파이프라인 캐시·정점 입력 타입.
 - [에셋 시스템](../AssetSystem/README.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
 - [텍스처 스트리밍](../TextureStreaming.ko.md)(개정 3) 결정 T4: 재질 sampling scale 공급.
-- [Renderer](../Renderer.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
+- [Renderer](../Renderer/README.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
 - [노드 그래프](../NodeGraph/README.ko.md)(개정 2): 그래프 문서 모델(`GraphDocument`)·노드 서술 등록표·`GraphSchema`·변경·undo·복사·의미 바이트·migration. 머티리얼 그래프는 그 위의 도메인 schema다(3.2·4.3·5.2·5.5·14절).
 
 **용어 방침.** UE 구조는 따르되 이름은 Rocks 이름을 쓴다. UE의 클래스·함수·CVar 이름은 대응표(2절)와 "UE 5.8 방식" 표·근거에만 적는다. shader·pass·BSDF·closure·GBuffer·uniform·sampler·permutation처럼 업계에서 함께 쓰는 말은 그대로 쓴다. 계획 문서에 이미 있는 Rocks 이름(MaterialSchema·MaterialCompiler·MaterialRuntime·MaterialCook·CompileCoordinator·PreviewSession)은 그대로 쓴다.

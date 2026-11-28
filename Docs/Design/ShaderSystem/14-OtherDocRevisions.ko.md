@@ -43,7 +43,7 @@
 | [에셋 시스템](../AssetSystem/11-RuntimeLoading.ko.md) | 11절 로더 시작 | 매니페스트 v2의 라이브러리 항목을 셰이더 집합에 넘김(SSD14), 엔진 전용 쿠킹 루트 |
 | [에셋 시스템](../AssetSystem/13-CommandLine.ko.md) | :25 `asset-cook` 문법 | `--engine`(SSD11) |
 | [렌더 기반](../RenderBase/README.ko.md) | 9.2절, SX7·SX14, GX1·GX3, R8 | 엔진 라이브러리는 프로젝트 쿠킹 산출물(SSD11), "형식마다 공급 경로 하나" 문구(개발 전용 항목은 공급자 실패 시 `Unsupported` 대체 — SSD16), "정적 등록으로 전체를 안다"(:861) → 모듈 수명 객체 등록(12.2.1절 SSD3), 완결성 검사에서 개발 전용 항목 제외·타입 집합 검사(SSD8·SSD3), 공급자 interface는 SH2e(SSD23), 메모리 라이브러리(SSD16), `DeviceCaps` 장치 요구 비트(SSD15), Graphics `CreateShader`·파이프라인 layout(16.1절 SSD18), RB4 SH2분 |
-| [렌더러](../Renderer.ko.md) | 13절 지원표 | PS 진단 버퍼 행(7.2절 12항 — PS만, D3D11·GLES no-op, Vulkan `fragmentStoresAndAtomics`) |
+| [렌더러](../Renderer/README.ko.md) | 13절 지원표 | PS 진단 버퍼 행(7.2절 12항 — PS만, D3D11·GLES no-op, Vulkan `fragmentStoresAndAtomics`) |
 | [엔진 셰이더](../EngineShaders/09-LimitsAndFollowups.ko.md) | SLR3·SLR12 | SLR3은 16.1절 SSD21(선택 하위 단계 SH2g, 자체 완료 기준), SLR12는 7.2절 12항(SSD22)으로 반영됨 |
 | [엔진 셰이더](../EngineShaders/07-CommonLibraryFirstScope.ko.md) | :21 `ShaderAssert.rsh` | VS·PS 판정을 `ROCKS_FEATURE_DEBUG_PIXEL_UAV`가 아니라 `ROCKS_DEBUG_BUFFER`(PS 개발 전용 퍼뮤테이션에서만 정의)로. VS는 늘 빈 매크로, CS는 일반 UAV 경로 |
 | [엔진 셰이더](../EngineShaders/06-Stages.ko.md) | SL0 행 "(C) 모든 엔진 컴파일 프로필 형식" | 엔진 컴파일 프로필 폐지(SSD24)에 따라 "호스트 플랫폼 TargetProfile(`Windows`·`Mac`)의 `shaderFormats` 형식 + `GLES31_PC`"로 |
@@ -55,4 +55,4 @@
 | [모듈 로더](../ModuleLoader/README.ko.md) | 3.12절 | 셰이더 타입 등록을 모듈 수명 객체 `Startup`에서(SSD3), 프로젝트 모듈 적재는 ML5b 선행 |
 | [에셋 시스템](../AssetSystem/10-Cooker/10.3.1-A4fDetails.ko.md) | A4f3 요청 `CookArtifactRequest` 칸 목록 | (개정 65, 16.5절 SSD87) `packages` — 이번 게시가 담을 매니페스트 항목(새로 쿠킹·재사용·부분 쿠킹의 이전 항목, AssetId 순, 엔진 전용은 빈다). 구현은 렌더 세션이 했다(`CookPublisher::Entries`·`RunArtifactStages`). 에셋 세션 문서 반영 대기 |
 | [머티리얼 시스템](../MaterialSystem/16-OtherDocRevisions.ko.md) | 16절 MSR17·MSR18·MSR19·MRD18 | (개정 65) 16.5절 SSD85–SSD92로 반영. `platformClass`는 하나를 고르는 열거가 아니라 집합(UE 세 bool 독립 — SSD89). 머티리얼 세션 문서 반영 대기 |
-| [렌더러](../Renderer.ko.md) | 3.2절 배치·의존도 | (개정 65, SSD92) MaterialCook은 `RendererShaders`를 링크하지 않고 등록부 원천에서 `ShaderTypeMaterialShader` 타입을 본다. **반영(Renderer 개정 14)** |
+| [렌더러](../Renderer/README.ko.md) | 3.2절 배치·의존도 | (개정 65, SSD92) MaterialCook은 `RendererShaders`를 링크하지 않고 등록부 원천에서 `ShaderTypeMaterialShader` 타입을 본다. **반영(Renderer 개정 14)** |

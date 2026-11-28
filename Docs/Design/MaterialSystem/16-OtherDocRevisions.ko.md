@@ -42,7 +42,7 @@
 | MRB8 | 10.2절(등록) | 정점 입력 타입 선언(이름·`.rsh` 경로·거르기·정적 배치)을 장치 없는 모듈(ShaderCore 또는 그와 같은 층)에 두어 쿠커가 RenderBase 없이 거르기를 실행할 수 있게 한다(8.3절) |
 | MRB9 | 10.2절(정점 입력 타입) | (개정 10) 정점 입력 타입이 채우는 문맥 공급 기능 집합(vertex·skin·particle·speedtree·instance)을 선언한다. 판정은 파이프라인(pass ∪ 정점 입력) 단위다(19.3.1절) |
 
-**Renderer 스펙(Renderer.ko.md)** — 개정 3이 모두 처리했다. 처리 내용은 Renderer 14.7절이다.
+**Renderer 스펙(Renderer/README.ko.md)** — 개정 3이 모두 처리했다. 처리 내용은 Renderer 14.7절이다.
 
 | ID | 요구 | 처리(Renderer 개정 3) |
 |---|---|---|
