@@ -76,32 +76,6 @@ bool SidecarCorrupt(const AssetLoadStatus& status, uint64 id) noexcept {
            status.diagnostic.asset == FixedId(id);
 }
 
-bool WriteWholeFile(StringView path, Span<const uint8> bytes) noexcept {
-    platform::File file;
-    if (!file.Open(platform::PhysicalFileSystem(), path.Data(), path.ByteCount(),
-                   platform::FileOpenMode::CreateAlways)) {
-        return false;
-    }
-
-    auto written = file.WriteAll(bytes.Data(), bytes.Size());
-    return written.status && written.bytes == bytes.Size() && file.Close();
-}
-
-// path의 부모 디렉터리를 만든다.
-bool MakeParent(StringView path) noexcept {
-    usize slash = path.ByteCount();
-    while (slash > 0 && path.Data()[slash - 1] != '/') {
-        --slash;
-    }
-
-    if (slash <= 1) {
-        return true;
-    }
-
-    return static_cast<bool>(
-        platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.Data(), slash - 1));
-}
-
 } // namespace
 
 // sidecar를 읽지 않는다(AS 20.1 7): 1(sidecar 4 MiB) → 2를 로드하면 IO가 복사한 byte는 두 패키지
