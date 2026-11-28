@@ -165,6 +165,7 @@ TEST(DefaultSubobject_RegistrationRejectsMalformedTables) {
 
     // 같은 ID 둘.
     entries[2].id = entries[1].id;
+    entries[2].type = entries[1].type;
     TypeSchema duplicate = Alias(owner, AliasType);
     duplicate.subobjects = Span<const SubobjectSchema>(entries, 3);
     RuntimeTypeOps duplicateOps = GeneratedType<SubobjectOwner>::Ops();

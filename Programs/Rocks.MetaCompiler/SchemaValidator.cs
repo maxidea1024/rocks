@@ -1453,8 +1453,9 @@ internal static partial class SchemaValidator
                     throw new MetadataException($"{model.Name}: {key} is inherited from {model.Base} and cannot be specified again", "RMC3002", hint).At(model.Site);
                 }
 
-                FieldModel field = model.Fields.FirstOrDefault(candidate => candidate.EffectiveToolName == spelling) ??
-                    throw new MetadataException($"{model.Name}: {key} = \"{spelling}\" does not name a reflected field of this class", "RMC3002", hint).At(model.Site);
+                // 자기 필드만 받는다(생성 접근자가 이 클래스에서 필드를 읽는다 — base의 private 필드는 읽을 수 없다).
+                FieldModel field = model.OwnFields.FirstOrDefault(candidate => candidate.EffectiveToolName == spelling) ??
+                    throw new MetadataException($"{model.Name}: {key} = \"{spelling}\" does not name a reflected field declared in this class", "RMC3002", hint).At(model.Site);
                 // EditorOnly 필드는 에디터 데이터 없는 빌드의 스키마에서 빠지므로 소유 구조 지정자가 가리킬 수 없다.
                 if (!shape(field) || field.Spec.EditorOnly)
                 {
@@ -1476,6 +1477,10 @@ internal static partial class SchemaValidator
         foreach (ClassModel model in ordered.Where(type => !type.IsEnum && !type.IsStruct))
         {
             ClassModel? baseModel = model.Base == "rocks::Object" ? null : find(model.Base);
+            // subobject 타입의 부착 필드(WeakObjectRef<T>)의 T다(지정자가 없거나 T가 없으면 null).
+            string? AttachTarget(ClassModel subobjectType) =>
+                subobjectType.SubobjectAttachId is string attachId ? subobjectType.Fields.FirstOrDefault(candidate => candidate.Id == attachId)?.Reference : null;
+
             List<SubobjectModel> table = [.. baseModel?.Subobjects ?? []];
             // 상속 subobject의 소유 필드(protected)는 생성 접근자가 이 클래스의 friend로 읽는다(GENERATED_BODY 필요).
             if (table.Count != 0 && !model.HasGeneratedBody)
@@ -1559,10 +1564,18 @@ internal static partial class SchemaValidator
                     {
                         throw new MetadataException($"{symbol}: AttachParent needs ROCKS_CLASS(SubobjectAttach = \"…\") on both subobject types", "RMC3002", hint).At(field.Site);
                     }
+
+                    if (AttachTarget(targetModel) is string expected && !derivesFrom(table[parent].Type, expected))
+                    {
+                        throw new MetadataException($"{symbol}: AttachParent {field.Spec.AttachParent} is {table[parent].Type}, not a {expected} (the attach field type)",
+                            "RMC3002", hint).At(field.Site);
+                    }
                 }
                 else if (targetModel.SubobjectAttachId is not null)
                 {
-                    parent = table.FindIndex(entry => entry.Root);
+                    // 생략하면 Root에 붙는다 — Root 타입이 부착 필드 타입의 파생일 때만(아니면 붙지 않는다).
+                    int rootIndex = table.FindIndex(entry => entry.Root);
+                    parent = rootIndex >= 0 && (AttachTarget(targetModel) is not string expected || derivesFrom(table[rootIndex].Type, expected)) ? rootIndex : -1;
                 }
 
                 table.Add(new SubobjectModel(field.Id, field.Name, name, target, targetModel.Id, parent, root, model.Name));
