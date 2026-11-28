@@ -2,8 +2,10 @@
 
 #include <AssetRuntime/Package.h>
 #include <AudioAssets/AttenuationTypes.h>
+#include <AudioAssets/MixBusSend.h>
 #include <AudioAssets/SoundSourceRef.h>
 #include <CurveAssets/FloatCurveSource.h>
+#include <Object/StructRefArray.h>
 
 // 감쇠 설정 에셋이다(Docs/Design/AudioSystem 3.9·3.35.3·3.42.1절, UE USoundAttenuation 대응). 거리
 // 감쇠(모양 넷·Custom 곡선), 공기 흡수, 우선순위 거리 감쇠, 리스너 focus, 스테레오 spread, 비공간화
@@ -42,7 +44,8 @@ class ROCKS_AUDIOASSETS_API AttenuationSettings final : public Asset {
 public:
     explicit AttenuationSettings(Allocator& allocator) noexcept
         : customDistanceCurve(allocator), customLowPassAbsorptionCurve(allocator),
-          customHighPassAbsorptionCurve(allocator), customPriorityAttenuationCurve(allocator) {
+          customHighPassAbsorptionCurve(allocator), customPriorityAttenuationCurve(allocator),
+          busSends(allocator) {
     }
 
     // 거리 감쇠를 한다(UE bAttenuate).
@@ -122,6 +125,10 @@ public:
     ROCKS_PROPERTY() float occlusionLowPassFrequency = MaxAttenuationFilterFrequency;
     ROCKS_PROPERTY() float occlusionVolumeAttenuation = 1.0f;
     ROCKS_PROPERTY() float occlusionInterpolationSeconds = DefaultOcclusionInterpolationSeconds;
+    // 버스 send(UE bEnableSubmixSends·SubmixSendSettings — 3.45.7절, 최대 MaxMixBusSends)다. 단계는
+    // 보지 않고 늘 post다(Pre면 스냅숏이 Warning을 내고 post로 쓴다).
+    ROCKS_PROPERTY() bool enableBusSends = false;
+    ROCKS_PROPERTY() StructRefArray<MixBusSend> busSends;
 
     // 값 스냅숏이다. 쓰이는 곡선(Custom 모델·CustomCurve 방법)은 FloatCurveSource::TryFlattenInto로
     // allocator에 깊이 복사한다(allocator는 스레드 안전해야 한다 — 제어 pipe가 마지막 참조를

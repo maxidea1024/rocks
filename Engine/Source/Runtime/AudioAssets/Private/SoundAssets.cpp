@@ -5,7 +5,11 @@
 #include <AudioAssets/SoundClip.generated.h>
 #include <AudioAssets/SoundSource.generated.h>
 #include <AudioAssets/SoundCategory.generated.h>
+#include <AudioAssets/MixBus.generated.h>
+#include <AudioAssets/MixBusSend.generated.h>
+#include "AudioAssetsValidation.h"
 #include <AssetRuntime/PackageWriter.h>
+#include <Core/Diagnostics/Log.h>
 #include <Base/Compiler.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Memory.h>
@@ -35,24 +39,41 @@ static_assert(static_cast<uint8>(SoundNaturalFalloffMode::Continues) ==
 
 namespace {
 
-// 쓰이는 곡선을 깊이 복사해 공유 사본으로 둔다(3.42.1절 — 제어 쪽이 Registry 없이 평가).
-Result<void> FlattenCurve(const FloatCurveSource& source, Allocator& allocator,
-                          ObjectRegistry& registry, const ObjectAccessContext& access,
-                          SharedPtr<const TangentCurve>& out) noexcept {
-    auto made = SharedPtr<TangentCurve>::TryMake(allocator, allocator);
-    if (!made) {
-        return Result<void>::Failure(made.Error());
+inline constexpr LogCategory LogAudioAssets{"AudioAssets"};
+
+// send 배열을 재생 값으로 평탄화한다(3.45.7절). postOnly면 단계를 보지 않고 post로 쓴다(감쇠 send —
+// UE FAttenuationSubmixSendSettings에는 단계가 없다).
+Result<void> FlattenBusSends(const StructRefArray<MixBusSend>& sends, bool postOnly,
+                             Allocator& allocator, ObjectRegistry& registry,
+                             const ObjectAccessContext& access, uint32& count,
+                             MixBusSendValue* out) noexcept {
+    if (sends.Size() > MaxMixBusSends) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    if (auto flattened = source.TryFlattenInto(registry, access, *made.Value().Get()); !flattened) {
-        return flattened;
+    count = 0;
+    for (usize index = 0; index < sends.Size(); ++index) {
+        auto value = MakeMixBusSendValue(sends[index], allocator, registry, access);
+        if (!value) {
+            return Result<void>::Failure(value.Error());
+        }
+
+        if (postOnly && value.Value().stage != MixBusSendStage::PostAttenuation) {
+            Log::Warning(LogAudioAssets,
+                         "Attenuation bus send uses the pre-attenuation stage; attenuation sends "
+                         "are always post-attenuation");
+            value.Value().stage = MixBusSendStage::PostAttenuation;
+        }
+
+        out[count++] = Move(value.Value());
     }
 
-    out = made.Value();
     return Result<void>::Success();
 }
 
 } // namespace
+
+using audio_assets_detail::FlattenCurve;
 
 Result<SoundAttenuation>
 AttenuationSettings::ToSnapshot(Allocator& allocator, ObjectRegistry& registry,
@@ -135,6 +156,16 @@ AttenuationSettings::ToSnapshot(Allocator& allocator, ObjectRegistry& registry,
         }
     }
 
+    // 버스 send(3.45.7절 — 켰을 때만 평탄화한다).
+    snapshot.enableBusSends = enableBusSends;
+    if (enableBusSends) {
+        if (auto flattened = FlattenBusSends(busSends, true, allocator, registry, access,
+                                             snapshot.busSendCount, snapshot.busSends);
+            !flattened) {
+            return Made::Failure(flattened.Error());
+        }
+    }
+
     if (auto valid = ValidateSoundAttenuation(snapshot); !valid) {
         return Made::Failure(valid.Error());
     }
@@ -193,6 +224,34 @@ Result<SoundSourceRef> SoundSource::MakePlayable(Allocator& allocator, ObjectReg
         }
 
         playable.attenuation = Move(snapshot.Value());
+    }
+
+    // 버스(3.45.7절): 기본 버스와 send다.
+    playable.enableBaseBus = enableBaseBus;
+    playable.enableBusSends = enableBusSends;
+    if (!bus.Handle().IsNull()) {
+        auto resolvedBus = registry.Resolve<MixBus>(access, bus.Handle());
+        if (!resolvedBus) {
+            return Made::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto busObject = resolvedBus.Value().Get();
+        if (!busObject) {
+            return Made::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto busRef = busObject.Value()->MakeRef(allocator, registry, access);
+        if (!busRef) {
+            return Made::Failure(busRef.Error());
+        }
+
+        playable.bus = busRef.Value();
+    }
+
+    if (auto flattened = FlattenBusSends(busSends, false, allocator, registry, access,
+                                         playable.busSendCount, playable.busSends);
+        !flattened) {
+        return Made::Failure(flattened.Error());
     }
 
     // 동시 발음: 재정의면 이 사운드만의 그룹 하나(키는 이 객체), 아니면 참조한 그룹들(3.41.2절).

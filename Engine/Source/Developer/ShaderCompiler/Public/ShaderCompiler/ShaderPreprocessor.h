@@ -54,6 +54,8 @@
 // 스레드: 재진입 가능하며 전역 상태를 쓰지 않는다. 같은 tree를 여러 스레드가 동시에 써도 된다.
 namespace rocks::shader {
 
+class ShaderSourceCache;
+
 // 한도(SC3). 넘으면 위치와 함께 오류다.
 // include 깊이: 엔트리가 0, Platform.rsh와 엔트리가 직접 include한 파일이 1이다.
 inline constexpr uint32 MaxShaderIncludeDepth = 64;
@@ -124,10 +126,12 @@ struct ROCKS_SHADERCOMPILER_API PreprocessedShader {
 // 이름이 식별자가 아니거나(InvalidDefine) 겹치면(DuplicateDefine) 오류다. generated는 생성 include
 // 연결이다(연결 대상 경로가 가상 경로 규칙에 맞지 않으면 그 include 줄의 오류다. 연결이 없는
 // <루트>/Generated/ include는 소스 트리의 GeneratedSource다). 실패하면 out은 비어 있고 결과에
-// 위치(가상 경로·줄)와 세부가 있다. out은 먼저 비운다.
+// 위치(가상 경로·줄)와 세부가 있다. out은 먼저 비운다. cache가 있으면 트리 파일은 캐시로 읽는다
+// (16.6절 SSD98 — 결과는 캐시 없이와 byte가 같다). cache의 트리가 tree가 아니거나 파일 한도가
+// limits.fileBytes와 다르면 InvalidArgument다.
 ROCKS_SHADERCOMPILER_API ShaderSourceStatus PreprocessShader(
     const ShaderSourceTree& tree, StringView entryPath, Span<const ShaderDefine> defines,
     PreprocessedShader& out, const ShaderPreprocessLimits& limits = {},
-    Span<const ShaderGeneratedInclude> generated = {}) noexcept;
+    Span<const ShaderGeneratedInclude> generated = {}, ShaderSourceCache* cache = nullptr) noexcept;
 
 } // namespace rocks::shader

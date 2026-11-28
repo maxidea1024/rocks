@@ -34,7 +34,9 @@ enum class ControlCommandType : uint8 {
     SetMixCategoryOverride,
     ClearMixCategoryOverride,
     // 분류 감쇠 거리 배수(3.43.6절 — categoryKey·assetValue·value·seconds).
-    SetCategoryDistanceScale
+    SetCategoryDistanceScale,
+    // 재생 단위 버스 send(3.45.9절 — handle·busSends[0]).
+    SetBusSend
 };
 
 struct ControlCommand {
@@ -79,6 +81,9 @@ struct ControlCommand {
     uint64 owner = 0;
     uint32 concurrencyCount = 0;
     SoundConcurrencyEntry concurrency[MaxConcurrencyGroups];
+    // Play: 재생 단위 버스 send. SetBusSend: busSends[0] 하나(3.45.7절).
+    uint32 busSendCount = 0;
+    PlayBusSend busSends[audio::MaxVoiceSends];
     // Stop.
     uint32 fadeFrames = 0;
     // SetParameter.
@@ -158,6 +163,15 @@ struct SceneUpdate {
     bool paused = false;
 };
 
+// 버스 실행 배수(3.45.8절 — 선형, UE SetSubmixOutputVolume·WetLevel·DryLevel)다. 바뀐 버스만
+// 싣는다.
+struct BusModifierUpdate {
+    uint64 key = 0;
+    float volume = 1.0f;
+    float wet = 1.0f;
+    float dry = 1.0f;
+};
+
 // emitter 위치 스냅숏이다(등록·이동한 프레임에만).
 struct EmitterUpdate {
     AudioEmitterId emitter;
@@ -167,8 +181,8 @@ struct EmitterUpdate {
 
 struct ControlBatch {
     explicit ControlBatch(Allocator& allocator) noexcept
-        : scenes(allocator), emitters(allocator), commands(allocator), events(allocator),
-          occlusionRequests(allocator) {
+        : scenes(allocator), emitters(allocator), commands(allocator), busModifiers(allocator),
+          events(allocator), occlusionRequests(allocator) {
     }
 
     // 게임 → 제어. 스냅숏(scenes·emitters)을 명령보다 먼저 적용한다(같은 프레임에 등록하고 재생한
@@ -186,6 +200,11 @@ struct ControlBatch {
     bool focusInitializeOnFirstUpdate = true;
     OcclusionSettings occlusion;
     UserVolumeSettings userVolume;
+    // 버스(3.45.8·3.45.9절): Master·BaseDefault 설정(바뀐 묶음에만 — 지금 값 전체)과 실행 배수.
+    bool busSettingsChanged = false;
+    MixBusRef masterBus;
+    MixBusRef baseDefaultBus;
+    Array<BusModifierUpdate> busModifiers;
     // 제어 → 게임.
     Array<PlaybackEvent> events;
     // 차폐 질의 요청이다(용량은 미리 잡고 넘치면 다음 묶음에 다시 낸다).
@@ -197,6 +216,10 @@ struct ControlBatch {
         scenes.Clear();
         emitters.Clear();
         commands.Clear();
+        busModifiers.Clear();
+        busSettingsChanged = false;
+        masterBus = MixBusRef{};
+        baseDefaultBus = MixBusRef{};
         events.Clear();
         occlusionRequests.Clear();
     }

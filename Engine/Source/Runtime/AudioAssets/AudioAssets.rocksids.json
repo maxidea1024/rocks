@@ -38,6 +38,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::AttenuationSettings::busSends",
+      "id": "ba0b427e7b6a4e3b9fef1ef75f9eab10",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AttenuationSettings::coneOffset",
       "id": "9a0f753ace684776913465e04e33622c",
       "aliases": [],
@@ -82,6 +89,13 @@
       "kind": "field",
       "name": "rocks::AttenuationSettings::customPriorityAttenuationCurve",
       "id": "35497670fa6b44148925345356ab2d66",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AttenuationSettings::enableBusSends",
+      "id": "fc6a715abc224b818571ab1b36d33cca",
       "aliases": [],
       "retired": false
     },
@@ -374,6 +388,139 @@
     },
     {
       "kind": "field",
+      "name": "rocks::MixBus::dryLevelDb",
+      "id": "bc566f6af7404c6b9370c5e0b54e094b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBus::muteWhenBackgrounded",
+      "id": "776e2f0a34434721896f2d78b37e3ff4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBus::outputVolumeDb",
+      "id": "20a05b6dc0f746a9a8e3aa588af6e0b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBus::parent",
+      "id": "b475ec0967fa41dba525ddd37127584e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBus::wetLevelDb",
+      "id": "724e232043ac4daf93b58ab15114e9da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::bus",
+      "id": "4961d016b6b949ff948770b6eb332f4b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::disableLevelClamp",
+      "id": "293760cd06c14718b69270713a63cd23",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::highPassEnabled",
+      "id": "d72c3d2e71954412aba2537b90297017",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::highPassHz",
+      "id": "6ff00095177040749c4b6ffe055b1129",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::level",
+      "id": "8cf80ae97a0c40559fec21efc7117819",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::levelCurve",
+      "id": "63ae299ef52a48fabd40cf22abfaeab2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::levelMethod",
+      "id": "eee1f5d84d7049c2b95c6e9d8b5ee90a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::lowPassEnabled",
+      "id": "7fc0336414e14c1d8112b0552875c221",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::lowPassHz",
+      "id": "6cc5046591ff4ab7bb2a7a8b49598094",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::maxDistance",
+      "id": "db19a372568f450b8da75cee3c736f6d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::maxLevel",
+      "id": "3087b9d01c9d4d2db9a3b0df0ee3b388",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::minDistance",
+      "id": "9eb24ade0e0541a1b74cb43e4b4fdc20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::minLevel",
+      "id": "73218514abdf406a9261877960866591",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MixBusSend::stage",
+      "id": "6a5ab0165b594f448432345dae201095",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::MixCategoryAdjuster::applyToChildren",
       "id": "171b0826c4e1467889e6ec2e0bf8e42a",
       "aliases": [],
@@ -453,6 +600,13 @@
       "kind": "field",
       "name": "rocks::SoundCategory::attenuationDistanceScale",
       "id": "7f1be2976a9a4c51ae0828ebc5a1a0b5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundCategory::defaultBus",
+      "id": "5839cab9d751460db7c9b8e3ff05bae9",
       "aliases": [],
       "retired": false
     },
@@ -829,6 +983,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::SoundSource::bus",
+      "id": "86a6afd2fcdc4c7ea4d3e92a208ac472",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::busSends",
+      "id": "bf095c3b012640b998ad8d5ecdd77c4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::SoundSource::bypassVolumeScaleForPriority",
       "id": "fe24738c26ba4941ba1c9f5e8cef2879",
       "aliases": [],
@@ -852,6 +1020,20 @@
       "kind": "field",
       "name": "rocks::SoundSource::concurrencyOverrides",
       "id": "b4eab15615ea409b88a1755c7af23714",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::enableBaseBus",
+      "id": "7a5d509fee2741ca9345be00ccdb9985",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SoundSource::enableBusSends",
+      "id": "6849a884aa934132aef83e0e268be9d7",
       "aliases": [],
       "retired": false
     },
@@ -908,6 +1090,34 @@
       "kind": "type",
       "name": "rocks::ConcurrencyGroup",
       "id": "2a7526a13c574539912d77dd6d840d42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MixBus",
+      "id": "b9d5fcc2efec4eebbbf2c0b83e3bd170",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MixBusSend",
+      "id": "4a3019ef7e8a437a97d4ff3f72c5957a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MixBusSendLevelMethod",
+      "id": "dd87d210e14446848cb7feb98fda1a81",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MixBusSendStage",
+      "id": "3a9176aa793745d280b0fd8b430afa3d",
       "aliases": [],
       "retired": false
     },
