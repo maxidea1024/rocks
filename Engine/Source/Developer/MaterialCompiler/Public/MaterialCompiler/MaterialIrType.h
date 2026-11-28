@@ -1,5 +1,6 @@
 #pragma once
 
+#include <MaterialSchema/MaterialConstantProgram.h>
 #include <Base/Types.h>
 
 // 머티리얼 IR 값 타입이다(Docs/Design/MaterialSystem 6.2·6.8절). 수 타입은 스칼라 종류와 성분
@@ -144,7 +145,7 @@ constexpr bool IsValidIrType(IrType type) noexcept {
 // 같은 스칼라 종류의 성분 수만 바꾼 벡터 타입이다.
 // Double 값(LWC) tile 한 칸의 크기(cm)다(MaterialDouble.rsh MaterialDoubleTileSize — UE
 // UE_LWC_RENDER_TILE_SIZE, Core/Public/Misc/LargeWorldRenderPosition.h:14).
-inline constexpr double IrDoubleTileSize = 2097152.0;
+inline constexpr double IrDoubleTileSize = MaterialDoubleTileSize;
 
 // 텍스처 종류의 uv 폭이다(UE TextureSample의 ForceCast 대상 — CubeArray 4, Cube·2DArray·3D 3,
 // 그 밖 2). None이면 0이다.

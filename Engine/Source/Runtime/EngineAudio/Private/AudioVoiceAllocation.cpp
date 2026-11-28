@@ -330,7 +330,8 @@ void AudioDeviceContext::DropVoice(uint32 slot, ControlBatch& batch, uint64 now)
     const bool keep = KeepsWithoutVoice(*record.sound.Get(), record.remainActive);
     switch (record.state) {
     case RecordState::Voiceless:
-        // voice 없는 one-shot은 이번 묶음에 수락한 새 재생뿐이다(시작하지 못함).
+        // voice 없는 one-shot은 아직 시작하지 못한 재생뿐이다(이번 묶음에 수락했거나, 기본 버스
+        // plan을 기다렸다 — 3.45.8절).
         if (!keep) {
             ++stats_.voiceLimitRejects;
             EndVoiceless(slot, PlaybackEndReason::VoiceLimit, batch);
@@ -384,6 +385,14 @@ AudioDeviceContext::StartOutcome AudioDeviceContext::StartVoice(uint32 slot, uin
         }
     }
 
+    // 라우팅을 먼저 만든다(새 버스는 plan을 게시한 뒤에만 쓴다 — 3.45.8절).
+    audio::AudioVoiceRoute route;
+    uint32 routeEntries[audio::MaxVoiceSends] = {};
+    bool routePending = false;
+    if (BuildRoute(record, route, routeEntries, routePending, true) != RouteOutcome::Ready) {
+        return StartOutcome::BusPending;
+    }
+
     auto voice = mixer_.AcquireVoice();
     if (!voice) {
         return StartOutcome::NoRoom;
@@ -404,7 +413,7 @@ AudioDeviceContext::StartOutcome AudioDeviceContext::StartVoice(uint32 slot, uin
     record.resumePending = fadeIn;
 
     auto play = mixer_.PreparePlay(record.voice, clips_[record.clip].id, start, playable.looping,
-                                   ParamsFor(record, now));
+                                   ParamsFor(record, now), route);
     if (!play) {
         (void)mixer_.ReleaseVoice(record.voice);
         ReleaseClipUser(record.clip);
@@ -415,6 +424,12 @@ AudioDeviceContext::StartOutcome AudioDeviceContext::StartVoice(uint32 slot, uin
         return StartOutcome::Failed;
     }
 
+    // 새 voice는 참조가 없으므로 라우팅의 버스 수(≤ MaxVoiceSends)는 늘 들어간다.
+    const bool retained = AddVoiceBusRefs(record.voice.index, route, routeEntries);
+    ROCKS_ASSERT(retained);
+    (void)retained;
+    record.route = route;
+    record.routeDirty = routePending;
     record.play = play.Value();
     record.state = RecordState::Deferred;
     record.started = false;
@@ -446,6 +461,11 @@ void AudioDeviceContext::OnStartFailure(uint32 slot, StartOutcome outcome,
     if (outcome == StartOutcome::Failed) {
         ++stats_.failedPlays;
         EndVoiceless(slot, PlaybackEndReason::Failed, batch);
+        return;
+    }
+
+    // 버스 plan 대기는 자리 부족이 아니다: voice 없이 두고 다음 묶음에 다시 시작한다.
+    if (outcome == StartOutcome::BusPending) {
         return;
     }
 
@@ -550,6 +570,7 @@ void AudioDeviceContext::ReleaseDeferredVoice(uint32 slot, uint64 now) noexcept 
     const bool released = abandoned && mixer_.ReleaseVoice(record.voice).IsOk();
     ROCKS_ASSERT(released);
     (void)released;
+    ReleaseVoiceBusRefs(record.voice.index);
     ReleaseClipUser(record.clip);
     voiceOwners_[record.voice.index] = 0;
     RemoveSlot(deferred_, slot);

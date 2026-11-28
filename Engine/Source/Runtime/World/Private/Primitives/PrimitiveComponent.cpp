@@ -438,7 +438,11 @@ PrimitiveComponent::SetCollisionResponseToAllChannels(CollisionResponse response
     });
 }
 
-bool PrimitiveComponent::BuildBodyGeometry(BodyGeometry&) const noexcept {
+Result<void> PrimitiveComponent::BuildBodyGeometry(BodyGeometry&) const noexcept {
+    return Result<void>::Success();
+}
+
+bool PrimitiveComponent::IsZeroExtent() const noexcept {
     return false;
 }
 
@@ -466,8 +470,9 @@ bool PrimitiveComponent::WantsSystemState(SystemStateKind kind) const noexcept {
         return false;
     }
 
-    BodyGeometry geometry;
-    if (!BuildBodyGeometry(geometry)) {
+    // 할당 실패면 상태를 원한다(만들기가 그 오류를 낸다 — 조용히 body 없이 두지 않는다).
+    BodyGeometry geometry(overlappingComponents_.GetAllocator());
+    if (auto built = BuildBodyGeometry(geometry); built && geometry.IsEmpty()) {
         return false;
     }
 
@@ -486,10 +491,17 @@ Result<void> PrimitiveComponent::CreateSystemState(SystemStateKind kind) noexcep
         return Result<void>::Failure(!resolved ? resolved.Error() : ErrorCode::NotReady);
     }
 
-    BodyCreateDesc desc;
-    if (!BuildBodyGeometry(desc.geometry)) {
+    BodyGeometry geometry(overlappingComponents_.GetAllocator());
+    if (auto built = BuildBodyGeometry(geometry); !built) {
+        return built;
+    }
+
+    if (geometry.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
+    BodyCreateDesc desc;
+    desc.geometry = geometry.View();
 
     desc.component = Handle();
     desc.actor = GetOwner();
@@ -655,9 +667,12 @@ void PrimitiveComponent::UpdateBodyCollision() noexcept {
 
 void PrimitiveComponent::UpdateBodyGeometry() noexcept {
     PhysicsScene* scene = bodyHandle_.IsNull() ? nullptr : GetWorld().GetPhysicsScene();
-    BodyGeometry geometry;
-    if (scene != nullptr && BuildBodyGeometry(geometry)) {
-        if (auto updated = scene->SetBodyGeometry(bodyHandle_, geometry); !updated) {
+    BodyGeometry geometry(overlappingComponents_.GetAllocator());
+    if (scene != nullptr) {
+        auto built = BuildBodyGeometry(geometry);
+        Result<void> updated = built ? scene->SetBodyGeometry(bodyHandle_, geometry.View())
+                                     : Result<void>::Failure(built.Error());
+        if (!updated) {
             LogContextScope context("World", GetWorld().Name());
             Log::Warning(
                 LogWorld,

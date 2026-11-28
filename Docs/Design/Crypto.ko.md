@@ -98,7 +98,7 @@ Core/Source/Runtime/Crypto/
 
 - **의존.** Crypto의 PublicDependencies는 `Core`, `Task`, `Sodium`뿐이다. 외부 암호 라이브러리는 libsodium 하나다. Task는 `AsyncCrypto`만 쓴다. 정적 링크이므로 동기 API만 쓰는 모듈은 Task object를 링크하지 않는다. Compression 모듈과 같은 구성이다.
 - **헤더 격리.** 외부 헤더는 Private에서만 include한다. 공개 헤더는 `sodium.h`나 intrinsics 헤더를 포함하지 않는다. 라이브러리 상태의 크기·정렬은 공개 헤더에 드러내지 않는다. 상태에는 키 확장 결과가 들어 있으므로 SecretArena 슬롯에 둔다(10.2절).
-- **Core 모듈은 외부 의존 없이 유지한다.** Core `Sha256`(콘텐츠 동일성 해시, Rockpile R0의 하드웨어 경로 계획 포함)은 그대로 둔다. Crypto는 SHA-256을 공개 API로 다시 내놓지 않는다(결정 D7).
+- **Core 모듈은 외부 의존 없이 유지한다.** Core `Sha256`(외부 무결성·프로토콜용 SHA-256, 하드웨어 경로 구현됨 — [CoreDataFoundations](CoreDataFoundations.ko.md) 6절)은 그대로 둔다. 내부 콘텐츠 동일성 해시는 `ContentHash`(BLAKE3-256, [ContentHash](ContentHash.ko.md))로 옮긴다(2026-11-28). Crypto는 SHA-256을 공개 API로 다시 내놓지 않는다(결정 D7).
 - **Compression과 독립.** 두 모듈을 잇는 것은 Core로 옮긴 `StreamProgress`와 호출자 코드다(9.6절).
 - **단일 원천.** 난수·소거·상수 시간 비교는 Crypto API 한 곳에 둔다(난수는 내부적으로 PlatformBase SecureRandom). 다른 모듈은 자체 구현 대신 이 API를 쓴다.
 
@@ -1096,7 +1096,7 @@ KeyBlob v1(Crypto/KeyBlob.h, 2026-11-15 구현, 설계 교차검증 반영)의 �
 | D4 | AES-256-GCM 일회성·세그먼트 경로 | libsodium 원본(검증된 코드, 경량 계층의 차등 기준). 2026-11-15 확정: 같은 기기에서 경량 계층이 64 KiB 이상 약 0.9배라 동등하지 않다(6.4절) | 경량 계층으로 단일화(경로 하나, 측정 결과가 같으면) |
 | D5 | 인증 실패 오류 | `ErrorCode::AuthenticationFailed` 신설(이름 후보 `VerificationFailed`) | `InvalidArgument` 재사용(Compression과 같은 분류) |
 | D6 | 세그먼트 크기 기본값 | 64 KiB(임의 접근 단위와 병렬 분할의 균형). 프리셋 4 KiB·64 KiB·1 MiB | 1 MiB(순차 처리량 우선) |
-| D7 | SHA-256 공개 API | Core `Sha256` 하나만 둔다. libsodium SHA-256은 HMAC·HKDF 내부에서만 쓴다 | Crypto에도 SHA-256 공개(중복) |
+| D7 | SHA-256 공개 API | Core `Sha256` 하나만 둔다. libsodium SHA-256은 HMAC·HKDF 내부에서만 쓴다. 내부 콘텐츠 해시는 SHA-256이 아니라 `ContentHash`(BLAKE3, ContentHash.ko.md, 2026-11-28)다 | Crypto에도 SHA-256 공개(중복) |
 | D8 | 고정 길이 인자 | 값 타입 + `View()`, 입력은 Span 길이 검사 | 정적 extent Span(`Span<const uint8, 32>`) 도입 |
 | D9 | sanitizer 구성의 libsodium | libsodium 번역 단위는 sanitizer 계측에서 뺀다(설치 문서가 sanitizer 전체를 금지하고 upstream CI에도 sanitizer 작업이 없다). 어댑터·경량 계층·형식 코드는 ASan으로 돈다. 구현: manifest `sanitizerInstrumentation: false` → 모듈의 Asan 계측 인자만 뺀다(2026-11-14) | 포함해서 돌리고 결과를 기록 |
 | D10 | 착수 시점 | 2026-11-14 착수(별도 워크트리, 브랜치 `feature/crypto`) |  |

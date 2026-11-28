@@ -249,6 +249,12 @@ struct ShaderCompileProgress {
     // 결정성 위반(Put Conflict)·손상 적중(값 0 없음·Corrupt) 수다.
     uint64 conflicts = 0;
     uint64 corruptHits = 0;
+    // Compile 단계별 누적 벽시계 시간(ns)이다: job 준비(전처리·키), 너겟 조회, 워커 컴파일,
+    // 게시(너겟 쓰기). 시작 비용을 구간별로 재는 진단이다(Docs/Design/ShaderSystem 16.4절).
+    uint64 prepareNanoseconds = 0;
+    uint64 lookupNanoseconds = 0;
+    uint64 compileNanoseconds = 0;
+    uint64 publishNanoseconds = 0;
 };
 
 // 너겟 조회 결과에 대한 관리자 동작이다(10절 결과 처리 — 시험이 직접 대조한다).

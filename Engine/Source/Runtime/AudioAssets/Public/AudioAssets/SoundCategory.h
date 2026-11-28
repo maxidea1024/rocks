@@ -22,6 +22,7 @@
 //   options.category = chain.Value();
 namespace rocks {
 
+class MixBus;
 class ObjectRegistry;
 
 ROCKS_CLASS()
@@ -52,6 +53,9 @@ public:
     ROCKS_PROPERTY() SoundUserVolume userVolume = SoundUserVolume::None;
     // 이 분류의 clip 로딩 동작이다(UE LoadingBehavior — Inherited면 부모 쪽으로 찾는다, 3.12절).
     ROCKS_PROPERTY() SoundLoadingBehavior loadingBehavior = SoundLoadingBehavior::Inherited;
+    // 이 분류 재생의 기본 출력 버스다(UE DefaultSubmix — 부모 분류로 내려가지 않는다, 3.45.7절).
+    // 사운드의 bus가 이긴다.
+    ROCKS_PROPERTY() ObjectRef<MixBus> defaultBus;
     // passive 믹스다(UE PassiveSoundMixModifiers — 최대 MaxCategoryPassiveMixes).
     ROCKS_PROPERTY() StructRefArray<SoundCategoryPassiveMix> passiveMixes;
 

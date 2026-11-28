@@ -88,7 +88,7 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 | `CylinderComponent`(CM3에서 더함) | 실린더 | CY2 — convex radius 정책(Cylinder 4.2절) |
 | `StaticMeshComponent`(D2b 뒤) | 메시 단순 충돌(compound) 또는 complex-as-simple 메시 | 어댑터 경계 4절, 쿠킹 형상은 6.5절 |
 
-- 형상은 `PrimitiveComponent`의 가상 `BuildCollisionGeometry(CollisionGeometryBuilder&)`로 얻는다(World 모듈, 값만 — Jolt 없음). Physics가 Jolt 형상으로 바꾼다.
+- 형상은 `PrimitiveComponent`의 가상 `BuildBodyGeometry(BodyGeometry&)`로 얻는다(World 모듈, 값만 — Jolt 없음). `BodyGeometry`는 원소(UE `FKShapeElem`) 목록이고 Physics가 원소마다 Jolt 형상을 만들어 묶는다(7.1.21절).
 - 같은 정의의 형상은 장면 안에서 공유한다(Jolt `RefConst<Shape>` — 키는 형상 종류·크기·convex radius 값). 메시 형상은 에셋 lease와 같이 산다(계획 16.4절 수명 순서).
 
 ## 2.5 운동 종류
@@ -126,5 +126,5 @@ UE 표(`E/Private/PrimitiveComponentPhysics.cpp`·`SceneComponent.cpp`)를 따�
 - `autoWeld`이고 Movable이며 질의 전용이 아니고 게임 World이며 부모 primitive에 body가 있으면, 자기 body를 만들지 않고 부모 body의 compound에 자기 형상을 상대 transform으로 더한다(UE `BodyInstance.cpp:1525–1541`·`1940–2027`).
 - 부착(`AttachTo`)·떼기(`Detach`)·시스템 상태 파괴 때 weld·unweld 한다(UE `SceneComponent.cpp:2625–2631`·`2683–2685`).
 - 루트가 Kinematic이면 자식의 `simulatePhysics`를 끄고 weld하지 않는다(UE `PrimitiveComponentPhysics.cpp:1040–1119`). 루트가 시뮬레이션으로 바뀌면 자식을 붙인다(`ApplyWeldOnChildren`).
-- Jolt 구현: 부모 body 형상을 `MutableCompoundShape`로 두고 자식 형상을 추가·제거한다(질량 다시 계산). 질의 결과의 `Component`는 하위 형상 ID로 원래 자식 컴포넌트를 찾는다(UE `ShapeToBodiesMap`).
+- Jolt 구현: 루트 body 칸의 부분 표에 자식을 더하고 `StaticCompoundShape`를 다시 만든다(질량은 부분마다 계산해 합침 — 7.1.22절). 질의·접촉 결과의 `Component`는 잎 형상 user data의 부분 번호로 원래 자식 컴포넌트를 찾는다(UE `ShapeToBodiesMap`).
 - weld는 PH6 단계다(7.1절). 그 전에는 `autoWeld`를 무시하고 경고 없이 자기 body를 만든다(설정 값만 보존).

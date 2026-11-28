@@ -38,6 +38,9 @@ struct HitResult {
     ROCKS_PROPERTY() double penetrationDepth = 0.0;
     // complex hit의 삼각형 번호다(QueryParams::returnFaceIndex).
     ROCKS_PROPERTY() int32 faceIndex = NoHitFaceIndex;
+    // 맞은 형상 원소 번호다(BodyGeometry 원소 순서 — UE ElementIndex, 7.1.21절). 시뮬레이션 접촉
+    // hit는 채우지 않는다(0 — UE와 같다).
+    ROCKS_PROPERTY() int32 elementIndex = 0;
     // 막음 여부·시작 겹침 여부다.
     ROCKS_PROPERTY() bool blockingHit = false;
     ROCKS_PROPERTY() bool startPenetrating = false;

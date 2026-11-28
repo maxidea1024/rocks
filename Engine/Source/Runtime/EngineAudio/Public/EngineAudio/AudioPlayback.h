@@ -4,6 +4,7 @@
 #include <Base/Types.h>
 #include <Core/Function.h>
 #include <Core/Optional.h>
+#include <AudioAssets/MixBusData.h>
 #include <AudioAssets/SoundCategoryChain.h>
 #include <AudioAssets/SoundConcurrencyEntry.h>
 #include <AudioAssets/SoundPlaybackSettings.h>
@@ -94,7 +95,18 @@ struct PlaybackEvent {
 
 using PlaybackEventCallback = Function<void(const PlaybackEvent&)>;
 
-// 재생 옵션이다(AU3, 우선순위 AU7a, 동시 발음 AU7b). 시작 시각 지정은 AU10.
+// 버스 실행 배수 표의 용량이다(게임 쪽·제어 쪽 표가 같이 쓴다 — 3.45.8절).
+inline constexpr uint32 AudioBusModifierCapacity = 256;
+
+// 재생 단위 버스 send다(UE UAudioComponent::SetSubmixSend — 3.45.7절). 사운드 send에 같은 버스가
+// 있으면 level만 바꾸고, 없으면 Constant·post·필터 없음으로 덧붙인다. level ≥ 0이고 [0, 1]로
+// 자른다.
+struct PlayBusSend {
+    MixBusRef bus;
+    float level = 1.0f;
+};
+
+// 재생 옵션이다(AU3, 우선순위 AU7a, 동시 발음 AU7b, 버스 AU7f). 시작 시각 지정은 AU10.
 struct PlayOptions {
     // 사운드 값에 곱하는 배수다. volume [0, MaxVoiceGain], pitch [MinPitch, MaxPitch](곱한 결과도
     // 같은 범위로 자른다).
@@ -134,6 +146,10 @@ struct PlayOptions {
     // 차폐 검사 간격(초, [−1, 60] — UE OcclusionCheckInterval)이다. 없으면
     // audio.occlusion.checkinterval이다.
     Optional<float> occlusionCheckInterval;
+    // 재생 단위 버스 send다(앞 busSendCount개 — UE PendingSubmixSends). 버스 null·level
+    // 음수·비유한은 InvalidArgument, 수 초과는 CapacityExceeded다.
+    uint32 busSendCount = 0;
+    PlayBusSend busSends[audio::MaxVoiceSends];
     // 결과 콜백이다(게임 스레드의 OnFrameBegin — 비어도 된다). 잡은 대상의 수명은 호출자 책임이다.
     // 엔진 종료 뒤에는 부르지 않는다.
     PlaybackEventCallback onEvent;

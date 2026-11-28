@@ -412,9 +412,14 @@ public:
 
     // --- 물리 body(Docs/Design/PhysicsModule 2.3–2.5절, 7.1.3절) ---
 
-    // body 형상(scale 전 cm)이다. 형상이 있는 파생(Box·Sphere·Capsule)이 채우고 참을 돌려준다.
-    // 기본은 형상 없음(거짓 — body를 만들지 않는다).
-    virtual bool BuildBodyGeometry(BodyGeometry& geometry) const noexcept;
+    // body 형상(scale 전 cm 원소 — 7.1.21절)을 geometry 끝에 더한다. 형상이 있는 파생
+    // (Box·Sphere·Capsule)이 원소를 더한다. 기본은 형상 없음(원소 0개 — body를 만들지 않는다).
+    // 오류: 할당 실패(geometry는 더하던 중일 수 있다).
+    virtual Result<void> BuildBodyGeometry(BodyGeometry& geometry) const noexcept;
+
+    // 형상 크기가 0인지다(UE IsZeroExtent — 기본 거짓, Box·Sphere·Capsule이 재정의). 컴포넌트
+    // sweep이 line trace로 바뀐다(UE ComponentSweepMultiByChannel).
+    virtual bool IsZeroExtent() const noexcept;
 
     // 물리 body handle이다. World에 물리 장면이 있고 형상과 충돌이 있으면 등록 때 생기고 등록 해제
     // 때 없어진다(없으면 IsNull).

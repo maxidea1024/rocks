@@ -7,6 +7,7 @@
 #include <Core/Hash/Sha256.h>
 #include <Core/FileError.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
@@ -14,6 +15,7 @@
 #include <ShaderCompiler/ShaderPreprocessDefines.h>
 #include <ShaderCore/ShaderType.h>
 #include <ShaderCompiler/ShaderWorkerChannel.h>
+#include <Task/ParallelFor.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -135,6 +137,10 @@ struct ShaderCompileManager::State {
     uint64 batches = 0;
     uint64 conflicts = 0;
     uint64 corruptHits = 0;
+    uint64 prepareNanoseconds = 0;
+    uint64 lookupNanoseconds = 0;
+    uint64 compileNanoseconds = 0;
+    uint64 publishNanoseconds = 0;
 };
 
 namespace compile_manager_detail {
@@ -439,6 +445,10 @@ ShaderCompileProgress ShaderCompileManager::Progress() const noexcept {
     progress.batches = AtomicLoad(&state_->batches);
     progress.conflicts = AtomicLoad(&state_->conflicts);
     progress.corruptHits = AtomicLoad(&state_->corruptHits);
+    progress.prepareNanoseconds = AtomicLoad(&state_->prepareNanoseconds);
+    progress.lookupNanoseconds = AtomicLoad(&state_->lookupNanoseconds);
+    progress.compileNanoseconds = AtomicLoad(&state_->compileNanoseconds);
+    progress.publishNanoseconds = AtomicLoad(&state_->publishNanoseconds);
     for (const ShaderWorkerChannel* channel : state_->channels) {
         progress.workersStarted += channel->WorkersStarted();
     }
@@ -487,29 +497,32 @@ public:
             }
         }
 
-        for (usize index = 0; index < jobs_.Size(); ++index) {
-            if (control_.cancel.IsCancellationRequested()) {
-                CancelRemaining();
-                break;
-            }
-
-            Prepare(index);
+        uint64 phaseStart = platform::MonotonicNanoseconds();
+        if (auto prepared = PrepareAll(); !prepared) {
+            return prepared;
         }
 
+        AddPhase(state_.prepareNanoseconds, phaseStart);
         Result<void> outcome = Result<void>::Success();
         if (control_.cancel.IsCancellationRequested()) {
             CancelRemaining();
         } else if (auto looked = LookUp(); !looked) {
+            AddPhase(state_.lookupNanoseconds, phaseStart);
             outcome = Move(looked);
-        } else if (control_.cancel.IsCancellationRequested()) {
+        } else if (AddPhase(state_.lookupNanoseconds, phaseStart);
+                   control_.cancel.IsCancellationRequested()) {
             CancelRemaining();
         } else if (auto compiled = CompileMisses(); !compiled) {
+            AddPhase(state_.compileNanoseconds, phaseStart);
             outcome = Move(compiled);
+        } else {
+            AddPhase(state_.compileNanoseconds, phaseStart);
         }
 
         if (outcome) {
             // 취소 뒤에도 이미 성공한 결과는 게시한다(내용 주소 너겟이라 맞는 값이다).
             Publish();
+            AddPhase(state_.publishNanoseconds, phaseStart);
         } else {
             // 실행 실패(할당)로 멈췄으면 돌지 못한 job을 실패로 끝낸다(sink 합계 = job 수).
             for (usize index = 0; index < out_.Size(); ++index) {
@@ -529,6 +542,13 @@ public:
 
         return tokenCancelled_ ? Result<void>::Failure(ErrorCode::Cancelled)
                                : Result<void>::Success();
+    }
+
+    // phaseStart부터 지금까지를 counter에 더하고 phaseStart를 지금으로 옮긴다(단계 시간 진단).
+    static void AddPhase(uint64& counter, uint64& phaseStart) noexcept {
+        const uint64 now = platform::MonotonicNanoseconds();
+        (void)AtomicFetchAdd(&counter, now - phaseStart);
+        phaseStart = now;
     }
 
     // 워커 job 줄 하나다(채널 스레드 — 진행 보고 10.3절의 잠정 완료).
@@ -606,9 +626,9 @@ private:
         }
     }
 
-    // job을 실패로 끝낸다(진단을 바꾸고 바로 센다).
-    void Fail(usize index, ShaderCompileStatus status, StringView message,
-              StringView detail = StringView()) noexcept {
+    // job 칸에 실패 상태와 진단만 쓴다(세지 않는다 — 병렬 준비가 쓴다, 16.6절 SSD94).
+    void MarkFailed(usize index, ShaderCompileStatus status, StringView message,
+                    StringView detail = StringView()) noexcept {
         ShaderCompileJobResult& result = out_[index];
         result.status = status;
         result.values.Reset();
@@ -616,20 +636,80 @@ private:
         (void)(AppendText(result.diagnostics, message) &&
                (detail.IsEmpty() ||
                 (AppendText(result.diagnostics, ": ") && AppendText(result.diagnostics, detail))));
+    }
+
+    // job을 실패로 끝낸다(진단을 바꾸고 바로 센다).
+    void Fail(usize index, ShaderCompileStatus status, StringView message,
+              StringView detail = StringView()) noexcept {
+        MarkFailed(index, status, message, detail);
         Count(index);
     }
 
-    // 정의 조립·전처리·키다.
+    // 모든 job을 준비한다(16.6절 SSD94). scheduler가 있으면 ParallelFor로 나누고, 병렬 구간은 job
+    // 칸만 쓴다. 실패 계수와 진행 sink는 루프 뒤 호출 스레드가 job 순서대로 한다. 취소로 준비하지
+    // 못한 job은 세지 않은 채 남고 CancelRemaining이 끝낸다.
+    Result<void> PrepareAll() noexcept {
+        const usize count = jobs_.Size();
+        Array<uint8> prepared(state_.allocator);
+        if (!prepared.TryResize(count)) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        // system 도구 조회는 채널 하나를 쓰므로 병렬 구간 앞에서 한 번 한다.
+        toolsReady_ = true;
+        for (const ShaderCompileJob& job : jobs_) {
+            if (job.format != nullptr && HasSystemTool(job.format->definition)) {
+                toolsReady_ = QueryTools();
+                break;
+            }
+        }
+
+        auto body = [&](usize begin, usize end) noexcept {
+            for (usize index = begin; index < end; ++index) {
+                if (control_.cancel.IsCancellationRequested()) {
+                    return;
+                }
+
+                Prepare(index);
+                prepared[index] = 1;
+            }
+        };
+
+        if (config_.scheduler != nullptr) {
+            if (auto ran = ParallelFor(*config_.scheduler, state_.allocator, count, body); !ran) {
+                return ran;
+            }
+        } else {
+            body(0, count);
+        }
+
+        for (usize index = 0; index < count; ++index) {
+            if (prepared[index] != 0 && out_[index].status != ShaderCompileStatus::Success) {
+                Count(index);
+            }
+        }
+
+        if (control_.cancel.IsCancellationRequested()) {
+            CancelRemaining();
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 정의 조립·전처리·키다. 여러 스레드에서 서로 다른 index로 동시에 불린다(job 칸만 쓴다 —
+    // 16.6절 SSD94). 실패는 MarkFailed로 기록만 하고 PrepareAll이 센다.
     void Prepare(usize index) noexcept {
         const ShaderCompileJob& job = jobs_[index];
         ShaderCompileJobResult& result = out_[index];
         if (job.format == nullptr || job.entryPoint.IsEmpty()) {
-            Fail(index, ShaderCompileStatus::InvalidJob, "shader job has no format or entry point");
+            MarkFailed(index, ShaderCompileStatus::InvalidJob,
+                       "shader job has no format or entry point");
             return;
         }
 
         if (job.testHook != ShaderWorkerJobKind::Compile && !config_.testHooks) {
-            Fail(index, ShaderCompileStatus::InvalidJob, "test hook jobs need a test hook manager");
+            MarkFailed(index, ShaderCompileStatus::InvalidJob,
+                       "test hook jobs need a test hook manager");
             return;
         }
 
@@ -638,7 +718,7 @@ private:
             BuildShaderPreprocessDefines(job.format->definition, job.stage, job.options.hlsl2021,
                                          job.defines, job.developmentOnly, defines);
         if (!built) {
-            Fail(index, ShaderCompileStatus::InvalidJob, StringView(built.message));
+            MarkFailed(index, ShaderCompileStatus::InvalidJob, StringView(built.message));
             return;
         }
 
@@ -673,20 +753,20 @@ private:
             char location[MaxShaderVirtualPathBytes + 64];
             snprintf(location, sizeof(location), "%s:%u: %s", preprocessed.path, preprocessed.line,
                      ShaderSourceErrorName(preprocessed.code));
-            Fail(index, ShaderCompileStatus::PreprocessError, StringView(location),
-                 StringView(preprocessed.message));
+            MarkFailed(index, ShaderCompileStatus::PreprocessError, StringView(location),
+                       StringView(preprocessed.message));
             return;
         }
 
         const char* layoutReason = nullptr;
         if (!ValidateShaderParameterLayouts(job.parameterLayouts, &layoutReason)) {
-            Fail(index, ShaderCompileStatus::InvalidJob, "shader parameter layout is invalid",
-                 StringView(layoutReason));
+            MarkFailed(index, ShaderCompileStatus::InvalidJob, "shader parameter layout is invalid",
+                       StringView(layoutReason));
             return;
         }
 
-        if (HasSystemTool(job.format->definition) && !QueryTools()) {
-            Fail(index, ShaderCompileStatus::ToolError, "shader tool query failed");
+        if (HasSystemTool(job.format->definition) && !toolsReady_) {
+            MarkFailed(index, ShaderCompileStatus::ToolError, "shader tool query failed");
             return;
         }
 
@@ -707,14 +787,14 @@ private:
         input.layoutSignature = job.parameterLayouts.IsEmpty() ? nullptr : &layoutSignature;
         auto key = BuildShaderJobKey(input);
         if (!key) {
-            Fail(index,
-                 key.Error() == ErrorCode::UnsupportedCapability
-                     ? ShaderCompileStatus::UnsupportedCapability
-                     : ShaderCompileStatus::InvalidJob,
-                 key.Error() == ErrorCode::UnsupportedCapability
-                     ? StringView("this host cannot produce the shader format")
-                     : StringView("shader job key inputs are invalid"),
-                 job.format->definition.Id());
+            MarkFailed(index,
+                       key.Error() == ErrorCode::UnsupportedCapability
+                           ? ShaderCompileStatus::UnsupportedCapability
+                           : ShaderCompileStatus::InvalidJob,
+                       key.Error() == ErrorCode::UnsupportedCapability
+                           ? StringView("this host cannot produce the shader format")
+                           : StringView("shader job key inputs are invalid"),
+                       job.format->definition.Id());
             return;
         }
 
@@ -1209,6 +1289,8 @@ private:
     Array<Batch*> batches_;
     Array<usize> publish_{state_.allocator};
     Array<uint8> counted_{state_.allocator};
+    // 병렬 준비 앞에서 한 system 도구 조회 결과다(그 형식의 job이 없으면 true).
+    bool toolsReady_ = true;
     // sink 계수다: 최종 상태를 정한 job 수(조정 스레드가 올림)·잠정 완료(채널 스레드)·보낸 수.
     platform::Atomic<uint64> final_{0};
     platform::Atomic<uint64> provisional_{0};

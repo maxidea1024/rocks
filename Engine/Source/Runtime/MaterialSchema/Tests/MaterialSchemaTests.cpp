@@ -86,6 +86,13 @@ TypeSchema MakeParamSchema() noexcept {
 }
 
 constexpr StringView ParamNonSemantic[] = {"defaultValue"};
+
+// 시험 파라미터 노드의 값 hook이다(파라미터 노드는 hook이 있어야 등록된다 — 12.8절 MS3d1).
+Result<bool> TestParamValue(NodePropertyReader&, MaterialParameterMetadata& out) noexcept {
+    out = MaterialParameterMetadata{};
+    return Result<bool>::Success(true);
+}
+
 constexpr StringView ParamUnknownField[] = {"missing"};
 
 constexpr MaterialPinDefinition ParamPins[] = {
@@ -101,6 +108,7 @@ constexpr MaterialNodeDefinition TestDefinitions[] = {
     MaterialNode("Material.TestParam")
         .Properties(&ParamSchema, ParamNonSemantic)
         .Pins(ParamPins)
+        .ParameterValue(&TestParamValue)
         .Flags(MaterialNodeFlags::Parameter),
 };
 
@@ -299,6 +307,52 @@ TEST(MaterialSchema_CatalogRegistersDefinitions) {
     CHECK(env.catalog.RegistrationCount() == 0);
 }
 
+// 내장 파라미터 노드의 값 hook(12.8절 MS3d1): 빈 속성(모든 필드 초기값)에서 성공하고(필드 이름이
+// schema에 있다 — 오타면 NotFound), 종류·초기값이 속성 struct와 같다(sortPriority 32, ChannelMask
+// (1,0,0,0), StaticComponentMask 0, primitive data 없음).
+TEST(MaterialSchema_ParameterValueHooks) {
+    // 파라미터 표지 내장 노드 수(19장 — 수·static·atlas 행·텍스처·컬렉션·SVT·RVT·font)와 속성
+    // struct sortPriority 초기값(UE 32)이다.
+    constexpr usize BuiltinParameterNodes = 21;
+    constexpr int32 InitialSortPriority = 32;
+    SystemAllocator allocator;
+    usize hooks = 0;
+    for (const Span<const MaterialNodeDefinition> group : BuiltinMaterialNodeGroups()) {
+        for (const MaterialNodeDefinition& definition : group) {
+            if (definition.parameterValue == nullptr) {
+                continue;
+            }
+
+            ++hooks;
+            REQUIRE(definition.propertiesSchema != nullptr);
+            auto reader = NodePropertyReader::Open(allocator, Span<const uint8>(),
+                                                   definition.propertiesSchema());
+            REQUIRE(reader);
+            MaterialParameterMetadata metadata;
+            auto read = definition.parameterValue(reader.Value(), metadata);
+            REQUIRE(read);
+            CHECK(read.Value());
+            CHECK(metadata.sortPriority == InitialSortPriority);
+            CHECK(metadata.primitiveDataIndex == NoPrimitiveDataIndex);
+            CHECK(!metadata.usedAsAtlasPosition);
+            if (definition.type == StringView("Material.ChannelMaskParameter")) {
+                CHECK(metadata.type == MaterialParameterType::Vector);
+                CHECK(metadata.defaults[0] == 1.0);
+                CHECK(metadata.defaults[3] == 0.0);
+            } else if (definition.type == StringView("Material.StaticComponentMaskParameter")) {
+                CHECK(metadata.type == MaterialParameterType::StaticComponentMask);
+                CHECK(metadata.defaults[0] == 0.0);
+            } else if (definition.type == StringView("Material.TextureSampleParameter2D")) {
+                CHECK(metadata.type == MaterialParameterType::Texture);
+            } else if (definition.type == StringView("Material.DoubleVectorParameter")) {
+                CHECK(metadata.type == MaterialParameterType::DoubleVector);
+            }
+        }
+    }
+
+    CHECK(hooks == BuiltinParameterNodes);
+}
+
 // 정의 검사 음성: 규칙마다 InvalidArgument이고 등록표는 그대로다.
 TEST(MaterialSchema_CatalogRejectsInvalidDefinitions) {
     SchemaEnv env;
@@ -336,6 +390,16 @@ TEST(MaterialSchema_CatalogRejectsInvalidDefinitions) {
         MaterialNode("Material.NoSchema").Properties(nullptr, ParamNonSemantic),
         MaterialNode("Material.UnknownField").Properties(&ParamSchema, ParamUnknownField),
         MaterialNode("Material.Flags").Flags(static_cast<MaterialNodeFlags>(0x80)),
+        // 파라미터 노드는 값 hook이 있어야 하고, hook은 속성이 있는 파라미터 노드만 가진다.
+        MaterialNode("Material.ParamNoHook")
+            .Properties(&ParamSchema, ParamNonSemantic)
+            .Flags(MaterialNodeFlags::Parameter),
+        MaterialNode("Material.HookNoParam")
+            .Properties(&ParamSchema, ParamNonSemantic)
+            .ParameterValue(&TestParamValue),
+        MaterialNode("Material.HookNoSchema")
+            .ParameterValue(&TestParamValue)
+            .Flags(MaterialNodeFlags::Parameter),
     };
 
     for (const MaterialNodeDefinition& definition : invalid) {

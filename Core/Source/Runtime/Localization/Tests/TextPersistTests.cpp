@@ -165,4 +165,84 @@ TEST(TextPersist_DeepCloneLimitsAndAllocationFailure) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// IsIdentical(값 같음 — ChangeNotification CN-D15): 같은 노드·깊은 사본은 같고, 형태·원문·ID·
+// revision·Format 인자가 다르면 다르며, 한도를 넘으면 다르다로 본다. 할당하지 않는다.
+TEST(TextPersist_IsIdenticalComparesHistory) {
+    SystemAllocator allocator;
+    {
+        Text empty;
+        Text otherEmpty;
+        CHECK(empty.IsIdentical(otherEmpty));
+
+        auto plain = Text::Invariant(allocator, "plain");
+        auto plainAgain = Text::Invariant(allocator, "plain");
+        auto other = Text::Invariant(allocator, "plaiN");
+        auto localized = Text::Localized(allocator, GreetingId, 7, "plain");
+        auto localizedAgain = Text::Localized(allocator, GreetingId, 7, "plain");
+        auto revised = Text::Localized(allocator, GreetingId, 8, "plain");
+        auto renamed = Text::Localized(allocator, TextId{0x51, 0x53}, 7, "plain");
+        REQUIRE(plain && plainAgain && other && localized && localizedAgain && revised && renamed);
+        CHECK(!empty.IsIdentical(plain.Value()) && !plain.Value().IsIdentical(empty));
+        CHECK(plain.Value().IsIdentical(plain.Value()));
+        CHECK(plain.Value().IsIdentical(plainAgain.Value()));
+        CHECK(!plain.Value().IsIdentical(other.Value()));
+        CHECK(!plain.Value().IsIdentical(localized.Value()));
+        CHECK(localized.Value().IsIdentical(localizedAgain.Value()));
+        CHECK(!localized.Value().IsIdentical(revised.Value()));
+        CHECK(!localized.Value().IsIdentical(renamed.Value()));
+
+        auto shared = plain.Value().Clone();
+        REQUIRE(shared);
+        CHECK(shared.Value().IsIdentical(plain.Value()));
+
+        auto seven = Text::Integer(allocator, 7);
+        auto sevenAgain = Text::Integer(allocator, 7);
+        auto eight = Text::Integer(allocator, 8);
+        auto sevenText = Text::Invariant(allocator, "7");
+        REQUIRE(seven && sevenAgain && eight && sevenText);
+        CHECK(seven.Value().IsIdentical(sevenAgain.Value()));
+        CHECK(!seven.Value().IsIdentical(eight.Value()));
+        CHECK(!seven.Value().IsIdentical(sevenText.Value()));
+
+        auto pattern = Text::Invariant(allocator, "count {n}");
+        auto patternAgain = Text::Invariant(allocator, "count {n}");
+        REQUIRE(pattern && patternAgain);
+        const TextArgument sevenArguments[] = {{"n", &seven.Value()}};
+        const TextArgument sevenAgainArguments[] = {{"n", &sevenAgain.Value()}};
+        const TextArgument eightArguments[] = {{"n", &eight.Value()}};
+        const TextArgument renamedArguments[] = {{"m", &seven.Value()}};
+        auto formatted = Text::Format(allocator, pattern.Value(), sevenArguments);
+        auto formattedAgain = Text::Format(allocator, patternAgain.Value(), sevenAgainArguments);
+        auto formattedEight = Text::Format(allocator, pattern.Value(), eightArguments);
+        auto formattedRenamed = Text::Format(allocator, pattern.Value(), renamedArguments);
+        REQUIRE(formatted && formattedAgain && formattedEight && formattedRenamed);
+        CHECK(formatted.Value().IsIdentical(formattedAgain.Value()));
+        CHECK(!formatted.Value().IsIdentical(formattedEight.Value()));
+        CHECK(!formatted.Value().IsIdentical(formattedRenamed.Value()));
+
+        auto deep = formatted.Value().DeepClone(allocator);
+        REQUIRE(deep);
+        CHECK(deep.Value().IsIdentical(formatted.Value()));
+
+        // 깊이 1로는 Format의 패턴(깊이 2)까지 가지 못하고, 작업 1로는 원문 byte를 비교하지 못한다.
+        // 64를 넘는 깊이 한도는 다르다다. 같은 노드는 한도와 무관하게 같다.
+        TextResolveLimits shallow;
+        shallow.maxDepth = 1;
+        CHECK(!formatted.Value().IsIdentical(formattedAgain.Value(), shallow));
+        TextResolveLimits tight;
+        tight.maxWork = 1;
+        CHECK(!plain.Value().IsIdentical(plainAgain.Value(), tight));
+        TextResolveLimits invalid;
+        invalid.maxDepth = 65;
+        CHECK(!plain.Value().IsIdentical(plainAgain.Value(), invalid));
+        CHECK(plain.Value().IsIdentical(plain.Value(), invalid));
+
+        const uint64 allocations = allocator.Stats().totalAllocations;
+        CHECK(formatted.Value().IsIdentical(formattedAgain.Value()));
+        CHECK(allocator.Stats().totalAllocations == allocations);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
 } // namespace text_persist_tests_file

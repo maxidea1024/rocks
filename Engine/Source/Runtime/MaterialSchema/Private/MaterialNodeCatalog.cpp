@@ -174,6 +174,14 @@ Result<void> ValidateDefinition(const MaterialNodeDefinition& definition) noexce
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 파라미터 노드는 값 hook을 가지고(12.8절 MS3d1 — 쿠킹 파라미터 표), hook은 속성이 있는
+    // 파라미터 노드만 가진다.
+    if (HasNodeFlag(definition.flags, MaterialNodeFlags::Parameter) !=
+            (definition.parameterValue != nullptr) ||
+        (definition.parameterValue != nullptr && definition.propertiesSchema == nullptr)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     // 에셋 참조 선언은 속성의 최상위 MaterialAssetReference 필드이고 같은 필드는 한 번이다.
     if (!definition.assetReferences.IsEmpty()) {
         if (definition.propertiesSchema == nullptr) {

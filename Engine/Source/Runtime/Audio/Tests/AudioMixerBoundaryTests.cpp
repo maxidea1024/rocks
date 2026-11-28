@@ -30,6 +30,15 @@ public:
         mixer.seqlockReadHook_ = hook;
     }
 
+    // 라우팅 seqlock version이다(3.45.5절).
+    static uint32 RouteVersion(AudioMixer& mixer, uint32 voice) noexcept {
+        return platform::AtomicLoad(&mixer.sharedVoices_[voice].routeVersion);
+    }
+
+    static void SetRouteVersion(AudioMixer& mixer, uint32 voice, uint32 version) noexcept {
+        platform::AtomicStore(&mixer.sharedVoices_[voice].routeVersion, version);
+    }
+
     // 읽지 않은 누적 seqlock version이다(홀수 = 쓰는 중으로 보인다).
     static void SetUnreadVersion(AudioMixer& mixer, uint32 voice, uint32 version) noexcept {
         platform::AtomicStore(&mixer.sharedVoices_[voice].unreadVersion, version);
@@ -660,6 +669,54 @@ TEST(Audio_Mixer2_UnreadTornReadReported) {
 
     AudioMixerTestAccess::SetUnreadVersion(rig.Mixer(), voice.index, EvenVersion);
     CHECK(!StatusOf(rig.Mixer(), voice).unreadReadFailed);
+}
+
+// Play 시작 때 라우팅 seqlock이 찢어지면 시작 라우팅을 ramp 없이 쓰고, 다음 블록에 더 뒤 순번의
+// 라우팅을 읽어 ramp로 옮긴다(3.45.5절).
+TEST(Audio_Mixer2_StartRouteSurvivesTornRouteRead) {
+    SystemAllocator allocator;
+    float ones[8192];
+    for (float& value : ones) {
+        value = 1.0f;
+    }
+
+    OfflineAudioRender rig = MakeRig(ConfigOf(), allocator);
+    AudioMixer& mixer = rig.Mixer();
+    auto loud = mixer.AcquireBus();
+    auto quiet = mixer.AcquireBus();
+    REQUIRE(loud && quiet);
+    AudioBusLink links[2];
+    links[0].bus = loud.Value();
+    links[0].parent = AudioMixer::MasterBus();
+    links[1].bus = quiet.Value();
+    links[1].parent = AudioMixer::MasterBus();
+    links[1].initialParams.outputGain = 0.5f;
+    REQUIRE(mixer.PublishBusPlan(Span<const AudioBusLink>(links, 2)));
+    AudioVoiceRoute toLoud;
+    toLoud.sendCount = 1;
+    toLoud.sends[0].bus = loud.Value();
+    AudioVoiceRoute toQuiet = toLoud;
+    toQuiet.sends[0].bus = quiet.Value();
+    auto voice = mixer.AcquireVoice();
+    REQUIRE(voice);
+    auto play = mixer.PreparePlay(voice.Value(), RegisterOnes(mixer, ones, 8192), 0, false,
+                                  AudioVoiceParams{}, toLoud);
+    REQUIRE(play);
+    REQUIRE(mixer.PublishRoute(voice.Value(), toQuiet));
+    play.Value().mixFrame = 0;
+    SubmitOrDie(rig, play.Value());
+    AudioMixerTestAccess::SetSeqlockReadHook(mixer, [](AudioMixer& target, uint32 index) noexcept {
+        AudioMixerTestAccess::SetRouteVersion(
+            target, index, AudioMixerTestAccess::RouteVersion(target, index) + 2);
+    });
+    Array<float> output = RenderBlocks(rig, 1, allocator);
+    AudioMixerTestAccess::SetSeqlockReadHook(mixer, nullptr);
+    CHECK(Left(output, 0) == 0.5f && Left(output, 255) == 0.5f);
+    CHECK(mixer.Counters().skippedSeqlockReads == 1);
+
+    output = RenderBlocks(rig, 2, allocator);
+    CHECK(Left(output, 0) == 0.5f);
+    CHECK(Left(output, 300) == 0.25f);
 }
 
 TEST(Audio_Mixer2_AbandonPreparedPlay) {

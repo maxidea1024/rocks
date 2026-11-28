@@ -6,6 +6,7 @@
 #include <AudioAssets/SoundCategory.generated.h>
 #include <AudioAssets/SoundCategoryPassiveMix.generated.h>
 #include <AudioAssets/MixCategoryAdjuster.generated.h>
+#include <AudioAssets/MixBus.generated.h>
 #include <Audio/AudioMixerTypes.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Math/MathUtility.h>
@@ -64,6 +65,21 @@ Result<void> FillLink(const SoundCategory& category, Allocator& allocator, Objec
     link.properties = PropertiesOf(category);
     if (auto valid = ValidateProperties(link.properties); !valid) {
         return valid;
+    }
+
+    // 기본 출력 버스(UE DefaultSubmix — 자기 칸 값만 쓰고 부모로 내려가지 않는다, 3.45.7절).
+    if (!category.defaultBus.Handle().IsNull()) {
+        auto resolvedBus = registry.Resolve<MixBus>(access, category.defaultBus.Handle());
+        if (!resolvedBus || !resolvedBus.Value().Get()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto busRef = resolvedBus.Value().Get().Value()->MakeRef(allocator, registry, access);
+        if (!busRef) {
+            return Result<void>::Failure(busRef.Error());
+        }
+
+        link.defaultBus = busRef.Value();
     }
 
     if (category.passiveMixes.Size() > MaxCategoryPassiveMixes) {

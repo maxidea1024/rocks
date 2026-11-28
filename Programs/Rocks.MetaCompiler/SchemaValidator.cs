@@ -1253,6 +1253,59 @@ internal static partial class SchemaValidator
                 CheckContainer(field);
                 CheckInstanced(model, field);
             }
+
+            CheckAccessors(model);
+        }
+
+        // 생성 setter·getter의 대상과 Apply 지정자다(Docs/Design/ChangeNotification.ko.md CN-D13 — RMC2903·RMC2904). 대상은 그 클래스가 선언한
+        // PROPERTY 필드이고, setter는 이벤트·bitfield·Registry 참조를 담는 필드(사본을 만들 수 없다 — Registry API로 제자리에 쓴다)에 쓸 수
+        // 없다. Apply는 setter가 있는 필드만 받는다(리플렉션 쓰기는 setter를 거칠 때만 Apply를 부른다).
+        void CheckAccessors(ClassModel model)
+        {
+            HashSet<(string Field, bool Setter)> seen = [];
+            foreach (AccessorModel accessor in model.Accessors)
+            {
+                string macro = accessor.Setter ? "ROCKS_SETTER" : "ROCKS_GETTER";
+                string symbol = $"{model.Name}::{accessor.Name}";
+                FieldModel? field = model.OwnFields.FirstOrDefault(own => own.Name == accessor.Field);
+                if (field is null)
+                {
+                    string why = model.NativeMembers.Any(native => native.Name == accessor.Field) ? "is a ROCKS_NATIVE member"
+                        : model.Fields.Any(any => any.Name == accessor.Field) ? "is inherited from a base class" : "is not a field of the class";
+                    throw new MetadataException($"{symbol}: {macro} target '{accessor.Field}' {why}", "RMC2903",
+                        $"{macro} names a ROCKS_PROPERTY field declared by the same class; put the setter or getter on the class that declares the field.").At(accessor.Site);
+                }
+
+                if (!seen.Add((accessor.Field, accessor.Setter)))
+                {
+                    throw new MetadataException($"{symbol}: field '{accessor.Field}' already has a {macro}", "RMC2903",
+                        $"Keep one {macro} per field; reflection, path and edit writes call exactly one setter.").At(accessor.Site);
+                }
+
+                string? refused = field.IsEvent ? "an Event field" : field.Bitfield ? "a bitfield" : null;
+                if (refused is null && accessor.Setter && (field.IsObjectReferenceFieldKind || field.IsRegistryContainer(Find) ||
+                    (field.StructTarget && Find(field.Reference!).ContainsStrongReference)))
+                {
+                    refused = "a field that holds Registry references (ObjectRef, ObjectRefArray, ObjectRefMap, StructRefArray or a reference struct)";
+                }
+
+                if (refused is not null)
+                {
+                    throw new MetadataException($"{symbol}: {macro} cannot target {refused}", "RMC2903",
+                        field.IsEvent ? "Events are not values; bind them with ScriptAssignable or the event API."
+                        : field.Bitfield ? "A bitfield has no member pointer; write it in code and announce it with ObjectRegistry::Notify."
+                        : "Registry reference fields are written in place through the ObjectRegistry API, which also announces Notify fields.").At(accessor.Site);
+                }
+            }
+
+            foreach (FieldModel field in model.OwnFields.Where(own => own.Spec.Apply.Length != 0))
+            {
+                if (!seen.Contains((field.Name, true)))
+                {
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Apply needs a ROCKS_SETTER for the field", "RMC2904",
+                        "Declare ROCKS_SETTER(SetName, field) after the field; the generated setter calls the Apply method after a change.").At(field.Site);
+                }
+            }
         }
 
         // name이 ancestor 자신이거나 base 사슬에 ancestor가 있는지다(이 모듈과 import 클래스 — Within 상속 판정, 리플렉션 B9h2).

@@ -13,3 +13,5 @@
 | tangent 계산 | MikkTSpace 참조 구현을 ThirdParty로 쓰되, CRT 초월 함수를 Core 결정적 수학으로 바꾸는 패치를 둔다 | UE와 같은 tangent를 내야 노멀맵 베이크 결과와 맞는다. 쿠킹 중 CRT 초월 함수는 금지다(AssetSystem 10절). 결정 MA-D5 |
 | 축소 LOD·Nanite·lightmap UV 생성·거리장·Lumen 카드 | 설정은 보존한다. 빌드는 후속 단계에서 하고, 그때까지는 `UnsupportedSetting` 경고를 낸다 | 해당 기능의 소비자(축소기·GI·VirtualGeometry)가 아직 없다 |
 | 애니메이션 압축 | 쿠킹 v1은 비압축(상수 트랙 접기만)이다. ACL은 후속이다 | 계획 15절 |
+
+> **콘텐츠 해시 전환(예정, [ContentHash](../ContentHash.ko.md), 2026-11-28).** 이 문서가 콘텐츠 주소·동일성 판정으로 정한 SHA-256 값(메시 원본·중간 결과 해시(MeshSource Bulk 포함))은 `ContentHash`(BLAKE3-256, 32 byte)로 바뀐다. 하위 호환 없이 일괄 B(CH-B3b)에서 한 번에 바뀌고, 그때 본문과 형식 버전을 고친다. 외부 무결성·프로토콜 SHA-256(CH5)은 남는다.

@@ -374,6 +374,59 @@ private:
         // 마지막으로 반영한 그 누적이다(3.44.6절).
         bool voicePaused = false;
         uint64 cursorUnread = 0;
+        // 버스(3.45.7절): 리스너 거리(거리 기반 send), 재생 단위 send, 마지막으로 낸 라우팅, 다시
+        // 낼지, 거리 기반 send가 있는지, send 초과를 알렸는지다.
+        float listenerDistance = 0.0f;
+        // voice를 받을 때 정한 기본 버스다(BaseDefault는 그 뒤 voice를 받는 재생부터 — 3.45.2절).
+        MixBusRef baseBus;
+        bool routeFailureWarned = false;
+        uint32 busOverrideCount = 0;
+        PlayBusSend busOverrides[audio::MaxVoiceSends];
+        audio::AudioVoiceRoute route;
+        bool routeDirty = false;
+        bool distanceSends = false;
+        bool routeWarned = false;
+    };
+
+    // 버스 표(AudioBuses.cpp — 3.45.8절)의 칸이다. key 0은 빈 칸이다.
+    struct BusEntry {
+        uint64 key = 0;
+        // 에셋의 부모 키(0 = 루트)다. 칸 대응(parent)은 Master 키에 따라 바뀔 수 있다.
+        uint64 parentKey = 0;
+        // 받은 스냅숏 가운데 가장 새 생성 번호와 그 값이다.
+        uint64 serial = 0;
+        MixBusLinkValue value;
+        audio::AudioBusHandle handle;
+        // 부모 칸(MasterBusEntry면 Master)과 참조 수(voice 수명·자식 버스)다.
+        uint32 parent = NumericLimits<uint32>::Max();
+        uint32 refs = 0;
+        // plan에서 빠짐(칸은 채택 ACK 뒤 놓는다)·가장 최근 게시 plan에 있음이다.
+        bool retiring = false;
+        bool inPlan = false;
+        bool sentValid = false;
+        audio::AudioBusParams sent;
+    };
+
+    // 버스 실행 배수다(키마다 — 버스가 아직 없어도 남는다).
+    struct BusModifier {
+        uint64 key = 0;
+        float volume = 1.0f;
+        float wet = 1.0f;
+        float dry = 1.0f;
+    };
+
+    // 믹서 voice 하나가 쥔 버스 칸이다(놓을 때 참조를 내린다).
+    static constexpr uint32 MaxVoiceBusRefs = audio::MaxVoiceSendSlots;
+
+    struct VoiceBusRefs {
+        uint32 count = 0;
+        uint32 entries[MaxVoiceBusRefs] = {};
+    };
+
+    enum class RouteOutcome : uint8 {
+        Ready,
+        // 기본 버스가 아직 게시한 plan에 없다(voice 시작을 다음 묶음으로 미룬다).
+        BusPending
     };
 
     struct ClipEntry {
@@ -460,6 +513,8 @@ private:
         // 믹서 voice·스트림 슬롯이 없다(다음 묶음에 다시 — 3.41.1절 여유 부족).
         NoRoom,
         NoStreamSlot,
+        // 기본 버스 plan을 아직 게시하지 못했다(미채택 plan이 둘 — 다음 묶음에 다시, 3.45.8절).
+        BusPending,
         // clip 등록 실패 등 시작할 수 없다.
         Failed
     };
@@ -579,6 +634,39 @@ private:
     uint32 SecondsToMixFrames(double seconds) const noexcept;
     bool ConcurrencyRamping(const Record& record, uint64 now) const noexcept;
 
+    // 버스(AudioBuses.cpp — 3.45.7·3.45.8절).
+    static constexpr uint32 NoBusEntry = NumericLimits<uint32>::Max();
+    static constexpr uint32 MasterBusEntry = NumericLimits<uint32>::Max() - 1;
+    static constexpr uint32 MaxBusModifiers = AudioBusModifierCapacity;
+    static constexpr uint32 MaxLoggedBusFallbacks = 64;
+    uint32 FindBusEntry(uint64 key) const noexcept;
+    audio::AudioBusHandle BusHandleOf(uint32 entry) const noexcept;
+    bool IsBusLive(uint32 entry) const noexcept;
+    void RetainBus(uint32 entry) noexcept;
+    void ReleaseBusRef(uint32 entry) noexcept;
+    void RetireBus(uint32 entry) noexcept;
+    bool BusHasAncestor(uint32 entry, uint32 ancestor) const noexcept;
+    void LogBusFallback(uint64 key) noexcept;
+    // 사슬을 등록하고 그 버스 칸(Master면 MasterBusEntry)을 돌려준다. 칸이 모자라면 fallback을
+    // 켜고 가장 가까운 등록 조상을 돌려준다.
+    uint32 RegisterBus(const MixBusRef& ref, bool& fallback) noexcept;
+    audio::AudioBusParams BusParamsFor(const MixBusLinkValue& value) const noexcept;
+    MixBusLinkValue MasterBusValue() const noexcept;
+    bool PublishPlan() noexcept;
+    void ApplyBusSettings(const ControlBatch& batch) noexcept;
+    // 재생의 라우팅을 만든다(entries는 send마다 버스 칸). 아직 plan에 없는 send는 빼고 pending을
+    // 켠다.
+    // resolveBase면 기본 버스를 지금 설정으로 다시 정한다(voice를 받을 때).
+    RouteOutcome BuildRoute(Record& record, audio::AudioVoiceRoute& route, uint32* entries,
+                            bool& pending, bool resolveBase) noexcept;
+    void WarnRouteFailure(Record& record) noexcept;
+    bool AddVoiceBusRefs(uint32 voiceIndex, const audio::AudioVoiceRoute& route,
+                         const uint32* entries) noexcept;
+    void ReleaseVoiceBusRefs(uint32 voiceIndex) noexcept;
+    void ApplySetBusSend(const ControlCommand& command) noexcept;
+    void UpdateBuses() noexcept;
+    void PublishRoutes() noexcept;
+
     Record* FindRecord(PlaybackHandle handle) noexcept;
     audio::AudioVoiceParams ParamsFor(const Record& record, uint64 frame) const noexcept;
     Result<uint32> AcquireClip(const SoundPlayable& playable, uint32 startFrame,
@@ -642,6 +730,20 @@ private:
     bool mixesChanging_ = false;
     // 차폐 요청 순회 시작 slot이다(요청 칸이 찰 때 뒤 slot이 늘 밀리지 않게 묶음마다 이어 간다).
     uint32 occlusionCursor_ = 0;
+    // 버스(3.45.8절): 표(믹서 칸 수 − 1), voice별 참조, 실행 배수, 칸 부족을 알린 키, plan 게시
+    // scratch, Master·BaseDefault 설정과 Master 키, 다시 게시할지, Master에 낸 값이다.
+    Array<BusEntry> busEntries_;
+    Array<VoiceBusRefs> voiceBusRefs_;
+    Array<BusModifier> busModifiers_;
+    Array<uint64> loggedBusFallbacks_;
+    bool busFallbackLogFull_ = false;
+    Array<audio::AudioBusLink> busLinks_;
+    MixBusRef masterBus_;
+    MixBusRef baseDefaultBus_;
+    uint64 masterBusKey_ = 0;
+    bool busPlanDirty_ = false;
+    bool masterBusSentValid_ = false;
+    audio::AudioBusParams masterBusSent_;
     AudioControlStats stats_;
 };
 

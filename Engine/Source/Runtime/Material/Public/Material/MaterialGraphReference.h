@@ -16,6 +16,11 @@ struct MaterialGraphReference {
     // field는 정적 문자열이다(노드 정의 선언 또는 리터럴).
     Guid node{};
     StringView field;
+    // 필드가 파라미터 기본값인가: 파라미터 노드(Parameter 표지)이고 이름(parameterName)이 있으며
+    // 필드가 비의미 필드(semantic hash 밖 — 5.5절)다. 이름이 빈 파라미터 샘플 노드는 UE처럼 보통
+    // 샘플이라 기본값이 아니다. 번역 키는 이런 텍스처 위치만 AssetId 없이 사실로 쓴다(12.8절
+    // MS3d1).
+    bool parameterDefault = false;
 };
 
 } // namespace rocks

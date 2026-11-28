@@ -23,5 +23,5 @@ public sealed class ShaderCompiler : EngineModuleRules
     protected override string[] PublicDependencies => ["ShaderCore", "ShaderCompilerCommon", "AssetNugget", "AssetCooker", "Progress", "PlatformBase", "Core"];
 
     // Not used by the public headers, so dependents do not see them (Docs/Design/BuildTargets section 3.5 BS3b).
-    protected override string[] PrivateDependencies => ["HostConfig", "ModuleLoader", "TargetProfiles"];
+    protected override string[] PrivateDependencies => ["HostConfig", "ModuleLoader", "TargetProfiles", "Task"];
 }

@@ -20,6 +20,8 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/ShapeFilter.h>
+#include <Jolt/Physics/Collision/SimShapeFilter.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeID.h>
 #include <Jolt/Physics/Constraints/Constraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -90,7 +92,9 @@ public:
     void SetBodyCollision(PhysicsBodyHandle body,
                           const ResolvedCollision& collision) noexcept override;
     Result<void> SetBodyGeometry(PhysicsBodyHandle body,
-                                 const BodyGeometry& geometry) noexcept override;
+                                 Span<const BodyShapeElement> geometry) noexcept override;
+    Result<void> WeldBody(PhysicsBodyHandle root, const BodyWeldDesc& child) noexcept override;
+    void UnweldBody(PhysicsBodyHandle root, ObjectHandle child) noexcept override;
     void SetBodyNotifyContacts(PhysicsBodyHandle body, bool notify) noexcept override;
     bool ComputePenetration(PhysicsBodyHandle body, const CollisionShape& shape,
                             const Vec3d& position, const Quatd& rotation,
@@ -122,8 +126,9 @@ public:
                            const Quatd& rotation, const QueryFilter& filter,
                            const QueryParams& params,
                            Array<HitResult>& all) const noexcept override;
-    Result<bool> OverlapBody(PhysicsBodyHandle body, const Vec3d& position, const Quatd& rotation,
-                             const QueryFilter& filter, const QueryParams& params,
+    Result<bool> OverlapBody(PhysicsBodyHandle body, ObjectHandle part, const Vec3d& position,
+                             const Quatd& rotation, const QueryFilter& filter,
+                             const QueryParams& params,
                              Array<OverlapResult>& all) const noexcept override;
 
     // 프레임의 고정 스텝이 끝났다(PhysicsResults — 7.1.17절): 프레임 힘을 지운다.
@@ -172,8 +177,23 @@ public:
                      const PhysicsSettings& settings, WorkerScheduler* scheduler) noexcept;
 
 private:
+    // body 부분이다(7.1.22절 — 0 = 루트 자신, 그 뒤 weld한 자식 — ShapePart).
+    using BodyPart = ShapePart;
+
+    // 형상을 다시 만드는 까닭이다: 형상 값·scale 변경(UE UpdateBodyScale — 깨우고, 질량은
+    // updateMassWhenScaleChanges일 때)과 weld·unweld(UE Weld·UnWeld → PostShapeChange — 깨우지
+    // 않고 질량을 늘 다시 계산).
+    enum class ShapeChange : uint8 {
+        Resize,
+        Weld
+    };
+
     // body 칸이다. 세대 0은 쓰지 않는다(PhysicsBodyHandle의 "없음").
     struct BodySlot {
+        explicit BodySlot(Allocator& allocator) noexcept
+            : geometry(allocator), elementShapes(allocator), parts(allocator) {
+        }
+
         JPH::BodyID body;
         ObjectHandle component;
         // 컴포넌트의 소유 Actor다(질의 hit·무시 목록 — 7.1.7절).
@@ -183,15 +203,23 @@ private:
         bool live = false;
         // 응답 묶음 표 색인이다(object 층 bit 11–31 — 7.1.6절).
         uint32 responseSet = 0;
-        // 형상을 다시 만들 때 쓰는 값이다(7.1.5절): scale 전 형상, 지금 형상에 구운 월드 scale,
-        // 형상 교체 때 질량을 다시 계산할지(BodySettings::updateMassWhenScaleChanges).
-        BodyGeometry geometry;
+        // 형상을 다시 만들 때 쓰는 값이다(7.1.5절): scale 전 형상 원소, 지금 형상에 구운 월드
+        // scale, 형상 교체 때 질량을 다시 계산할지(BodySettings::updateMassWhenScaleChanges).
+        Array<BodyShapeElement> geometry;
         Vec3d scale = Vec3d::One();
+        // 원소 묶음(질량 중심 감싸기 전 — 질량 변경이 감싸기만 바꾼다)과 원소 잎 형상(컴포넌트
+        // sweep이 원소마다 쓴다 — 7.1.21절)이다.
+        JPH::RefConst<JPH::Shape> inner;
+        Array<ElementShape> elementShapes;
+        // 부분 표(7.1.22절)다: geometry는 부분 순서로 이은 원소, parts[0]은 루트 자신이다.
+        Array<BodyPart> parts;
         bool updateMassOnShapeChange = true;
         // 질량 계산 입력이다(형상을 바꿀 때 UE 질량 규칙으로 다시 계산 — 7.1.15절).
         BodyMassValues mass;
         // 지금 질량 속성이다(운동 종류 전환 때 자유도와 함께 다시 넣는다 — 7.1.16절).
         JPH::MassProperties massProperties;
+        // 형상 질량 중심을 inner에서 옮긴 양(Jolt m — 0이면 감싸기 없음, 7.1.22절)이다.
+        JPH::Vec3 massShift = JPH::Vec3::sZero();
         // 자유도 잠금(7.1.16절)이다: Dynamic일 때 쓰는 허용 자유도와 CustomPlane 구속(Dynamic일
         // 때만 걸려 있다).
         DofLock dof;
@@ -281,6 +309,9 @@ private:
         JPH::uint64 userData2 = 0;
         JPH::SubShapeID subShape1;
         JPH::SubShapeID subShape2;
+        // 접촉한 원소의 부분 번호다(7.1.22절 — hit 컴포넌트).
+        uint32 part1 = 0;
+        uint32 part2 = 0;
         JPH::RVec3 point = JPH::RVec3::sZero();
         JPH::Vec3 normal = JPH::Vec3::sZero();
         float depth = 0.0f;
@@ -340,12 +371,50 @@ private:
         JPH::BodyID body;
         JPH::SubShapeID subShape;
         uint32 slot = 0;
+        // 맞은 원소의 부분 번호다(7.1.22절 — hit 컴포넌트, 합치기·순서 key).
+        uint32 part = 0;
         bool stops = false;
         bool reportBlocking = false;
         bool initial = false;
         JPH::RVec3 contact = JPH::RVec3::sZero();
         JPH::Vec3 axis = JPH::Vec3::sZero();
         float depth = 0.0f;
+    };
+
+    // 질의에서 더 뺄 body·부분이다(컴포넌트 질의 — 7.1.9·7.1.22절). null이면 빼지 않는다.
+    // sweptBody는 컴포넌트 sweep의 body로, 그 모든 부분의 Actor를 뺀다(UE "All actors pointed to by
+    // shapes should be ignored").
+    struct QueryExclusion {
+        ObjectHandle actor;
+        ObjectHandle component;
+        const BodySlot* sweptBody = nullptr;
+    };
+
+    // 원소 충돌 켬 필터다(7.1.21절): 질의는 대상 잎의 질의 켬, 시뮬레이션은 두 잎의 실효
+    // 시뮬레이션(body 값과 교집합)을 본다. 잎이 아닌 형상(user data 표지 없음)은 통과다. 질의
+    // 필터는 부분이 둘 이상인 body의 무시 목록·제외를 부분마다 본다(7.1.22절 — Jolt mBodyID2).
+    class ElementQueryFilter final : public JPH::ShapeFilter {
+    public:
+        ElementQueryFilter(const JoltPhysicsScene& scene, const QueryParams& params,
+                           const QueryExclusion& exclusion) noexcept
+            : scene_(scene), params_(params), exclusion_(exclusion) {
+        }
+
+        bool ShouldCollide(const JPH::Shape* shape2, const JPH::SubShapeID&) const override;
+        bool ShouldCollide(const JPH::Shape*, const JPH::SubShapeID&, const JPH::Shape* shape2,
+                           const JPH::SubShapeID&) const override;
+
+    private:
+        const JoltPhysicsScene& scene_;
+        const QueryParams& params_;
+        const QueryExclusion& exclusion_;
+    };
+
+    class ElementSimFilter final : public JPH::SimShapeFilter {
+    public:
+        bool ShouldCollide(const JPH::Body& body1, const JPH::Shape* shape1, const JPH::SubShapeID&,
+                           const JPH::Body& body2, const JPH::Shape* shape2,
+                           const JPH::SubShapeID&) const override;
     };
 
     // 질의 Jolt 필터·수집기다(JoltPhysicsSceneQueries.cpp — 칸을 읽는다).
@@ -355,19 +424,41 @@ private:
     class ShapeHitCollector;
     class OverlapCollector;
 
-    // 질의에서 더 뺄 body다(컴포넌트 질의 — 7.1.9절). null이면 빼지 않는다.
-    struct QueryExclusion {
-        ObjectHandle actor;
-        ObjectHandle component;
-    };
-
     // Jolt 형상(Jolt 좌표·scale이 구워진 형상)으로 하는 shape trace다(TraceShape·TraceBody의 공통
     // 경로 — 7.1.8절). queryKind는 impactNormal 규칙에 쓴다. rotation은 단위 quaternion이다.
+    // local은 시작 자세 기준 형상 자리(Jolt 단위 — 컴포넌트 sweep의 원소, 7.1.21절)다. 결과 위치는
+    // start 기준이다(UE GeomSweepMulti가 원소 transform을 형상 안에 둔다).
     Result<bool> TraceJoltShape(const JPH::Shape& shape, CollisionShapeKind queryKind,
                                 const Vec3d& start, const Vec3d& end, const Quatd& rotation,
                                 const QueryFilter& filter, const QueryParams& params,
                                 TraceMode mode, HitResult* first, Array<HitResult>* all,
-                                const QueryExclusion& exclusion) const noexcept;
+                                const QueryExclusion& exclusion,
+                                const JPH::Mat44& local = JPH::Mat44::sIdentity()) const noexcept;
+
+    // hit 잎 형상의 원소 번호다(7.1.21절 — 표지가 없으면 0).
+    int32 HitElementIndex(const QueryHitRecord& record) const noexcept;
+
+    // body의 하위 형상이 속한 부분 번호다(7.1.22절 — 표지가 없으면 0). 질의 수집기가 부른다(잠금
+    // 없는 body 인터페이스).
+    uint32 PartOfHit(const JPH::BodyID& body, const JPH::SubShapeID& subShape) const noexcept;
+
+    // 칸의 부분이다(번호가 범위 밖이면 루트 — 0).
+    static const BodyPart& PartOf(const BodySlot& slot, uint32 part) noexcept;
+
+    // 부분이 질의 무시 목록·제외에 걸리는지다(7.1.22절).
+    bool IsExcludedPart(const BodyPart& part, const QueryParams& params,
+                        const QueryExclusion& exclusion) const noexcept;
+
+    // overlap 하나를 모은다(All이면 queryHits_에 더한다 — 비우지 않는다). local은 position·rotation
+    // 기준 형상 자리(Jolt 단위)다. 오류: 할당 실패.
+    Result<bool> CollectOverlap(const JPH::Shape& shape, const Vec3d& position,
+                                const Quatd& rotation, const JPH::Mat44& local,
+                                const QueryFilter& filter, const QueryParams& params,
+                                OverlapMode mode, const QueryExclusion& exclusion) const noexcept;
+
+    // All overlap이 모은 queryHits_를 (칸, 부분)마다 합쳐 all 끝에 덧붙이고 비운다. 반환 값은 막는
+    // 겹침이 있는지다. 오류: all 할당 실패.
+    Result<bool> FlushOverlaps(Array<OverlapResult>& all) const noexcept;
 
     // Jolt 형상으로 하는 overlap이다(OverlapShape·OverlapBody의 공통 경로 — 7.1.9절).
     Result<bool> OverlapJoltShape(const JPH::Shape& shape, const Vec3d& position,
@@ -396,10 +487,23 @@ private:
     void ApplyDegreesOfFreedom(BodySlot& slot) noexcept;
     void DetachDofConstraint(BodySlot& slot) noexcept;
 
-    // 형상 값·scale로 형상을 다시 만들어 바꾸고 깨운다(7.1.5절). 실패하면 이전 형상을 둔다.
-    // 오류: 형상 없음·비유한 값(InvalidArgument).
-    Result<void> ReplaceShape(BodySlot& slot, const BodyGeometry& geometry,
+    // 루트 형상 값·scale로 형상을 다시 만들어 바꾸고 깨운다(7.1.5절 — weld 부분은 그대로 둔다).
+    // 실패하면 이전 형상을 둔다. geometry가 slot.geometry 자신이어도 된다. 오류: 형상 없음·비유한
+    // 값(InvalidArgument), 할당 실패.
+    Result<void> ReplaceShape(BodySlot& slot, Span<const BodyShapeElement> geometry,
                               const Vec3d& scale) noexcept;
+
+    // 원소 값·부분 표·scale로 형상을 만들어 칸에 넣는다(성공해야 바꾼다 — 7.1.22절). change가
+    // 깨움·질량 규칙을 고른다. 오류: MakeBodyShape와 같다.
+    Result<void> ApplyShape(BodySlot& slot, Array<BodyShapeElement>&& values,
+                            Array<BodyPart>&& parts, const Vec3d& scale,
+                            ShapeChange change) noexcept;
+
+    // 칸의 부분 표에서 skip 부분을 뺀 원소 값·부분 표 사본을 values·parts 끝에 만든다(범위를 다시
+    // 매긴다). replaceRoot가 null이 아니면 루트 원소를 그것으로 바꾼다. 오류: 할당 실패.
+    Result<void> CopyParts(const BodySlot& slot, usize skip,
+                           const Span<const BodyShapeElement>* replaceRoot,
+                           Array<BodyShapeElement>& values, Array<BodyPart>& parts) const noexcept;
 
     // body user data(칸 번호·세대)의 칸을 결과 목록에 한 번만 넣는다(살아 있는 Dynamic만).
     void MarkMoved(JPH::uint64 userData) noexcept;
@@ -416,8 +520,8 @@ private:
     void AddStepForce(uint32 index, JPH::Body& body, JPH::Vec3Arg force, JPH::Vec3Arg torque,
                       bool everyFixedStep) noexcept;
     // 새 질량 입력 mass로 질량 속성을 다시 넣는다(7.1.18절 — 깨우지 않는다). 질량 중심 이동이
-    // 바뀐 때만 형상(감싸기)을 바꾼다(UE UpdateMassProperties는 형상을 건드리지 않는다 — 접촉
-    // cache를 지키려고). 형상을 만들지 못하면 이전 값을 두고 Warning BodyMassUpdateFailed다.
+    // 바뀐 때만 형상(원소 묶음의 감싸기)을 바꾼다(UE UpdateMassProperties는 형상을 건드리지
+    // 않는다 — 접촉 cache를 지키려고).
     void RebuildMass(BodySlot& slot, const BodyMassValues& mass) noexcept;
     // 칸의 자유도와 gyroscopic 표지(gyroscopicTorque && 회전 bit 잠금 없음)를 body에 넣는다.
     void ApplyGyroscopic(BodySlot& slot, bool requested) noexcept;
@@ -461,6 +565,7 @@ private:
     // PhysicsSystem이 가리키므로 그보다 먼저 생기고 늦게 사라진다.
     ActivationListener activations_;
     ContactCollector contacts_;
+    ElementSimFilter simShapeFilter_;
     JPH::PhysicsSystem system_;
     uint64 steps_ = 0;
     uint64 floatingPointCorrections_ = 0;

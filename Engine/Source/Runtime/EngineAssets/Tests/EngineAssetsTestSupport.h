@@ -22,31 +22,6 @@ using namespace rocks::asset_test;
 
 constexpr uint64 TestFrames = 6;
 
-inline bool WriteWholeFile(StringView path, Span<const uint8> bytes) noexcept {
-    platform::File file;
-    if (!file.Open(platform::PhysicalFileSystem(), path.Data(), path.ByteCount(),
-                   platform::FileOpenMode::CreateAlways)) {
-        return false;
-    }
-
-    auto written = file.WriteAll(bytes.Data(), bytes.Size());
-    return written.status && written.bytes == bytes.Size() && file.Close();
-}
-
-inline bool MakeParent(StringView path) noexcept {
-    usize slash = path.ByteCount();
-    while (slash > 0 && path.Data()[slash - 1] != '/') {
-        --slash;
-    }
-
-    if (slash <= 1) {
-        return true;
-    }
-
-    return static_cast<bool>(
-        platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.Data(), slash - 1));
-}
-
 // 시험 콘텐츠 서명이다(ContentSigning.ko.md 7절 7): 고정 seed 키(keyId TestContentKeyId), scope
 // ("rocks.engine-assets.test", "main"), 최소 버전 TestMinimumContentVersion. 신뢰 정보는 프로세스
 // 수명 동안 유효하다.

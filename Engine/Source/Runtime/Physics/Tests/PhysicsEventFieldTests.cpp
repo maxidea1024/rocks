@@ -25,7 +25,7 @@ constexpr int MaxFallSteps = 90;
 constexpr int MaxEntries = 32;
 constexpr double NormalTolerance = 1.0e-6;
 // HitResult의 리플렉션 값 칸 수다(component·actor는 NATIVE).
-constexpr usize HitResultReflectedFields = 12;
+constexpr usize HitResultReflectedFields = 13;
 // PrimitiveComponent의 이벤트 필드 수다(hit·overlap 셋 — PH4e, 깨움·잠듦·물리 상태 셋 — PH5d).
 constexpr usize PrimitiveComponentEvents = 6;
 

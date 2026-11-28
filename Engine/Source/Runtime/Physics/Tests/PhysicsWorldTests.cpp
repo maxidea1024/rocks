@@ -152,7 +152,8 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
         void SetBodyCollision(PhysicsBodyHandle, const ResolvedCollision&) noexcept override {
         }
 
-        Result<void> SetBodyGeometry(PhysicsBodyHandle, const BodyGeometry&) noexcept override {
+        Result<void> SetBodyGeometry(PhysicsBodyHandle,
+                                     Span<const BodyShapeElement>) noexcept override {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 
@@ -211,10 +212,17 @@ TEST(Physics_WorldSetPhysicsSceneRules) {
             return Result<bool>::Success(false);
         }
 
-        Result<bool> OverlapBody(PhysicsBodyHandle, const Vec3d&, const Quatd&, const QueryFilter&,
-                                 const QueryParams&,
+        Result<bool> OverlapBody(PhysicsBodyHandle, ObjectHandle, const Vec3d&, const Quatd&,
+                                 const QueryFilter&, const QueryParams&,
                                  Array<OverlapResult>&) const noexcept override {
             return Result<bool>::Success(false);
+        }
+
+        Result<void> WeldBody(PhysicsBodyHandle, const BodyWeldDesc&) noexcept override {
+            return Result<void>::Success();
+        }
+
+        void UnweldBody(PhysicsBodyHandle, ObjectHandle) noexcept override {
         }
     };
 

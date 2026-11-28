@@ -1319,6 +1319,76 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::MaterialArtifact::collections",
+      "id": "83db11c94e3f4be0a032e8d1cb8442b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::constants",
+      "id": "ad42c2e07b4c455397eaaad98b524c8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::floatVectors",
+      "id": "38608bc59de9498fa5f753dff26a7d7d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::layoutSignature",
+      "id": "d707a215d3874b179cfba2cca5503f1d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::parameters",
+      "id": "aa8e53956d35484f93a6bafe6dfb8dac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::program",
+      "id": "1aa901b8224741499637f2a9cd66416a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::shaderSetId",
+      "id": "ebee52c1dd1b4c658dc52d1de5049a00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::textures",
+      "id": "62cf283cce6d4577b63800d27e4a2fdf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::traits",
+      "id": "112040282e84424e85a7df87deeffefc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialArtifact::userSceneTextures",
+      "id": "6dd9680abe854fb4bce1cfb09b178327",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialAssetReference::assetId",
       "id": "43140e6f14134d958646553b444939c6",
       "aliases": [],
@@ -1368,6 +1438,83 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::components",
+      "id": "90aaedb454224b338c3f5cb76080a696",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::immediates",
+      "id": "ee5b2acbf931445f87ec026a1a89210f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::op",
+      "id": "3b0c0cdd5b4e42eca22d4e0adf36eaad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::operandCount",
+      "id": "6fdf9d0bd5d54566b523b62122b2ec23",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::operands",
+      "id": "b3993cfa088b4adc91b99d871b596307",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantInstruction::scalar",
+      "id": "2252511277ad4cfa8f129da87669e6c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantSlot::components",
+      "id": "1cb240c2f97d4f0eaf9c2c584039a37a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantSlot::firstComponent",
+      "id": "7b5303a2019940718f7c500fe3813354",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantSlot::instruction",
+      "id": "6309b3fc3a4e4d52b64fc1c0b8983c9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantSlot::kind",
+      "id": "6357f5ca1c8647e08a6ac23d7969adde",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialConstantSlot::vector",
+      "id": "4049662b081b40e8be8013b0c8601885",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialDisplacementTraits::center",
       "id": "de6b74e9e5844e468f1af0297b8ed47f",
       "aliases": [],
@@ -1410,6 +1557,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::material::MaterialFormatArtifact::artifact",
+      "id": "09fd43ecd48e45fbbb4fe15d5bc1d0fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialFormatArtifact::formatId",
+      "id": "ce6510f6184441098fb90d36058b8144",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialFormatArtifact::quality",
+      "id": "0625dcbad16b446b92a7d653c3979062",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::material::MaterialForwardTraits::blendSkyLightCubemaps",
       "id": "39162b1630f242c8851d915b213c14fc",
       "aliases": [],
@@ -1433,6 +1601,62 @@
       "kind": "field",
       "name": "rocks::material::MaterialForwardTraits::preintegratedSimpleIbl",
       "id": "a6a5f09433434773bd51d48479c9ebdf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::defaults",
+      "id": "a9c25e1b48c043b1993985e9fa0081cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::group",
+      "id": "9a6fbfd4411844c2b8f46caa67fed5c7",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::key",
+      "id": "fe4f2ba921f24b8ea1190dcb461ee951",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::name",
+      "id": "44c7fdc8c19948b582758d211f722727",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::primitiveDataIndex",
+      "id": "85c00832e9ea4e0a86a5dac05716c223",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::sortPriority",
+      "id": "77df9a8dff6d444385874f9bae979ac4",
+      "aliases": [],
+      "retired": true
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::texture",
+      "id": "8e2dd72d757d4df89add058b8a407766",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialParameterInfo::type",
+      "id": "f667f0d76edd498197f039cb9a6f6eaf",
       "aliases": [],
       "retired": false
     },
@@ -1580,6 +1804,55 @@
       "kind": "field",
       "name": "rocks::material::MaterialTextureSamplingScale::uvChannel",
       "id": "58aadf9ac82845248ac2e59ec8ce25e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::kind",
+      "id": "89115831d6ca485da1ba758e30852e70",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::logicalSize",
+      "id": "8ef5ba0890964944bb18c63cae08caa7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::parameter",
+      "id": "760074b3cc9d40318dd71fb5187ccff4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::sampler",
+      "id": "f7e2912c39d14677bd95e3f765b21144",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::source",
+      "id": "ae3d24c43cdd4c37a23fc163d666d67d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::texture",
+      "id": "a8ac8050025a413a8f3b25b9f5591d38",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::material::MaterialTextureSlot::wholeResident",
+      "id": "1a0e86ccf693411a963c85e541ec3112",
       "aliases": [],
       "retired": false
     },
@@ -5372,6 +5645,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialArtifact",
+      "id": "596b923ad4f544adb95ff58ddf1413cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialAssetReference",
       "id": "bf66c7a40e3c4d518748ae4a03eb168d",
       "aliases": [],
@@ -5400,8 +5680,50 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialConstantInstruction",
+      "id": "a1fe0fd99de8401380b570d98f7a7c86",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialConstantOp",
+      "id": "2bb88a87ac8548d6bd40540d189e6b76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialConstantScalar",
+      "id": "6a2dff91391543c9a95b604dbaedb4d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialConstantSlot",
+      "id": "b12f6611f53c4989be554db2a3587bf0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialConstantSlotKind",
+      "id": "fd7c18837fe046f88e982f15101ef7c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialDisplacementTraits",
       "id": "8fb758e9ebbb41dba5a33e1a8654d705",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialFormatArtifact",
+      "id": "a990e52bd2314e16a3d2e2d1d2f58f39",
       "aliases": [],
       "retired": false
     },
@@ -5421,6 +5743,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialParameterInfo",
+      "id": "7e482a774ede485abc621ce658674328",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialParameterType",
+      "id": "da2c1b6a08da4a39b91f9dce5a6b91cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialPinValue",
       "id": "7dfc433c722543908d38250d802c283b",
       "aliases": [],
@@ -5435,8 +5771,22 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialQualityLevel",
+      "id": "aec5f1d0ea954a989eb869d9dd641291",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialSampleProperties",
       "id": "1c47acbcc9714389a8dc42d449bc7f37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialSamplerSource",
+      "id": "f1374ea5a9fc46f080c4559c549c7757",
       "aliases": [],
       "retired": false
     },
@@ -5449,8 +5799,29 @@
     },
     {
       "kind": "type",
+      "name": "rocks::material::MaterialTextureKind",
+      "id": "6a117ff3fe024922af94ade69a1c4608",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::material::MaterialTextureSamplingScale",
       "id": "2c3b25a5e7724497a37eacda9f9972bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialTextureSlot",
+      "id": "154baf81c623463d99ab935dcce03c7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::material::MaterialTextureSource",
+      "id": "c773d42fa1dc49a9bb930ba47c81d34c",
       "aliases": [],
       "retired": false
     },

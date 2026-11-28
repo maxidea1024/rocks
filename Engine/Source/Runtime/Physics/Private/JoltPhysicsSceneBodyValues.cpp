@@ -23,27 +23,20 @@ void JoltPhysicsScene::RebuildMass(BodySlot& slot, const BodyMassValues& mass) n
         return;
     }
 
-    auto shape = MakeBodyShape(slot.geometry, slot.scale, shapeOptions_, mass);
-    if (!shape) {
-        Log::Warning(LogPhysics,
-                     "Physics body #{Slot} kept its previous mass; the shape could not be rebuilt "
-                     "({Code})",
-                     static_cast<uint32>(&slot - slots_.Data()), DiagBodyMassUpdateFailed);
-        return;
-    }
-
-    // 질량 중심 이동이 바뀐 때만 감싸기를 바꾼다(형상 교체는 broadphase·접촉 cache를 새로 한다).
-    // 깨우지 않는다(UE UpdateMassProperties).
-    const Vec3d before = ScaledCenterOfMassOffset(slot.mass, slot.scale);
-    const Vec3d after = ScaledCenterOfMassOffset(mass, slot.scale);
-    const bool moved = before != after;
+    // 질량 중심이 옮겨진 때만 감싸기를 바꾼다(형상 교체는 broadphase·접촉 cache를 새로 한다).
+    // 깨우지 않는다(UE UpdateMassProperties). weld body는 부분별 질량을 다시 합친다(7.1.22절).
     slot.mass = mass;
+    slot.parts[0].mass = mass;
+    const BodyMass bodyMass =
+        ComputeBodyMass(slot.inner, slot.elementShapes.View(), slot.parts.View(), slot.scale);
+    const bool moved = bodyMass.shift != slot.massShift;
     if (moved) {
-        system_.GetBodyInterface().SetShape(slot.body, shape.Value().shape.GetPtr(), false,
+        system_.GetBodyInterface().SetShape(slot.body, bodyMass.shape.GetPtr(), false,
                                             JPH::EActivation::DontActivate);
     }
 
-    slot.massProperties = ComputeBodyMass(*shape.Value().inner, slot.mass, slot.scale);
+    slot.massShift = bodyMass.shift;
+    slot.massProperties = bodyMass.properties;
     {
         JPH::BodyLockWrite lock(system_.GetBodyLockInterface(), slot.body);
         if (lock.Succeeded()) {

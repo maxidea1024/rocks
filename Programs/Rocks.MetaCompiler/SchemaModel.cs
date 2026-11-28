@@ -952,6 +952,9 @@ internal sealed class ClassModel
     // 이 타입이 선언한 리플렉션 함수다(클래스만 — FunctionReflection FD1, 선언 순서). import 타입은 descriptor의 함수(이름·ID·flag)다.
     public List<FunctionModel> Functions { get; } = [];
 
+    // 이 모듈 클래스가 선언한 ROCKS_SETTER·ROCKS_GETTER다(Docs/Design/ChangeNotification.ko.md CN-D13, 선언 순서). import 타입은 비어 있다.
+    public List<AccessorModel> Accessors { get; } = [];
+
     // Sparks 노출 지정자다(Docs/Design/SparksBinding.ko.md B1): 이 모듈 타입이 선언에 직접 쓴 값이다(enum은 Type만, import 타입은 None).
     public ScriptTypeSpec Script { get; init; } = ScriptTypeSpec.None;
 
@@ -962,6 +965,10 @@ internal sealed class ClassModel
     // scriptExtensible은 노출된 타입에서 이 값이다(Docs/Design/SparksBinding.ko.md B1).
     public bool ScriptExtensible { get; set; }
 }
+
+// ROCKS_SETTER·ROCKS_GETTER 하나다(CN-D13): Name은 C++ 함수 이름, Field는 대상 필드 C++ 이름, Setter는 setter인지(거짓이면 getter)다.
+// setter는 생성 소스가 정의를 쓰고, getter는 매크로가 인라인 정의한다(메타 컴파일러는 대상만 검사한다).
+internal sealed record AccessorModel(string Name, string Field, bool Setter, SourceSite Site);
 
 // 펼친 선언 subobject 표의 항목 하나다(Docs/Design/Prefab 10.2절). Id는 소유 필드의 FieldId(= SubobjectGuid), Field는 소유 필드 C++
 // 이름(생성 접근자), ToolName은 객체 이름이 되는 실효 도구 이름, Type은 만드는 클래스의 정규 이름, AttachParent는 펼친 표 index(-1 = 붙이지

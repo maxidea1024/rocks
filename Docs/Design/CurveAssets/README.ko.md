@@ -2,6 +2,8 @@
 
 개정 4(2026-11-27). [컴포넌트 도입](../ComponentCatalog/04-Prerequisites.ko.md) CR10의 설계다. 커브 값 타입 층([CurveData](../CurveData/README.ko.md) — `TangentCurve`·`PlainCurve`, CV1–CV10 완료) 위에 UE 5.8의 커브 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve` 계열·`FCurveTableRowHandle`·`UCurveLinearColorAtlas`)을 들인다. CurveData 14절이 정한 경계를 따른다.
 
+> **콘텐츠 해시 전환(예정, [ContentHash](../ContentHash.ko.md), 2026-11-28).** 이 문서가 콘텐츠 주소·동일성 판정으로 정한 SHA-256 값(커브 atlas 쿠킹 해시)은 `ContentHash`(BLAKE3-256, 32 byte)로 바뀐다. 하위 호환 없이 일괄 B(CH-B3b)에서 한 번에 바뀌고, 그때 본문과 형식 버전을 고친다. 외부 무결성·프로토콜 SHA-256(CH5)은 남는다.
+
 UE 경로 약어: `RE/` = `Engine/Source/Runtime/Engine/`, `UEd/` = `Engine/Source/Editor/UnrealEd/`(UE 5.8.4 — 로컬 클론 `C:\github\UnrealEngine`).
 
 ## 목차

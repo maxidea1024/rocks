@@ -19,6 +19,8 @@ constexpr uint64 FunctionAssetHigh = 0x4d4146554e435431ull;
 constexpr Guid FunctionAssetF{FunctionAssetHigh, 1};
 constexpr Guid FunctionAssetG{FunctionAssetHigh, 2};
 constexpr Guid SampleAssetM{FunctionAssetHigh, 3};
+// 파라미터를 가진 MaterialSample 참조 머티리얼이다.
+constexpr Guid SampleAssetN{FunctionAssetHigh, 4};
 constexpr Guid FunctionInputIdIn{0x4d41464e494e5054ull, 1};
 constexpr Guid FunctionOutputIdOut{0x4d41464e4f555450ull, 1};
 constexpr Guid FunctionOutputIdSecond{0x4d41464e4f555450ull, 2};
@@ -356,6 +358,29 @@ TEST(MaterialFunctions_ParameterScopes) {
             CHECK(!(item.id == FunctionParameterId));
         }
 
+        // 출처(12.8절 MS3d1): 소유는 함수 에셋, 공유면 Global·빈 경로, 아니면 FunctionCall·호출
+        // 노드 하나(두 호출이 서로 다르다).
+        Guid seenCalls[2] = {};
+        usize seen = 0;
+        for (const IrParameter& item : out.module.Parameters()) {
+            const IrParameterOrigin* origin = out.module.FindParameterOrigin(item.id);
+            REQUIRE(origin != nullptr);
+            CHECK(origin->owner == FunctionAssetF);
+            CHECK(origin->parameterId == FunctionParameterId);
+            CHECK(origin->name.View() == StringView("P"));
+            if (shared) {
+                CHECK(origin->scope == ParameterScopeKind::Global);
+                CHECK(origin->callPath.IsEmpty());
+            } else {
+                CHECK(origin->scope == ParameterScopeKind::FunctionCall);
+                REQUIRE(origin->callPath.Size() == 1);
+                CHECK((origin->callPath[0] == first || origin->callPath[0] == second));
+                seenCalls[seen++] = origin->callPath[0];
+            }
+        }
+
+        CHECK((shared || !(seenCalls[0] == seenCalls[1])));
+
         // 같은 함수의 정체는 번역마다 같다(쿠킹 키·인스턴스 override).
         MaterialTranslation again(env.allocator);
         REQUIRE(TranslateWithSources(main, &sources, again));
@@ -386,6 +411,68 @@ TEST(MaterialFunctions_ParameterScopes) {
         REQUIRE(TranslateWithSources(main, &sources, out));
         CHECK(HasError(out, MaterialDiagnosticCode::ParameterConflict) == shared);
     }
+}
+
+// 출처의 호출 경로(12.8절 MS3d1): main → G(호출 g) → F(G 안 호출 f) → 파라미터면 callPath는 원본
+// 노드 id [g, f]이고(사본 id가 아니다) 소유는 F다. 같은 F를 G 밖에서 직접 부르면 경로가 달라 정체도
+// 다르다. 이름이 다른 같은 ParameterId는 ParameterConflict다.
+TEST(MaterialFunctions_ParameterOriginPath) {
+    TranslatorEnv env;
+    REQUIRE(env.ready);
+    const Guid outputs[] = {FunctionOutputIdOut};
+    FunctionFixture inner(env, FunctionAssetF, "F");
+    const Guid parameter = AddScalarParameter(inner.graph, FunctionParameterId, "P", false);
+    const Guid innerOutput = AddFunctionOutput(inner.graph, FunctionOutputIdOut);
+    inner.graph.Connect(parameter, "Result", innerOutput, "A");
+    FunctionFixture outer(env, FunctionAssetG, "G");
+    const Guid innerCall = AddCall(outer.graph, FunctionAssetF, {}, outputs);
+    const Guid outerOutput = AddFunctionOutput(outer.graph, FunctionOutputIdOut);
+    outer.graph.Connect(innerCall, PinKey(env, FunctionOutputIdOut), outerOutput, "A");
+    MemorySources sources(env.allocator);
+    REQUIRE(sources.AddFunction(inner.snapshot));
+    REQUIRE(sources.AddFunction(outer.snapshot));
+    GraphFixture main(env);
+    const Guid outerCall = AddCall(main, FunctionAssetG, {}, outputs);
+    const Guid directCall = AddCall(main, FunctionAssetF, {}, outputs);
+    const Guid add = main.Add("Material.Add");
+    main.Connect(outerCall, PinKey(env, FunctionOutputIdOut), add, "A");
+    main.Connect(directCall, PinKey(env, FunctionOutputIdOut), add, "B");
+    EmitEmissive(main, add, "Result");
+    MaterialTranslation out(env.allocator);
+    REQUIRE(TranslateWithSources(main, &sources, out));
+    REQUIRE(out.succeeded);
+    REQUIRE(out.module.Parameters().Size() == 2);
+    REQUIRE(out.module.ParameterOrigins().Size() == 2);
+    bool nestedSeen = false;
+    bool directSeen = false;
+    for (const IrParameterOrigin& origin : out.module.ParameterOrigins()) {
+        CHECK(origin.owner == FunctionAssetF);
+        CHECK(origin.scope == ParameterScopeKind::FunctionCall);
+        if (origin.callPath.Size() == 2) {
+            nestedSeen = true;
+            CHECK(origin.callPath[0] == outerCall);
+            CHECK(origin.callPath[1] == innerCall);
+        } else {
+            REQUIRE(origin.callPath.Size() == 1);
+            directSeen = true;
+            CHECK(origin.callPath[0] == directCall);
+        }
+    }
+
+    CHECK(nestedSeen);
+    CHECK(directSeen);
+
+    // 주 그래프 파라미터 둘이 같은 ParameterId·같은 기본값인데 이름이 다르면 충돌이다.
+    GraphFixture renamed(env);
+    const Guid first = AddScalarParameter(renamed, FunctionParameterId, "P", false);
+    const Guid second = AddScalarParameter(renamed, FunctionParameterId, "Q", false);
+    const Guid sum = renamed.Add("Material.Add");
+    renamed.Connect(first, "Result", sum, "A");
+    renamed.Connect(second, "Result", sum, "B");
+    EmitEmissive(renamed, sum, "Result");
+    MaterialTranslation renamedOut(env.allocator);
+    REQUIRE(TranslateWithSources(renamed, &sources, renamedOut));
+    CHECK(HasError(renamedOut, MaterialDiagnosticCode::ParameterConflict));
 }
 
 // MaterialSample은 참조 머티리얼 출력 노드 Surface의 그래프를 펼친다(그 출력 노드·custom 출력은 이
@@ -424,6 +511,33 @@ TEST(MaterialFunctions_MaterialSample) {
     CHECK(HasOnlyErrorAt(selfOut, MaterialDiagnosticCode::FunctionCycle, selfSample));
     CHECK(HasMessage(
         selfOut, "Material Sample cannot reference this material or one of it's child instances."));
+
+    // 참조 머티리얼의 파라미터는 출처 소유가 그 머티리얼, 경로는 MaterialSample 노드다(12.8절
+    // MS3d1).
+    GraphFixture parameterized(env);
+    EmitEmissive(parameterized,
+                 AddScalarParameter(parameterized, FunctionParameterId, "Sampled", false),
+                 "Result");
+    MaterialGraphSnapshot parameterSnapshot;
+    parameterSnapshot.asset = SampleAssetN;
+    parameterSnapshot.name = "N";
+    parameterSnapshot.document = &parameterized.document;
+    REQUIRE(sources.AddMaterial(parameterSnapshot));
+    GraphFixture viaSample(env);
+    MaterialSampleProperties viaProperties;
+    viaProperties.materialReference.assetId = AssetId{SampleAssetN};
+    const Guid via = viaSample.Add("Material.MaterialSample", env.Save(viaProperties));
+    viaSample.Connect(via, "Front Material", OutputNodeId, "Surface");
+    MaterialTranslation viaOut(env.allocator);
+    REQUIRE(TranslateWithSources(viaSample, &sources, viaOut));
+    REQUIRE(viaOut.succeeded);
+    REQUIRE(viaOut.module.ParameterOrigins().Size() == 1);
+    const IrParameterOrigin& sampled = viaOut.module.ParameterOrigins()[0];
+    CHECK(sampled.owner == SampleAssetN);
+    CHECK(sampled.parameterId == FunctionParameterId);
+    CHECK(sampled.scope == ParameterScopeKind::FunctionCall);
+    REQUIRE(sampled.callPath.Size() == 1);
+    CHECK(sampled.callPath[0] == via);
 }
 
 // 호출 입력이 그 호출의 출력에 기대면 순환(V2)이다.
