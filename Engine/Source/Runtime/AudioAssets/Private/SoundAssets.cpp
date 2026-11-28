@@ -73,8 +73,6 @@ Result<void> FlattenBusSends(const StructRefArray<MixBusSend>& sends, bool postO
 
 } // namespace
 
-using audio_assets_detail::FlattenCurve;
-
 Result<SoundAttenuation>
 AttenuationSettings::ToSnapshot(Allocator& allocator, ObjectRegistry& registry,
                                 const ObjectAccessContext& access) const noexcept {
@@ -150,7 +148,8 @@ AttenuationSettings::ToSnapshot(Allocator& allocator, ObjectRegistry& registry,
             continue;
         }
 
-        if (auto flattened = FlattenCurve(*curve.source, allocator, registry, access, *curve.out);
+        if (auto flattened = audio_assets_detail::FlattenCurve(*curve.source, allocator, registry,
+                                                               access, *curve.out);
             !flattened) {
             return Made::Failure(flattened.Error());
         }
@@ -500,14 +499,20 @@ Result<void> SoundClip::LoadCookedPcm(Allocator& allocator, SoundBulkReader read
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    auto read = reader(context, platformData);
+    Array<uint8> joined(allocator);
+    auto read = ReadResidentBytes(reader, context, joined);
     if (!read) {
         return Result<void>::Failure(read.Error());
     }
 
+    return LoadPcmBytes(allocator, read.Value(), decoders);
+}
+
+Result<void> SoundClip::LoadPcmBytes(Allocator& allocator, Span<const uint8> bytes,
+                                     const audio::AudioDecoderTable& decoders) noexcept {
     // 형식 위반은 Parse가 CorruptData로, 모르는 판·codec은 Unsupported로 알린다(3.38절 — 그대로
     // 넘긴다).
-    auto view = audio::AudioPlatformDataView::Parse(read.Value());
+    auto view = audio::AudioPlatformDataView::Parse(bytes);
     if (!view) {
         return Result<void>::Failure(view.Error());
     }
@@ -576,18 +581,29 @@ Result<void> SoundClip::LoadCookedStream(Allocator& allocator, SoundBulkReader r
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    auto read = reader(context, platformData);
+    Array<uint8> joined(allocator);
+    auto read = ReadResidentBytes(reader, context, joined);
     if (!read) {
         return Result<void>::Failure(read.Error());
     }
 
+    return LoadStreamBytes(allocator, read.Value(), decoders);
+}
+
+Result<void> SoundClip::LoadStreamBytes(Allocator& allocator, Span<const uint8> bytes,
+                                        const audio::AudioDecoderTable& decoders) noexcept {
     // 복사·해석·모든 청크 검증(3.40.2절 — 공급자의 "검증된 payload" 계약을 여기서 만든다).
-    auto made = SoundStreamData::TryCreate(allocator, read.Value());
+    auto made = SoundStreamData::TryCreate(allocator, bytes);
     if (!made) {
         return Result<void>::Failure(made.Error());
     }
 
-    const SoundStreamData& data = *made.Value();
+    return AdoptStream(Move(made.Value()), decoders);
+}
+
+Result<void> SoundClip::AdoptStream(SharedPtr<SoundStreamData> made,
+                                    const audio::AudioDecoderTable& decoders) noexcept {
+    const SoundStreamData& data = *made;
     if (data.ChannelCount() != channelCount || data.SampleRate() != sampleRate ||
         data.FrameCount() != frameCount) {
         return Result<void>::Failure(ErrorCode::CorruptData);
@@ -597,7 +613,7 @@ Result<void> SoundClip::LoadCookedStream(Allocator& allocator, SoundBulkReader r
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
-    stream_ = SharedPtr<const SoundStreamData>(Move(made.Value()));
+    stream_ = SharedPtr<const SoundStreamData>(Move(made));
     pcm_ = SharedPtr<const SoundPcm>{};
     ++pcmRevision_;
     pcmKey_ = SoundPcmKey{SoundPcmOrigin::CookedStream,
@@ -629,23 +645,104 @@ SoundClip::EffectiveLoadingBehavior(const SoundCookedLoadOptions& options) const
                : options.defaultLoading;
 }
 
-Result<void> SoundClip::LoadCooked(Allocator& allocator, SoundBulkReader reader, void* context,
-                                   const audio::AudioDecoderTable& decoders,
-                                   const SoundCookedLoadOptions& options) noexcept {
-    // AU6a는 동작마다 디코드 방식이 같다(AU6b의 청크 캐시가 동작을 쓴다).
-    (void)options;
-    // 짧은 loop는 바퀴마다 디코더를 다시 여는 비용이 커서 통째로 푼다(3.40.2절).
+bool SoundClip::UsesWholeDecode() const noexcept {
     uint32 loopBegin = 0;
     uint32 loopEnd = 0;
     EffectiveLoop(loopBegin, loopEnd);
-    const uint64 loopLength = loopBegin == 0 && loopEnd == 0 ? frameCount : loopEnd - loopBegin;
-    const bool shortLoop =
-        looping && loopLength < static_cast<uint64>(sampleRate) * StreamMinLoopSeconds;
-    if (shortLoop) {
-        return LoadCookedPcm(allocator, reader, context, decoders);
+    return IsWholeDecodeLoop(looping, loopBegin, loopEnd, frameCount, sampleRate);
+}
+
+bool SoundClip::IsWholeDecodeLoop(bool looping, uint32 loopBegin, uint32 loopEnd, uint32 frames,
+                                  uint32 sampleRate) noexcept {
+    // 짧은 loop는 바퀴마다 디코더를 다시 여는 비용이 커서 통째로 푼다(3.40.2절).
+    const uint64 loopLength = loopBegin == 0 && loopEnd == 0 ? frames : loopEnd - loopBegin;
+    return looping && loopLength < static_cast<uint64>(sampleRate) * StreamMinLoopSeconds;
+}
+
+bool SoundClip::HasCookedData() const noexcept {
+    const SoundPcmOrigin origin =
+        UsesWholeDecode() ? SoundPcmOrigin::Cooked : SoundPcmOrigin::CookedStream;
+    return !platformData.IsEmpty() &&
+           SameKey(pcmKey_, origin, platformData, SoundSourceStorage::None, channelCount,
+                   sampleRate, frameCount);
+}
+
+Result<void> SoundClip::LoadCooked(Allocator& allocator, SoundBulkReader reader, void* context,
+                                   const audio::AudioDecoderTable& decoders,
+                                   const SoundCookedLoadOptions& options,
+                                   SharedPtr<SoundStreamedPayload> streamed) noexcept {
+    // 로딩 동작은 엔진 로드 도우미의 청크 1 후크가 쓴다(3.46.5절).
+    (void)options;
+    if (!streamed) {
+        // 상주 경로다. payload가 패키지 안 bulk(sidecar 출력이 없는 쿠킹)여도 두 bulk를 이어
+        // 읽는다.
+        return UsesWholeDecode() ? LoadCookedPcm(allocator, reader, context, decoders)
+                                 : LoadCookedStream(allocator, reader, context, decoders);
     }
 
-    return LoadCookedStream(allocator, reader, context, decoders);
+    // sidecar 경로다(3.46.3절): 메타 + 청크 0만 메모리에 둔다. sidecar가 없는 clip(패키지만)이나
+    // 통째 디코드 clip에는 streamed를 줄 수 없다.
+    if (streamedPayload.IsEmpty() || UsesWholeDecode()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (platformData.IsEmpty() || reader == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotReady);
+    }
+
+    if (SameKey(pcmKey_, SoundPcmOrigin::CookedStream, platformData, SoundSourceStorage::None,
+                channelCount, sampleRate, frameCount)) {
+        return Result<void>::Success();
+    }
+
+    if (channelCount > audio::MaxClipChannels) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto prefix = reader(context, platformData);
+    if (!prefix) {
+        return Result<void>::Failure(prefix.Error());
+    }
+
+    auto made = SoundStreamData::TryCreateStreamed(allocator, prefix.Value(), Move(streamed));
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    return AdoptStream(Move(made.Value()), decoders);
+}
+
+Result<Span<const uint8>> SoundClip::ReadResidentBytes(SoundBulkReader reader, void* context,
+                                                       Array<uint8>& joined) const noexcept {
+    using Read = Result<Span<const uint8>>;
+    auto prefix = reader(context, platformData);
+    if (!prefix || streamedPayload.IsEmpty()) {
+        return prefix;
+    }
+
+    // payload가 패키지 안 bulk다(sidecar 출력이 없는 쿠킹 — 3.46.3절): 메타 뒤에 payload 전체를
+    // 이어 붙인다. prefix를 먼저 해석해 메타 길이를 정한다(prefix의 청크 0은 payload 쪽과 같은
+    // byte다).
+    auto meta = audio::AudioPlatformDataView::Parse(prefix.Value());
+    if (!meta) {
+        return Read::Failure(meta.Error());
+    }
+
+    if (auto copied = joined.TryAppend(prefix.Value().Slice(0, meta.Value().MetaBytes()));
+        !copied) {
+        return Read::Failure(copied.Error());
+    }
+
+    auto payload = reader(context, streamedPayload);
+    if (!payload) {
+        return Read::Failure(payload.Error());
+    }
+
+    if (auto copied = joined.TryAppend(payload.Value()); !copied) {
+        return Read::Failure(copied.Error());
+    }
+
+    return Read::Success(joined.View());
 }
 
 } // namespace rocks

@@ -172,6 +172,8 @@ bool PrimitiveComponent::WeldInto(ObjectHandle root, PhysicsBodyHandle rootBody,
         desc.geometry = geometry.View();
         desc.relative = WeldRelativeTransform(BodyWorldTransform(), rootWorld);
         desc.collisionEnabled = resolved.Value().collisionEnabled;
+        desc.objectType = resolved.Value().objectType;
+        desc.responses = resolved.Value().responses;
         desc.settings = &bodySettings_;
         welded = scene->WeldBody(rootBody, desc);
     }

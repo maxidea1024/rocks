@@ -528,4 +528,45 @@ TEST(PhysicsWeld_NoAutoWeldOutsideGameWorld) {
     CHECK(!IsWelded(fixture, child));
 }
 
+// weld 컴포넌트의 object type 변경은 다시 weld해 부분 층을 바꾼다(UE UpdatePhysicsFilterData →
+// WeldParent — 7.1.24절).
+TEST(PhysicsWeld_ChildObjectTypeRewelds) {
+    BodyWorldFixture fixture;
+    REQUIRE(StartWorld(fixture));
+    ObjectHandle root;
+    ObjectHandle child;
+    REQUIRE(SpawnPair(fixture, root, child, true, true));
+    REQUIRE(Apply<PrimitiveComponent>(*fixture.world, child, [](PrimitiveComponent& box) noexcept {
+        (void)box.SetCollisionObjectType(CollisionChannel::Pawn);
+    }));
+    CHECK(IsWelded(fixture, child));
+    HitResult hit;
+    REQUIRE(LineTraceFirst(
+        *fixture.world, Vec3d(0.0, 0.0, TraceTop), Vec3d(0.0, 0.0, -TraceTop),
+        QueryFilter::ByObjectTypes(CollisionObjectTypeBit(CollisionChannel::Pawn)), {}, hit));
+    CHECK(hit.component == child);
+    REQUIRE(TraceDown(fixture, 0.0, hit));
+    CHECK(hit.component == root);
+}
+
+// weld 컴포넌트의 응답·알림 setter도 다시 weld한다(UE UpdatePhysicsFilterData → WeldParent):
+// Visibility를 무시하면 Visibility 질의가 자식을 지나 루트를 맞힌다.
+TEST(PhysicsWeld_ChildResponseAndNotifyRewelds) {
+    BodyWorldFixture fixture;
+    REQUIRE(StartWorld(fixture));
+    ObjectHandle root;
+    ObjectHandle child;
+    REQUIRE(SpawnPair(fixture, root, child, true, true));
+    REQUIRE(Apply<PrimitiveComponent>(*fixture.world, child, [](PrimitiveComponent& box) noexcept {
+        (void)box.SetCollisionResponseToChannel(CollisionChannel::Visibility,
+                                                CollisionResponse::Ignore);
+        box.SetNotifyRigidBodyCollision(true);
+    }));
+    CHECK(IsWelded(fixture, child));
+    HitResult hit;
+    REQUIRE(LineTraceFirst(*fixture.world, Vec3d(0.0, 0.0, TraceTop), Vec3d(0.0, 0.0, -TraceTop),
+                           QueryFilter::ByChannel(CollisionChannel::Visibility), {}, hit));
+    CHECK(hit.component == root);
+}
+
 } // namespace physics_weld_tests_file

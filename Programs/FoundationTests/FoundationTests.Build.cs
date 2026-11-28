@@ -140,8 +140,9 @@ public abstract class TestsModule : ModuleRules
         // (InputActions IA6b) cook input context packages with the asset test scene support.
         ["Gameplay"] = ["AssetTestFixtures", "ConfigTestFixtures"],
         ["EngineAssets"] = ["AssetTestFixtures", "ConfigTestFixtures", "Curves"],
-        // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars).
-        ["EngineAudio"] = ["ConfigTestFixtures", "AudioTools", "AudioOpus"],
+        // The EngineAudio settings test builds an engine on the Config test fixture context (audio.* CVars); the sidecar tests (AudioSystem 3.46 AU6b)
+        // open a streamed bulk of an AssetManager test scene (AssetRuntime ManagerTestSupport.h uses the asset fixture types).
+        ["EngineAudio"] = ["ConfigTestFixtures", "AudioTools", "AudioOpus", "AssetTestFixtures"],
         ["ImageCodec"] = ["Compression"],
         // Input asset tests (InputActions IA6a) cook input asset packages with the asset test scene support; the function binding tests
         // (IA7) bind to the reflected handlers of InputActionsTestFixtures.
@@ -209,6 +210,7 @@ public abstract class TestsModule : ModuleRules
         ["AssetCooker"] = ["AssetRuntime"],
         ["AssetDatabase"] = ["AssetRuntime"],
         ["EngineAssets"] = ["AssetRuntime"],
+        ["EngineAudio"] = ["AssetRuntime"],
         ["Gameplay"] = ["AssetRuntime"],
         ["InputActions"] = ["AssetRuntime"],
         ["WorldIntegration"] = ["AssetRuntime"],

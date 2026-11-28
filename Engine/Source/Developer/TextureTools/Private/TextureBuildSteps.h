@@ -106,13 +106,13 @@ ROCKS_TEXTURETOOLS_API uint32 MipChainLength(const MipChainParams& params, uint3
 // base 다음 mip을 최대 depth개(1×1에서 멈춤) out 뒤에 더한다(UE GenerateMipChain — 평균 사슬·alpha
 // coverage·Volume 두 slice·테두리 다시 쓰기, 12.18 TP1 3–7). base는 out 안에 있어도 되므로 out을
 // 늘리지 않는다 — 호출자가 더할 mip 수만큼 자리를 예약해 둔다(모자라면 InvalidArgument). 오류: 할당
-// 실패.
-ROCKS_TEXTURETOOLS_API Result<void> GenerateMipChain(Allocator& allocator,
-                                                     const MipChainParams& params,
-                                                     const Level& base, uint32 depth,
-                                                     Array<Level>& out) noexcept;
-// 법선을 정규화한다(UE NormalizeMip).
-void NormalizeNormals(Level& level) noexcept;
+// 실패. 대상 행·coverage 행을 execution으로 나눠 돈다(결과는 분할과 무관 — 12.18 TP1b).
+ROCKS_TEXTURETOOLS_API Result<void>
+GenerateMipChain(Allocator& allocator, const MipChainParams& params, const Level& base,
+                 uint32 depth, Array<Level>& out,
+                 const TextureBuildExecution& execution = {}) noexcept;
+// 법선을 정규화한다(UE NormalizeMip — (평면, 행) batch 병렬, 12.18 TP1b). 오류: 병렬 실행 오류.
+Result<void> NormalizeNormals(Level& level, const TextureBuildExecution& execution = {}) noexcept;
 
 } // namespace build_mips
 

@@ -135,3 +135,27 @@ UE는 weld한 자식 body의 형상을 루트 입자에 더하고(`FBodyInstance
 
 **시험(`Physics/Tests/PhysicsWeldTests.cpp` — 컴포넌트 경로).** `WeldTo`·같은 부모 다시 붙이기, weld 자식을 가진 컴포넌트를 다른 루트에 weld(자손 이동), body 없는 가운데 컴포넌트(루트 상태 다시 만들기·가운데 떼기), 풀기 연쇄, 충돌 켬 왕복·부분 충돌 켬, weld 자식 시뮬레이션 켬·형상 변경·sweep hit 없음, Kinematic 루트에 `weldSimulatedBodies`(자식 시뮬레이션 꺼짐), 게임 World 밖 autoWeld 없음, 그리고 시뮬레이션하는 루트 + `autoWeld` 자식: 자식 body 없음·`IsWelded`·질의 hit 컴포넌트가 자식, 루트가 Kinematic이면 weld 안 함, QueryOnly 자식은 weld 안 함, `weldSimulatedBodies` 부착으로 weld, 떼기·자식 파괴·루트 상태 파괴로 unweld(자식 body 다시 생김), 루트 시뮬레이션 켬으로 `ApplyWeldOnChildren`, 직접 이동하면 다시 weld(새 자리 hit), 부모 이동은 다시 weld하지 않음, API 전달(자식 `AddImpulse`가 루트 속도를 바꿈, 자식 `SetEnableGravity`가 루트 값을 바꿈, `GetMass`는 루트 질량), weld 자식 overlap, 깨움 이벤트 전달.
 
+### 7.1.24 PH6b3 구현 세부(2026-11-28)
+
+UE는 weld body의 형상마다 원래 body 값으로 filter data를 만든다(`FBodyInstance::UpdatePhysicsFilterData` — weld body면 `WeldParent`로 가고, 루트가 형상마다 `GetOriginalBodyInstance`의 object type·응답·알림 표지로 다시 만든다, `BodyInstance.cpp:1003–1100`). Rocks는 body object 층이 하나라 부분별 층을 칸에 두고 잎 단계 필터가 판정한다.
+
+**부분 층.** 부분마다 object 층을 둔다(`ObjectLayerFor(부분 실효 충돌, 루트 운동 종류, 부분 응답 묶음)` — 7.1.6절과 같은 식). 루트 부분은 body 칸의 응답 묶음을 쓰고, weld 부분은 응답 묶음 표에서 따로 얻고(`Acquire`) 부분이 빠질 때 놓는다(`Release`). 부분 알림 표지는 그 body 값의 `notifyRigidBodyCollision`이다.
+
+**compound 층.** 부분이 둘 이상이면 body object 층을 compound 층으로 둔다: 참여 bit 셋 모두(Physics·Query·Probe — 충돌 켬 값에서는 나오지 않는 조합, 6.1절 bit 배치는 그대로), 운동 묶음은 루트 것, 채널·응답 묶음 0. 판정은 이렇다.
+- 쌍 필터(`ObjectLayerPairFilter`): 한쪽이 compound면 둘 다 Static이 아닐 때 통과(잎 단계로 미룸).
+- 질의 층 필터(`QueryLayerFilter`): compound면 통과(잎 단계로 미룸).
+- broadphase: 운동 묶음 그대로(Simulates 참).
+- body 단위 probe 판정(`IsProbeBody`)은 compound를 probe로 보지 않는다.
+부분이 하나로 돌아가면(unweld) 루트 층으로 되돌린다. 루트 충돌·부분 구성이 바뀌면 부분 층과 body 층을 다시 만든다(Kinematic↔Dynamic은 운동 묶음이 같아 층이 그대로, Static 전환은 body를 다시 만든다). 시뮬레이션하는 부분이 없으면 compound 층의 운동 묶음은 QueryOnly다(broadphase·쌍 필터가 바로 거른다). 층이 바뀌면 그 body의 Jolt 접촉 cache를 버린다(`InvalidateContactCache` — cache가 맞으면 Jolt가 narrowphase와 `SimShapeFilter`를 건너뛰어 옛 접촉이 이어진다, `PhysicsSystem.cpp:1098–1099`). manifold reduction은 잎의 실효 충돌 켬(부분 값 ∩ 원소 값 — 루트 포함)이 섞이면 끈다(7.1.21절 규칙을 부분까지).
+
+**잎 단계 판정.** 잎 user data의 부분 번호로 부분 층을 찾는다(body user data → 칸 → `parts[part].layer`. step 중 worker가 읽는다 — 칸 쓰기는 step 밖이다).
+- 질의: 잎마다 부분 층으로 `ClassifyQueryHit`(채널·응답·막음 판정)를 다시 한다 — 원소 필터가 거르고(keep 거짓), 수집기의 막음·자르기 판정도 부분 층으로 한다.
+- 시뮬레이션: 두 잎의 실효 시뮬레이션(부분 층 참여 ∩ 원소 값)과, 한쪽이라도 compound body면 두 부분 층의 응답 쌍(서로 Block — 6.2절)을 본다.
+- probe: 잎의 실효 probe를 부분 층으로 정한다.
+
+**접촉 알림.** body 칸의 알림 표지는 부분 가운데 하나라도 알리면 참이다(listener가 모을지 정한다). hit는 body 쌍의 받는 쪽마다 하나이고, 그 쪽 부분이 알림 표지를 켠 첫 통지(정렬 순)로 컴포넌트·점·법선·probe를 정한다(UE 형상 filter data의 알림 bit — 원래 body 값). 그런 통지가 없으면 그 쪽 hit는 없다. probe 통지면 충격량 0이고 문턱으로 거르지 않는다.
+
+**World.** `BodyWeldDesc`에 `objectType`·`responses`(`collisionEnabled`와 함께 자식 실효 충돌)와 `settings`(알림 표지). weld된 컴포넌트의 응답·object type·알림 표지 변경은 다시 weld한다(UE `UpdatePhysicsFilterData`가 `WeldParent`로 간다).
+
+**시험(`PhysicsWeldSceneTests.cpp`·`PhysicsWeldTests.cpp`).** 응답 묶음 참조 수 균형(weld·같은 부분 다시 weld·unweld·삭제 전후 `Stats().responseSets`), 둘 다 닿고 자식만 알림 → 자식 hit, 루트 응답 변경의 접촉 cache 무효화(놓인 compound가 바닥을 지남), shape sweep·overlap의 부분 object type, 자식 object type이 루트와 다를 때 질의 ObjectTypes 필터가 부분마다 갈림(자식 채널만 → 자식 hit, 루트 채널만 → 루트 hit), 채널 질의 응답(자식이 그 채널을 Ignore → 자식 원소를 지나 루트 hit), 시뮬레이션 쌍(자식이 바닥 채널을 Ignore → 자식은 바닥을 지나고 루트는 막힘), 부분 알림 표지(자식만 알림 → 자식 접촉 hit만), unweld 뒤 루트 층 복귀, weld 컴포넌트 응답 setter의 다시 weld.
+

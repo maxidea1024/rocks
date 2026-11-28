@@ -909,16 +909,21 @@ BodyMass ComputeBodyMass(const JPH::RefConst<JPH::Shape>& inner, Span<const Elem
 
 JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion motion,
                                 uint32 responseSet) noexcept {
+    return ObjectLayerFor(collision.collisionEnabled, collision.objectType, motion, responseSet);
+}
+
+JPH::ObjectLayer ObjectLayerFor(CollisionEnabled enabled, CollisionChannel objectType,
+                                BodyMotion motion, uint32 responseSet) noexcept {
     uint32 participation = 0;
-    if (CollisionEnabledHasPhysics(collision.collisionEnabled)) {
+    if (CollisionEnabledHasPhysics(enabled)) {
         participation |= LayerParticipationPhysics;
     }
 
-    if (CollisionEnabledHasQuery(collision.collisionEnabled)) {
+    if (CollisionEnabledHasQuery(enabled)) {
         participation |= LayerParticipationQuery;
     }
 
-    if (CollisionEnabledHasProbe(collision.collisionEnabled)) {
+    if (CollisionEnabledHasProbe(enabled)) {
         participation |= LayerParticipationProbe;
     }
 
@@ -927,8 +932,7 @@ JPH::ObjectLayer ObjectLayerFor(const ResolvedCollision& collision, BodyMotion m
     const LayerMotion group = !simulates                     ? LayerMotion::QueryOnly
                               : motion == BodyMotion::Static ? LayerMotion::Static
                                                              : LayerMotion::Moving;
-    return MakeObjectLayer(static_cast<uint32>(collision.objectType), group, participation,
-                           responseSet);
+    return MakeObjectLayer(static_cast<uint32>(objectType), group, participation, responseSet);
 }
 
 JPH::EMotionType ToJoltMotion(BodyMotion motion) noexcept {
