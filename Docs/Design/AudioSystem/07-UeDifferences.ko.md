@@ -68,5 +68,13 @@
 | pause 중 UI 소리의 재생 시간 | 게임이 멈추면 UI 소리의 `PlaybackTime`도 멈춤(`AudioDevice.cpp:4311–4329`), fader 동결은 컴포넌트 `bIsUISound`만 봄 | 실효 UI 값(옵션 OR 분류) 하나로 voice·시계를 함께 판정, UI는 모두 흐름(3.44.2절) | 한 판정이 두 갈래로 갈리지 않게 |
 | pause 중 정지·steal fade | steal fader·FadeOut은 멈춤(delta 0), Stop은 pause를 풀고 512 frame 꼬리(`AudioMixerSource.cpp:1182–1189`) | fade는 mix 시계로 진행해 무음으로 끝남, 꼬리 없음(3.44.3·3.44.5절) | pause 중 소리가 새지 않고 자원이 제때 풀린다 |
 | pause·해제 | fade 없이 source를 건너뜀(`AudioMixerSourceManager.cpp:2059–2071`) | `PauseFadeFrames` 64 frame fade(3.44.5절) | 클릭 방지 |
+| 엔진이 두는 submix | Main·BaseDefault·Reverb·EQ 필수 submix 에셋(`ERequiredSubmixes`) | Master 하나(AU7h부터 `ReverbReturn`), Master 값·BaseDefault는 `SetMasterBus`·`SetBaseDefaultBus`(3.45.2절) | EQ는 레거시, 나머지는 같은 역할 |
+| source당 send 수 | 제한 없음(`TArray`) | `MaxVoiceSends` 8(기본 send 포함), 넘으면 뒤쪽을 버리고 Warning·계수(3.45.7절) | AudioRT 고정 표 |
+| submix 수 | 제한 없음 | 믹서 칸 `maxBuses`(기본 64), 모자라면 send를 버리고 기본 버스는 Master로 — Warning·계수(3.45.8절) | 미리 잡은 버퍼 |
+| submix 인스턴스 수명 | 에셋이 로드된 동안 장치에 등록 | 재생 라우팅이 참조하는 동안(AU7g부터 꼬리까지), 실행 배수는 키로 따로 유지(3.45.8절) | 고정 칸을 쓰는 만큼만 차지 |
+| background mute | 처리 뒤 버퍼를 바로 0으로 채움(`AudioMixerSubmix.cpp` `bIsBackgroundMuted`) | output gain을 한 블록 ramp로 0(3.45.3절) | 클릭 방지 |
+| 마스터 gain·limiter 위치 | Main submix 출력 뒤 장치 출력 | Master 버스 출력 뒤 구간별 마스터 gain 곡선 → limiter(3.45.6절) | 블록 중간 `SetMasterGain`의 frame 정확성 유지 |
+| 감쇠 send의 Pre 단계 | 구조체에 단계가 없음(늘 post) | 같은 `MixBusSend`를 쓰고 Pre면 Warning + post(3.45.7절) | 구조체 하나로 통일 |
+| send 변화 | `SetSubmixSendInfo`의 level을 다음 버퍼에 바로 씀 | `DefaultParamRampFrames` ramp, 새 send는 0에서, 빠진 send는 0으로(3.45.5절) | 클릭 방지 |
 | pause 중 가상 loop의 재생 시간 | device delta로 진행(`AudioVirtualLoop.cpp:302–337`) | 멈춤(3.44.3절) | voice 있는 재생과 같은 시계, 풀린 뒤 이어 듣는다 |
 | 스트림 디코드 지연 | 렌더 스레드가 디코드 작업 완료를 기다림(`AudioMixerSourceBuffer.cpp:550` `EnsureCompletion`) — 늦으면 렌더가 멈춤 | AudioRT는 기다리지 않음 — 링이 모자라면 그 voice만 무음(굶음)이고 이어 재생(3.40.1절) | AudioRT 무대기 계약(3.2절), 한 스트림의 지연이 전체 출력을 멈추지 않게 |
