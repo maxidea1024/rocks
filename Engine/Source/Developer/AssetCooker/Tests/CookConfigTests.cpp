@@ -622,10 +622,9 @@ TEST(CookConfig_TextureProfile) {
          TextureGroup::Bokeh},
         {"{\"textureLodGroups\": {\"Pixels2D\": {\"mipGenSettings\": \"FromTextureGroup\"}}}",
          TextureGroup::Pixels2D},
-        {"{\"textureLodGroups\": {\"8BitData\": {\"mipGenSettings\": \"Sharpen0\"}}}",
+        // LeaveExistingMips는 계약이다(12.18 TP5 — Sharpen·Blur·Angular는 TP1부터 받는다).
+        {"{\"textureLodGroups\": {\"8BitData\": {\"mipGenSettings\": \"LeaveExistingMips\"}}}",
          TextureGroup::EightBitData},
-        {"{\"textureLodGroups\": {\"16BitData\": {\"mipGenSettings\": \"Blur5\"}}}",
-         TextureGroup::SixteenBitData},
     };
     for (const Case& item : rejects) {
         REQUIRE(scene.Write("Engine/TargetProfiles/Windows.json", item.text));
@@ -642,6 +641,9 @@ TEST(CookConfig_TextureProfile) {
         "{\"textureLodGroups\": {\"World\": {\"minLodSize\": 0, \"maxLodSize\": 0}}}",
         "{\"textureLodGroups\": {\"World\": {\"mipGenSettings\": \"Unfiltered\", "
         "\"maxAniso\": 16, \"mipLoadOptions\": \"Default\"}}}",
+        "{\"textureLodGroups\": {\"8BitData\": {\"mipGenSettings\": \"Sharpen0\"}, "
+        "\"16BitData\": {\"mipGenSettings\": \"Blur5\"}, \"Skybox\": {\"mipGenSettings\": "
+        "\"Angular\"}}}",
         "{\"textureLodGroups\": {\"Project01\": {\"numStreamedMips\": 3, \"maxLodSizeLow\": 512, "
         "\"maxLodSizeEpic\": 8192, \"highPriorityLoad\": true, "
         "\"cookPlatformTilingDisabled\": true}}}",

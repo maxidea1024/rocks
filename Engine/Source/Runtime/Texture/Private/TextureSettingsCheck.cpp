@@ -1,6 +1,7 @@
 #include <Texture/TextureSettingsCheck.h>
 
 #include <Base/Compiler.h>
+#include <Base/NumericLimits.h>
 #include <Core/Algorithms.h>
 #include <Object/ObjectRegistry.h>
 #include <ObjectSerialization/ClassDefaults.h>
@@ -12,6 +13,30 @@
 // 에디터 빌드에서만 돈다).
 namespace rocks {
 
+bool TextureAlphaCoverageThresholdsValid(const Vec4d& thresholds) noexcept {
+    const double values[4] = {thresholds.x, thresholds.y, thresholds.z, thresholds.w};
+    bool nonzero = false;
+    bool nonzeroAsFloat = false;
+    for (double value : values) {
+        // NaN은 비교가 모두 거짓이라 여기서 걸린다. Inf는 float 상한을 넘는다.
+        if (!(value >= 0.0) || value > static_cast<double>(NumericLimits<float>::Max())) {
+            return false;
+        }
+
+        // float로 바꿔 비정규 수가 되는 임계값은 UE alpha coverage 비교 임계값 계산이 0으로 내려가
+        // check로 멈추는 값이다(TCM 437–444 — 12.18 TP1).
+        const float asFloat = static_cast<float>(value);
+        if (asFloat != 0.0f && asFloat < NumericLimits<float>::Min()) {
+            return false;
+        }
+
+        nonzero = nonzero || value != 0.0;
+        nonzeroAsFloat = nonzeroAsFloat || asFloat != 0.0f;
+    }
+
+    return !nonzero || nonzeroAsFloat;
+}
+
 #if ROCKS_WITH_EDITOR_DATA
 namespace {
 
@@ -19,7 +44,6 @@ namespace {
 enum class ContractCondition : uint8 {
     Always,
     ChromaKey,
-    AlphaCoverage,
     Composite,
     CustomColorSpace,
     VirtualTexture
@@ -44,8 +68,6 @@ constexpr ContractField ContractFields[] = {
     {"chromaKeyTexture", nullptr, ContractCondition::Always},
     {"chromaKeyThreshold", nullptr, ContractCondition::ChromaKey},
     {"chromaKeyColor", nullptr, ContractCondition::ChromaKey},
-    {"doScaleMipsForAlphaCoverage", nullptr, ContractCondition::Always},
-    {"alphaCoverageThresholds", nullptr, ContractCondition::AlphaCoverage},
     {"compositeTexture", nullptr, ContractCondition::Always},
     {"compositeTextureMode", nullptr, ContractCondition::Composite},
     {"compositePower", nullptr, ContractCondition::Composite},
@@ -75,6 +97,8 @@ struct TextureFacts {
     bool alphaCoverage = false;
     bool composite = false;
     bool virtualTexture = false;
+    bool alphaThresholdsValid = true;
+    bool cube = false;
     TextureMipGenSettings mipGen = TextureMipGenSettings::FromTextureGroup;
     TextureSourceEncoding encoding = TextureSourceEncoding::None;
     TextureColorSpace colorSpace = TextureColorSpace::None;
@@ -88,8 +112,6 @@ bool Holds(ContractCondition condition, const TextureFacts& facts) noexcept {
         return true;
     case ContractCondition::ChromaKey:
         return facts.chromaKey;
-    case ContractCondition::AlphaCoverage:
-        return facts.alphaCoverage;
     case ContractCondition::Composite:
         return facts.composite;
     case ContractCondition::CustomColorSpace:
@@ -170,15 +192,14 @@ Result<void> AddValueIssues(Array<KeyedIssue>& out, const TypeLease& lease,
     };
 
     Result<void> added = Result<void>::Success();
-    switch (facts.mipGen) {
-    case TextureMipGenSettings::FromTextureGroup:
-    case TextureMipGenSettings::SimpleAverage:
-    case TextureMipGenSettings::NoMipmaps:
-    case TextureMipGenSettings::Unfiltered:
-        break;
-    default:
+    // Sharpen·Blur는 구현(12.18 TP1)이고, Cube가 아닌 Angular는 빌드가 SimpleAverage로 바꾼다.
+    if (facts.mipGen == TextureMipGenSettings::LeaveExistingMips ||
+        (facts.mipGen == TextureMipGenSettings::Angular && facts.cube)) {
         added = top("mipGenSettings", AssetDiagnosticCode::UnsupportedSetting);
-        break;
+    }
+
+    if (added && facts.alphaCoverage && !facts.alphaThresholdsValid) {
+        added = top("alphaCoverageThresholds", AssetDiagnosticCode::InvalidSetting);
     }
 
     if (added && facts.encoding != TextureSourceEncoding::None &&
@@ -273,12 +294,15 @@ Result<void> CheckTextureSettings(ObjectRegistry& registry, const ObjectAccessCo
 #if ROCKS_WITH_EDITOR_DATA
         facts.chromaKey = read.chromaKeyTexture;
         facts.alphaCoverage = read.doScaleMipsForAlphaCoverage;
+        facts.alphaThresholdsValid =
+            TextureAlphaCoverageThresholdsValid(read.alphaCoverageThresholds);
         facts.composite = !read.compositeTexture.Handle().IsNull();
         facts.mipGen = read.mipGenSettings;
         facts.encoding = read.sourceColorSettings.encodingOverride;
         facts.colorSpace = read.sourceColorSettings.colorSpace;
 #endif
         facts.virtualTexture = read.virtualTextureStreaming != 0;
+        facts.cube = lease.Value().IsA(TypeIdOf<TextureCube>());
         facts.mipLoad = read.mipLoadOptions;
         facts.compression = read.compressionSettings;
     }

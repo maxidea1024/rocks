@@ -1366,11 +1366,44 @@ TEST(TextureBuild_DiagnosticsAndResolve) {
                                            result) &&
               result.failure.code == AssetDiagnosticCode::InvalidSetting);
         texture.powerOfTwoMode = TexturePowerOfTwoSetting::None;
+        // Sharpen은 받는다(12.18 TP1). LeaveExistingMips는 계약이다(TP5).
         group.mipGenSettings = TextureMipGenSettings::Sharpen5;
+        CHECK(ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                          result) &&
+              settings.mipGenSettings == TextureMipGenSettings::Sharpen5);
+        group.mipGenSettings = TextureMipGenSettings::LeaveExistingMips;
         CHECK(
             ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings, result)
                     .Error() == ErrorCode::Unsupported &&
             result.failure.code == AssetDiagnosticCode::UnsupportedSetting);
+        // Cube가 아닌 Angular는 SimpleAverage다(UE GetMipGenSettings — 12.18 TP1).
+        group.mipGenSettings = TextureMipGenSettings::Angular;
+        CHECK(ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                          result) &&
+              settings.mipGenSettings == TextureMipGenSettings::SimpleAverage);
+        group.mipGenSettings = TextureMipGenSettings::SimpleAverage;
+        // alpha coverage는 칸과 임계값이 모두 있어야 켜지고, 잘못된 임계값은 InvalidSetting이다.
+        texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, 0.0, 0.5};
+        texture.useNewMipFilter = true;
+        CHECK(ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                          result) &&
+              !settings.alphaCoverage && settings.alphaCoverageThresholds.w == 0.0f &&
+              settings.useNewMipFilter);
+        texture.doScaleMipsForAlphaCoverage = true;
+        CHECK(ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                          result) &&
+              settings.alphaCoverage && settings.alphaCoverageThresholds.w == 0.5f);
+        texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, 0.0, 0.0};
+        CHECK(ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                          result) &&
+              !settings.alphaCoverage);
+        texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, -0.25, 0.5};
+        CHECK(!ResolveTextureBuildSettings(texture, TextureDimension::Volume, group, settings,
+                                           result) &&
+              result.failure.code == AssetDiagnosticCode::InvalidSetting);
+        texture.doScaleMipsForAlphaCoverage = false;
+        texture.alphaCoverageThresholds = Vec4d{0.0, 0.0, 0.0, 0.0};
+        texture.useNewMipFilter = false;
     }
 
     {
@@ -1565,9 +1598,12 @@ TEST(TextureBuild_CubeAndChecks) {
     uint8 fiveFaces[5 * 4] = {};
     CHECK(!Build(allocator, five, fiveFaces, built) &&
           built.result.failure.code == AssetDiagnosticCode::InvalidSource);
+    // Sharpen은 빌드한다(12.18 TP1). LeaveExistingMips는 계약이다(TP5).
     TextureBuildSettings sharpen = Gray(2, 2);
     sharpen.mipGenSettings = TextureMipGenSettings::Sharpen3;
     const uint8 plain[4] = {};
+    CHECK(Build(allocator, sharpen, plain, built) && built.result.mips.Size() == 2);
+    sharpen.mipGenSettings = TextureMipGenSettings::LeaveExistingMips;
     CHECK(!Build(allocator, sharpen, plain, built) &&
           built.result.failure.code == AssetDiagnosticCode::UnsupportedSetting);
 
