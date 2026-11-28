@@ -183,7 +183,7 @@ Sha256Kernel InitializeActiveKernel() noexcept {
         return candidate;
     }
 
-    // 커널 결함이나 잘못된 CPU 보고다. Core는 Log에 의존하지 않으므로 stderr에 바로 남긴다.
+    // 커널 결함이다(결과가 틀렸다). Core는 Log에 의존하지 않으므로 stderr에 바로 남긴다.
     constexpr char Message[] =
         "[Error][Sha256] SHA-256 hardware kernel self-test failed; using the scalar kernel\n";
     platform::WriteDiagnostic(Message, sizeof(Message) - 1);
@@ -219,7 +219,7 @@ const char* Sha256KernelName(Sha256Kernel kernel) noexcept {
 
 Sha256Kernel SelectSha256Kernel(const platform::CpuFeatures& cpu) noexcept {
 #if ROCKS_ARCH_X64
-    if (cpu.sha && cpu.sse42) {
+    if (cpu.sha && cpu.ssse3 && cpu.sse41) {
         return Sha256Kernel::X64Sha;
     }
 #elif ROCKS_ARCH_ARM64

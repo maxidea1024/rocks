@@ -3,8 +3,8 @@
 #include <Base/Compiler.h>
 
 // x64 SHA-NI SHA-256 커널이다(Docs/Design/CoreDataFoundations.ko.md 6절). Intel "SHA Extensions"
-// 백서의 상태 배치(ABEF·CDGH)를 따른다. Sha256Kernel::X64Sha 조건(sha && sse42)을 채운 CPU에서만
-// 커널 표를 거쳐 부른다.
+// 백서의 상태 배치(ABEF·CDGH)를 따른다. Sha256Kernel::X64Sha 조건(sha && ssse3 && sse41)을 채운
+// CPU에서만 커널 표를 거쳐 부른다.
 #if ROCKS_ARCH_X64
 
 #include <immintrin.h>

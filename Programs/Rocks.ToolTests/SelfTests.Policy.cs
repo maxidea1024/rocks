@@ -1322,13 +1322,15 @@ internal static partial class SelfTests
             // 정의 헤더는 target 속성으로 매크로를 정의하고, 계열 디렉터리는 자기 계열의 매크로·intrinsics를 쓴다. 주석·리터럴(raw
             // 포함)의 언급, 범용 SIMD의 비슷한 이름, 이름만 비슷한 식별자, target이라는 이름의 함수·속성 인자 안의 호출은 대상이 아니다.
             temporary.Write(compiler, "#define ROCKS_TARGET_X64_AES __attribute__((target(\"aes,avx,pclmul\")))\n" +
-                "#define ROCKS_TARGET_ARM64_AES __attribute__((target(\"neon,aes,fuse-aes\")))\n");
+                "#define ROCKS_TARGET_ARM64_AES __attribute__((target(\"neon,aes,fuse-aes\")))\n" +
+                "#define ROCKS_TARGET_X64_SHA __attribute__((target(\"sha,sse4.1\")))\n" +
+                "#define ROCKS_TARGET_ARM64_SHA2 __attribute__((target(\"neon,sha2\")))\n");
             temporary.Write(aes, "ROCKS_TARGET_X64_AES static __m128i R(__m128i b, __m128i k) noexcept {\n" +
                 "    return _mm_xor_si128(_mm_aesenc_si128(b, k), _mm_clmulepi64_si128(b, k, 0x11));\n}\n" +
                 "ROCKS_TARGET_ARM64_AES uint8x16_t A(uint8x16_t b, uint8x16_t k) { return vaesmcq_u8(vaeseq_u8(b, k)); }\n" +
                 "poly128_t M(poly64_t a, poly64_t b) { return vmull_high_p64(a, b) ^ vmull_p64(a, b); }\n");
-            temporary.Write(sha, "uint32x4_t H(uint32x4_t a, uint32x4_t b, uint32x4_t w) { return vsha256hq_u32(a, b, w); }\n" +
-                "__m128i S(__m128i a, __m128i b, __m128i k) { return _mm_sha256rnds2_epu32(a, b, k); }\n");
+            temporary.Write(sha, "ROCKS_TARGET_ARM64_SHA2 uint32x4_t H(uint32x4_t a, uint32x4_t b, uint32x4_t w) { return vsha256hq_u32(a, b, w); }\n" +
+                "ROCKS_TARGET_X64_SHA __m128i S(__m128i a, __m128i b, __m128i k) { return _mm_sha256rnds2_epu32(a, b, k); }\n");
             temporary.Write(test, "// _mm_aesenc_si128, vsha256hq_u32, __attribute__((target(\"aes\"))) are only named here\n" +
                 "const char* names = \"_mm_aesenc_si128 ROCKS_TARGET_X64_AES #pragma clang attribute\";\n" +
                 "const char* attribute = \"__attribute__((target(\\\"aes\\\"))) [[gnu::target(\\\"aes\\\")]]\";\n" +
@@ -1422,7 +1424,7 @@ internal static partial class SelfTests
             string definitions = File.ReadAllText(temporary.FilePath(compiler));
             temporary.Write(compiler, definitions + "#define ROCKS_TARGET_X64_SHA512 __attribute__((target(\"sha512\")))\n");
             var unassigned = PolicyChecks.TargetIntrinsics(temporary.Root);
-            Verify.That(unassigned.Count == 1 && unassigned[0].Rule == "target-intrinsics" && unassigned[0].Line == 3,
+            Verify.That(unassigned.Count == 1 && unassigned[0].Rule == "target-intrinsics" && unassigned[0].Line == 5,
                 "unassigned target macro definition accepted in Compiler.h\n" + string.Join('\n', unassigned));
 
             // 정의 헤더도 intrinsics는 쓰지 못한다(매크로 정의만 예외다).

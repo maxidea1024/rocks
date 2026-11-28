@@ -290,6 +290,13 @@ private:
                     continue;
                 }
 
+                // 도구는 처음 쓸 때 연다. job 시간에 도구 적재가 섞이지 않도록 먼저 연다(실패는
+                // CompileJob이 같은 상태로 보고한다).
+                if (!toolsTried_) {
+                    String ignored(allocator_);
+                    (void)Tools(ignored);
+                }
+
                 const uint64 jobStart = platform::MonotonicNanoseconds();
                 CompileJob(job, *result.Value());
                 LogElapsed("job compiled", jobStart);

@@ -222,7 +222,7 @@ Debug 워커 하나가 시작에 쓰는 약 1.5 s 가운데 약 1.2 s가 이 해
 - 내부 헤더 `Core/Private/Hash/Sha256Kernels.h`(namespace `rocks::detail`)는 블록 함수 `Sha256BlocksFunction = void(*)(uint32* state, const uint8* blocks, usize count) noexcept`를 정의한다. 64 byte 블록 `count`개를 차례로 압축하며, 경계는 블록 하나가 아니라 버퍼 단위다(Compiler.h target 속성 규칙).
 - 커널은 셋이다.
   - `Scalar`: 지금 구현이다.
-  - `X64Sha`: SHA-NI(`SHA256RNDS2`·`SHA256MSG1`·`SHA256MSG2`)와 SSSE3 `PSHUFB`, SSE4.1 `PBLENDW`를 쓴다. 조건은 `cpu.sha && cpu.sse42`이다(SSE4.2 보고는 SSSE3·SSE4.1을 포함한다).
+  - `X64Sha`: SHA-NI(`SHA256RNDS2`·`SHA256MSG1`·`SHA256MSG2`)와 SSSE3 `PSHUFB`, SSE4.1 `PBLENDW`를 쓴다. 조건은 `cpu.sha && cpu.ssse3 && cpu.sse41`이다. 셋은 CPUID에서 서로 독립 bit라 PlatformBase `CpuFeatures`에 `ssse3`·`sse41` 칸을 더했다.
   - `Arm64Sha2`: ARMv8 `SHA256H`·`SHA256H2`·`SHA256SU0`·`SHA256SU1`을 쓴다. 조건은 `cpu.armSha2`이다.
 - `SelectSha256Kernel(cpu)`는 조건을 만족하는 이 아키텍처의 커널을, 아니면 `Scalar`를 돌려준다. `Sha256KernelBlocks(kernel)`는 블록 함수를 돌려준다.
 - `CheckSha256Kernel(blocks)`는 알려진 답으로 자가 시험한다: 한 블록(`"abc"`), 두 블록(448 bit NIST 메시지), 여러 블록을 한 번에 넘긴 결과와 블록마다 넘긴 결과의 동치.
@@ -230,13 +230,13 @@ Debug 워커 하나가 시작에 쓰는 약 1.5 s 가운데 약 1.2 s가 이 해
 
 **선택.**
 - 첫 `Compress` 때 함수 안 static으로 한 번 고른다. 순서는 `QueryCpuFeatures()` → `SelectSha256Kernel` → `Scalar`가 아니면 `CheckSha256Kernel`이다. 결과는 프로세스 끝까지 같다.
-- 자가 시험이 실패하면(커널 결함이나 잘못된 CPU 보고) `Scalar`를 쓰고, `platform::WriteDiagnostic`으로 stderr에 영어 한 줄을 남긴다. Core는 Log에 의존하지 않으므로 이렇게 한다. 조용한 대체는 하지 않는다.
+- 자가 시험은 결과가 틀린 커널을 거른다. CPU가 기능 bit를 보고했는데 명령이 실제로 없으면(일부 가상 머신의 마스킹) 시험 중 잘못된 명령 예외로 끝난다. 자가 시험이 실패하면 `Scalar`를 쓰고, `platform::WriteDiagnostic`으로 stderr에 영어 한 줄을 남긴다. Core는 Log에 의존하지 않으므로 이렇게 한다. 조용한 대체는 하지 않는다.
 - 하드웨어가 없는 CPU에서 `Scalar`를 쓰는 것은 기능 판별 결과이므로 진단을 남기지 않는다.
 - 공개 API(`Sha256`·`Sha256Digest`)와 출력 byte는 바뀌지 않는다.
 - 내부 콘텐츠 해시는 뒤이어 BLAKE3로 바뀐다([ContentHash](ContentHash.ko.md)). SHA-256은 외부 무결성(제3자 manifest의 upstream 대조)·Crypto·빌드 지문에 남으므로 이 하드웨어 경로도 남는다. 셰이더 도구 적재 검사는 manifest `blake3` 칸으로 옮긴다(ContentHash CH11).
 
 **시험(`Core/Tests/Sha256Tests.cpp`).**
 - 이 CPU가 실행할 수 있는 커널마다 NIST 벡터를 확인하고, 스칼라와 차등 비교한다(길이 0–4,160 byte, 블록 수 1–65를 한 번에 넘기는 경우 포함).
-- 선택 표: 기능이 없으면 `Scalar`, x64에서 `sha`만 있고 `sse42`가 없으면 `Scalar`, 둘 다 있으면 `X64Sha`, ARM64에서 `armSha2`가 있으면 `Arm64Sha2`.
+- 선택 표: 기능이 없으면 `Scalar`, x64에서 `sha`에 `ssse3`·`sse41` 가운데 하나라도 없으면 `Scalar`, 셋 다 있으면 `X64Sha`, ARM64에서 `armSha2`가 있으면 `Arm64Sha2`.
 - 자가 시험은 결과를 한 bit 바꾸는 커널을 거부한다.
 - ARM64 커널은 이 기기에서 실행할 수 없으므로 macOS·Android에서 같은 시험으로 확인한다.

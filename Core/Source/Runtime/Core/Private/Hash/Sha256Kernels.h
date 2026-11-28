@@ -21,7 +21,7 @@ using Sha256BlocksFunction = void (*)(uint32* state, const uint8* blocks, usize 
 enum class Sha256Kernel : uint8 {
     // 이식 가능한 스칼라 구현이다(모든 CPU).
     Scalar,
-    // x64 SHA-NI. 조건: cpu.sha && cpu.sse42.
+    // x64 SHA-NI. 조건: cpu.sha && cpu.ssse3 && cpu.sse41.
     X64Sha,
     // ARMv8 SHA2. 조건: cpu.armSha2.
     Arm64Sha2
@@ -40,8 +40,10 @@ SelectSha256Kernel(const platform::CpuFeatures& cpu) noexcept;
 // 예외).
 [[nodiscard]] ROCKS_CORE_API Sha256BlocksFunction Sha256KernelBlocks(Sha256Kernel kernel) noexcept;
 
-// blocks를 알려진 답으로 자가 시험한다: 한 블록("abc"), 두 블록(448 bit NIST 메시지), 여러 블록을
-// 한 번에 넘긴 결과와 블록마다 넘긴 결과의 동치. 모두 맞으면 true다. nullptr는 false다.
+// blocks를 알려진 답으로 자가 시험한다(결과가 틀린 커널을 거른다 — CPU가 기능 bit를 보고했는데
+// 명령이 실제로 없으면 시험 중 잘못된 명령 예외로 끝난다): 한 블록("abc"), 두 블록(448 bit NIST
+// 메시지), 여러 블록을 한 번에 넘긴 결과와 블록마다 넘긴 결과의 동치. 모두 맞으면 true다. nullptr는
+// false다.
 [[nodiscard]] ROCKS_CORE_API bool CheckSha256Kernel(Sha256BlocksFunction blocks) noexcept;
 
 // 이 프로세스가 쓰는 커널이다. 첫 호출에 SelectSha256Kernel(QueryCpuFeatures())로 고르고 Scalar가
@@ -61,10 +63,10 @@ ROCKS_CORE_API void Sha256BlocksScalar(uint32* state, const uint8* blocks, usize
 
 #if ROCKS_ARCH_X64
 // SHA-NI 커널이다(Sha256X64.cpp). Sha256Kernel::X64Sha 조건을 채운 CPU에서만 부른다.
-ROCKS_CORE_API void Sha256BlocksX64Sha(uint32* state, const uint8* blocks, usize count) noexcept;
+void Sha256BlocksX64Sha(uint32* state, const uint8* blocks, usize count) noexcept;
 #elif ROCKS_ARCH_ARM64
 // ARMv8 SHA2 커널이다(Sha256Arm64.cpp). Sha256Kernel::Arm64Sha2 조건을 채운 CPU에서만 부른다.
-ROCKS_CORE_API void Sha256BlocksArm64Sha2(uint32* state, const uint8* blocks, usize count) noexcept;
+void Sha256BlocksArm64Sha2(uint32* state, const uint8* blocks, usize count) noexcept;
 #endif
 
 } // namespace rocks::detail

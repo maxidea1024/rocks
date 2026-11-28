@@ -286,8 +286,8 @@
 // SHA-256 명령 경로를 함수 하나에만 켜는 target 속성이다(Docs/Design/CoreDataFoundations.ko.md
 // 6절). 규칙은 위 AES 매크로와 같다.
 //   ROCKS_TARGET_X64_SHA     SHA-NI(SHA256RNDS2·SHA256MSG1·SHA256MSG2)와 SSE4.1(SSSE3 포함 —
-//                            PSHUFB·PBLENDW). 감지 조건: sha && sse42. ROCKS_ARCH_X64에서만
-//                            정의한다.
+//                            PSHUFB·PALIGNR·PBLENDW). 감지 조건: sha && ssse3 && sse41.
+//                            ROCKS_ARCH_X64에서만 정의한다.
 //   ROCKS_TARGET_ARM64_SHA2  NEON·SHA2(SHA256H·SHA256H2·SHA256SU0·SHA256SU1). 감지 조건: armSha2.
 //                            ROCKS_ARCH_ARM64에서만 정의한다.
 // - 정책 검사 target-intrinsics: 이 매크로와 SHA 계열 intrinsics는 Core/Private/Hash/에서만

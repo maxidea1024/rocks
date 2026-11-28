@@ -87,6 +87,7 @@ TEST(Sha256_HexRoundTripAndRejectsInvalidText) {
     CHECK(Sha256Digest::ParseHex("zz7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
               .Error() == ErrorCode::InvalidArgument);
 }
+
 namespace {
 
 // 커널 대조 시험의 최대 블록 수와 최대 입력 길이다(CoreDataFoundations 6절 시험).
@@ -148,10 +149,16 @@ TEST(Sha256_KernelSelectionFollowsCpuFeatures) {
     CHECK(detail::SelectSha256Kernel(none) == detail::Sha256Kernel::Scalar);
     platform::CpuFeatures shaOnly{};
     shaOnly.sha = true;
+    shaOnly.sse42 = true;
     CHECK(detail::SelectSha256Kernel(shaOnly) == detail::Sha256Kernel::Scalar);
+    platform::CpuFeatures noSse41{};
+    noSse41.sha = true;
+    noSse41.ssse3 = true;
+    CHECK(detail::SelectSha256Kernel(noSse41) == detail::Sha256Kernel::Scalar);
     platform::CpuFeatures x64{};
     x64.sha = true;
-    x64.sse42 = true;
+    x64.ssse3 = true;
+    x64.sse41 = true;
     platform::CpuFeatures arm64{};
     arm64.neon = true;
     arm64.armSha2 = true;
