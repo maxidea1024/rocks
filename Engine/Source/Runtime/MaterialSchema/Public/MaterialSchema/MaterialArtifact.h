@@ -2,7 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
-#include <Core/Encoding/Sha256.h>
+#include <Core/Hash/Sha256.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Text/Name.h>
 #include <MaterialSchema/MaterialConstantInstruction.h>
