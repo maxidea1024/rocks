@@ -109,5 +109,5 @@
 - **UW4b2c**: 키 선택 스타일·고정 크기 지우기(23.4절).
 - **UW4b2d**: 끄는 동안 커서 숨김·되돌림(23.5절) — 창 `LockPointer`·`UnlockPointer`·`SetCursorPosition`(창이 이동량을 재고 되돌림), 입력 `relative`·`deltaX`·`deltaY`, UI 잠금 계약(`CursorService`), 편집 텍스트 오른쪽 끌기(소프트웨어 커서 `icons::CursorGrab`).
 - **UW4b2e**: 스크롤 막대 표시 정책(23.6절) — `ScrollBarVisibility`·`ScrollBarPlacement`, `ScrollThumbOpacity`, ScrollView Reserve 칸·흐려짐 타이머, `ScrollBoxWidget` 속성, 갤러리 행.
-- **UW4n**: 숫자 입력(24장 — 착수 때 쓴다).
+- **UW4n**: 숫자 입력(24장 — 단계는 24.9절 UW4n1–UW4n6).
 - 리뷰어는 9.1절대로 UW4b 2차 끝(UW4n 포함)에 한 번 둔다.

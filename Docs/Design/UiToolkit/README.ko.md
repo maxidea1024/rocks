@@ -50,3 +50,4 @@ Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용�
 - [21. Widget 층 정렬(UW9 상세 설계)](21-WidgetLayerAlignment.ko.md)
 - [22. 편집 텍스트 공개(UW4f2 상세 설계)](22-EditableText.ko.md)
 - [23. 입력 컨트롤 2차(UW4b 2차 상세 설계)](23-InputControls2.ko.md)
+- [24. 숫자 입력(UW4n 상세 설계)](24-NumericInput.ko.md)
