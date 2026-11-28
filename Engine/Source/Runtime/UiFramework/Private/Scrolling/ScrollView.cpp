@@ -56,7 +56,27 @@ Result<void> ScrollView::Arrange(const Geometry& geometry) noexcept {
     const Vec2 size = vertical ? Vec2(geometry.size.x, content) : Vec2(content, geometry.size.y);
     const AffineTransform2D translation{
         1, 0, 0, 1, vertical ? 0 : before - offset_, vertical ? before - offset_ : 0};
-    return child->ArrangeIfNeeded(GetGeometry().MakeChild(size, translation, {}, {}));
+    auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(size, translation, {}, {}));
+    // 미룬 스크롤 요청을 자식 배치 뒤에 맞추고, 옮겼으면 같은 배치 안에서 다시 놓는다.
+    if (const SharedPtr<Element> target = reveal_.Lock(); arranged && target) {
+        reveal_.Reset();
+        const float previous = offset_;
+        if (target->IsWithin(*this) && ScrollIntoView(*target, revealAlignment_, revealPadding_) &&
+            offset_ != previous) {
+            return Arrange(geometry);
+        }
+    }
+
+    reveal_.Reset();
+    return arranged;
+}
+
+void ScrollView::RequestScrollIntoView(const SharedPtr<Element>& child,
+                                       ScrollIntoViewAlignment alignment, float padding) noexcept {
+    reveal_ = WeakPtr<Element>(child);
+    revealAlignment_ = alignment;
+    revealPadding_ = math::IsFinite(padding) && padding > 0 ? padding : 0;
+    InvalidateArrangement();
 }
 
 PointerReply ScrollView::OnPreviewPointerDown(const PointerEvent& event) noexcept {

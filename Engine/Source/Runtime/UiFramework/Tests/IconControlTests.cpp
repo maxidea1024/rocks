@@ -84,8 +84,10 @@ TEST(UiFramework_ComboBoxDrawsDownArrow) {
     SystemAllocator allocator;
     IconProbe probe;
     ComboBox combo(allocator);
-    // 화살표 칸(2 + 16 + 2)을 내용 오른쪽 여백으로 비운다.
-    CHECK(combo.GetContentPadding().z == ComboArrowPadding * 2 + ComboArrowSize);
+    // 화살표 칸(화살표 여백 2 + 16 + 2)을 내용 오른쪽 여백으로 비운다(UE "ComboButton").
+    const ComboButtonStyle& style = DefaultComboBoxStyle().comboButton;
+    CHECK(combo.GetContentPadding().z ==
+          style.downArrowPadding.x + style.downArrow.imageSize.x + style.downArrowPadding.z);
     REQUIRE(combo.Arrange(Geometry::Root({120, 24}, {})));
     PaintList list(allocator);
     list.SetVectorImageResolver(&probe);
@@ -96,10 +98,10 @@ TEST(UiFramework_ComboBoxDrawsDownArrow) {
     // 오른쪽 끝에서 버튼 여백과 화살표 여백만큼 들어가고 세로 가운데다.
     const auto bounds = list.Boxes()[1].geometry.WindowBounds().Value();
     const float right = combo.GetStyle().normalPadding.z;
-    CHECK(bounds.max.x == 120 - right - ComboArrowPadding);
+    CHECK(bounds.max.x == 120 - right - style.downArrowPadding.z);
     CHECK(bounds.min.y == 4 && bounds.max.y == 20);
-    // 색은 버튼 전경색(UE UseForeground)이다.
-    CHECK(list.Boxes()[1].color == IconTheme(ThemeSlot::ForegroundHover));
+    // 색은 흰 이미지 × 버튼 전경색(UE UseForeground — 콤보 보통 전경 Foreground)이다.
+    CHECK(list.Boxes()[1].color == IconTheme(ThemeSlot::Foreground));
 }
 
 // 지역 캐시(CachePanel) 안의 벡터 brush도 Application의 resolver로 풀리고, resolver revision이

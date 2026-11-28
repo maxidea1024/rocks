@@ -8,9 +8,10 @@ namespace rocks::ui {
 
 StyleSet::StyleSet(Allocator& allocator) noexcept
     : allocator_(allocator), parent_(allocator), buttons_(allocator), checkBoxes_(allocator),
-      dockTabs_(allocator), editableTexts_(allocator), editableTextBoxes_(allocator),
-      menuBars_(allocator), menus_(allocator), progressBars_(allocator), scrollBars_(allocator),
-      sliders_(allocator), texts_(allocator), toolTips_(allocator), windows_(allocator),
+      comboButtons_(allocator), comboBoxes_(allocator), dockTabs_(allocator),
+      editableTexts_(allocator), editableTextBoxes_(allocator), menuBars_(allocator),
+      menus_(allocator), progressBars_(allocator), scrollBars_(allocator), sliders_(allocator),
+      tableRows_(allocator), texts_(allocator), toolTips_(allocator), windows_(allocator),
       brushes_(allocator), colors_(allocator), floats_(allocator), margins_(allocator) {
 }
 
@@ -107,6 +108,31 @@ Result<void> StyleSet::SetValue(StringView name, const EditableTextStyle& value)
 const EditableTextStyle* StyleSet::FindValue(StringView name,
                                              const EditableTextStyle*) const noexcept {
     return Lookup(editableTexts_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const ComboButtonStyle& value) noexcept {
+    return Store(comboButtons_, name, value);
+}
+
+const ComboButtonStyle* StyleSet::FindValue(StringView name,
+                                            const ComboButtonStyle*) const noexcept {
+    return Lookup(comboButtons_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const ComboBoxStyle& value) noexcept {
+    return Store(comboBoxes_, name, value);
+}
+
+const ComboBoxStyle* StyleSet::FindValue(StringView name, const ComboBoxStyle*) const noexcept {
+    return Lookup(comboBoxes_, name);
+}
+
+Result<void> StyleSet::SetValue(StringView name, const TableRowStyle& value) noexcept {
+    return Store(tableRows_, name, value);
+}
+
+const TableRowStyle* StyleSet::FindValue(StringView name, const TableRowStyle*) const noexcept {
+    return Lookup(tableRows_, name);
 }
 
 Result<void> StyleSet::SetValue(StringView name, const EditableTextBoxStyle& value) noexcept {
@@ -264,6 +290,26 @@ Result<void> AddCoreStyles(StyleSet& styles) noexcept {
     if (added) {
         added = styles.Set<EditableTextBoxStyle>("NormalEditableTextBox",
                                                  DefaultEditableTextBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<ComboButtonStyle>("ComboButton", DefaultComboButtonStyle());
+    }
+
+    if (added) {
+        added = styles.Set<ComboButtonStyle>("SimpleComboButton", DefaultSimpleComboButtonStyle());
+    }
+
+    if (added) {
+        added = styles.Set<ComboBoxStyle>("ComboBox", DefaultComboBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<ComboBoxStyle>("SimpleComboBox", DefaultSimpleComboBoxStyle());
+    }
+
+    if (added) {
+        added = styles.Set<TableRowStyle>("ComboBox.Row", DefaultComboBoxRowStyle());
     }
 
     if (added) {

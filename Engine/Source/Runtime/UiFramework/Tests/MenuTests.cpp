@@ -17,7 +17,8 @@ TEST(UiFramework_ComboPopupUsesOuterOverlayAndSelectsByPointer) {
     auto combo = Build<ComboBox>({
         .count = 3,
         .makeOption = ComboBox::MakeOption::CreateLambda([](usize, bool) noexcept {
-            auto frame = Build<Frame>({});
+            // 행 높이 24 = 내용 18 + 행 여백 3 + 3(UE "ComboBox" 행 여백 — 23.2절).
+            auto frame = Build<Frame>({.desiredSize = Vec2{40, 18}});
             return frame ? Result<SharedPtr<Element>>::Success(frame.Value().AsSharedPtr())
                          : Result<SharedPtr<Element>>::Failure(frame.Error());
         }),

@@ -8,13 +8,10 @@
 
 namespace rocks::ui {
 
-// 콤보 아래 화살표의 크기와 둘레 여백이다(UE FComboButtonStyle DownArrowImage 16x16 —
-// "wide-chevron-down", DownArrowPadding 기본 2, SlateTypes.cpp 176행).
-inline constexpr float ComboArrowSize = 16.0f;
-inline constexpr float ComboArrowPadding = 2.0f;
-
 // 선택 값의 표현과 메뉴 행의 표현을 생성기로 분리한다. 생성기는 매번 부모 없는 새 Element를
 // 반환해야 한다. 선택 인덱스 -1은 선택 해제다. 열려 있는 동안 방향키로 이동하고 Enter로 확정한다.
+// 모양은 ComboBoxStyle(UE "ComboBox")과 행 스타일(UE "ComboBox.Row")이다(Docs/Design/UiToolkit
+// 23.2절). 크기는 내용 + 버튼 여백 + 화살표 칸이다(고정 크기 없음 — UE SComboButton).
 class ROCKS_UIFRAMEWORK_API ComboBox final : public MenuAnchor {
     ROCKS_UI_ELEMENT(ComboBox, MenuAnchor)
 
@@ -47,12 +44,31 @@ public:
     Result<void> Select(int32 index, SelectionCause cause = SelectionCause::Direct) noexcept;
     Result<void> SetMaxListHeight(float height) noexcept;
     int32 SelectedIndex() const noexcept;
+    // 펼친 목록에서 키보드로 옮긴 강조 행이다(닫혀 있으면 -1).
+    int32 HighlightedIndex() const noexcept;
+    // 콤보 모양이다(UE FComboBoxStyle). 부르지 않으면 활성 앱 스타일의 "ComboBox"(없으면
+    // DefaultComboBoxStyle)다(20.11절). 버튼 brush·여백이 잘못되면 InvalidArgument다. 버튼 모양
+    // (Button::GetStyle)은 comboButton.button이다.
+    Result<void> SetComboStyle(const ComboBoxStyle& style) noexcept;
+    const ComboBoxStyle& GetComboStyle() const noexcept;
+    // 펼침 목록 행 모양이다(UE "ComboBox.Row"). 부르지 않으면 활성 앱 스타일의 "ComboBox.Row"다.
+    void SetRowStyle(const TableRowStyle& style) noexcept;
+    const TableRowStyle& GetRowStyle() const noexcept;
     KeyReply OnKeyEvent(const KeyEvent& key) noexcept override;
     // 버튼 위 오른쪽에 아래 화살표를 그린다(UE SComboButton 오른쪽 칸 — 전경색 tint, 세로 가운데).
     // 화살표 자리는 내용 여백으로 비워 둔다.
     Result<void> OnPaint(PaintList& list, int32 layer) const noexcept override;
+    // 내용과 화살표 칸 중 높은 쪽에 버튼 여백을 더한다(UE SComboButton 가로 상자 — 화살표 슬롯도
+    // 높이를 정한다).
+    Vec2 ComputeDesiredSize(float scale) const noexcept override;
 
 private:
+    void ApplyStyles(const UiHostServices& host) noexcept override;
+    Result<void> ApplyComboStyle(const ComboBoxStyle& style) noexcept;
+    // 행 버튼 모양이다(행 스타일과 행 여백에서 만든다).
+    ButtonStyle RowButtonStyle() const noexcept;
+    // 화살표 칸 폭이다(화살표 여백 + 이미지 폭).
+    float ArrowZone() const noexcept;
     Result<SharedPtr<Element>> MakeMenu() noexcept;
     Result<void> SetDisplay(int32 index) noexcept;
     void Highlight(int32 index) noexcept;
@@ -66,6 +82,10 @@ private:
     int32 selected_ = -1;
     int32 highlighted_ = -1;
     Array<WeakPtr<Button>> rows_;
+    ComboBoxStyle comboStyle_ = DefaultComboBoxStyle();
+    TableRowStyle rowStyle_ = DefaultComboBoxRowStyle();
+    bool comboStyleExplicit_ = false;
+    bool rowStyleExplicit_ = false;
     bool changing_ = false;
 };
 

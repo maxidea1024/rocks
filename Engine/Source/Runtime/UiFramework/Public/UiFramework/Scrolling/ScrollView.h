@@ -61,6 +61,12 @@ public:
     // 자식 배치 좌표를 스크롤 영역으로 변환한 뒤 요청한 위치가 보이도록 이동한다.
     Result<void> ScrollIntoView(const Element& child, ScrollIntoViewAlignment alignment,
                                 float padding = 0) noexcept;
+    // 다음 배치에서 child를 보이게 한다(UE STableView::RequestScrollIntoView —
+    // Docs/Design/UiToolkit 23.2절). 자식을 배치한 뒤 같은 배치 안에서 맞추므로 아직 배치되지 않은
+    // 내용(처음 펼치는 목록)도 한 프레임 늦지 않는다. 마지막 요청만 남고, child가 그 사이
+    // 사라지거나 이 영역 밖이면 버린다.
+    void RequestScrollIntoView(const SharedPtr<Element>& child, ScrollIntoViewAlignment alignment,
+                               float padding = 0) noexcept;
     void ScrollToEnd() noexcept;
     float GetMaxScrollOffset() const noexcept;
 
@@ -76,6 +82,10 @@ private:
     float offset_ = 0;
     float maxOffset_ = 0;
     bool arranged_ = false;
+    // 다음 배치에서 보이게 할 자식이다(RequestScrollIntoView).
+    WeakPtr<Element> reveal_;
+    ScrollIntoViewAlignment revealAlignment_ = ScrollIntoViewAlignment::Nearest;
+    float revealPadding_ = 0;
     bool endRequested_ = false;
     ConsumeMouseWheel wheelPolicy_ = ConsumeMouseWheel::WhenScrolling;
     float wheelMultiplier_ = 1;

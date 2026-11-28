@@ -4,6 +4,7 @@
 #include <Core/Optional.h>
 #include <UiCore/Declarative.h>
 #include <UiCore/StackLayout.h>
+#include <UiCore/Styles/StyleBrush.h>
 
 namespace rocks::ui {
 
@@ -36,8 +37,17 @@ public:
     void SetColor(LinearColor color) noexcept;
     void BindColor(Bindable<LinearColor> source) noexcept;
 
+    // 풀린 brush다. StyleBrush 바탕(SetStyleBrush)을 지운다.
     Result<void> SetBrush(const Brush& brush) noexcept;
     const Brush& GetBrush() const noexcept;
+    // 테마로 푸는 바탕이다(UE SBorder BorderImage — Docs/Design/UiToolkit 23.2절). 그릴 때마다 지금
+    // 테마·전경색 문맥으로 풀므로 테마를 바꿔도 따라간다. color는 그대로 tint로 곱한다. 기본
+    // 테마로 풀리지 않는 brush는 InvalidArgument다.
+    //
+    // 사용 예:
+    //   (void)frame->SetStyleBrush(DefaultComboButtonStyle().menuBorder);
+    Result<void> SetStyleBrush(const StyleBrush& brush) noexcept;
+    const Optional<StyleBrush>& GetStyleBrush() const noexcept;
 
     LinearColor GetColor() const noexcept;
 
@@ -61,6 +71,7 @@ public:
 
 private:
     Brush brush_;
+    Optional<StyleBrush> styleBrush_;
     ElementAttribute<LinearColor, InvalidateReason::Paint> color_;
     ElementAttribute<Vec2, InvalidateReason::Layout> desiredSize_;
     Vec4 padding_{};

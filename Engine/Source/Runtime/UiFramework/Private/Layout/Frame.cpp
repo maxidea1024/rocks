@@ -39,12 +39,30 @@ Result<void> Frame::SetBrush(const Brush& brush) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (brush_ != brush) {
+    if (brush_ != brush || styleBrush_) {
         brush_ = brush;
+        styleBrush_ = {};
         InvalidatePaint();
     }
 
     return Result<void>::Success();
+}
+
+Result<void> Frame::SetStyleBrush(const StyleBrush& brush) noexcept {
+    if (brush.mode != BrushMode::None && !brush.Resolve(DefaultThemeColors(), {}).IsValid()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!styleBrush_ || *styleBrush_ != brush) {
+        styleBrush_ = brush;
+        InvalidatePaint();
+    }
+
+    return Result<void>::Success();
+}
+
+const Optional<StyleBrush>& Frame::GetStyleBrush() const noexcept {
+    return styleBrush_;
 }
 
 const Brush& Frame::GetBrush() const noexcept {
@@ -151,6 +169,12 @@ Result<void> Frame::Arrange(const Geometry& geometry) noexcept {
 }
 
 Result<void> Frame::OnPaint(PaintList& list, int32 layer) const noexcept {
+    if (styleBrush_) {
+        return list.TryAddBrush(GetGeometry(),
+                                styleBrush_->Resolve(list.Theme(), list.ColorContext()),
+                                color_.Get(), layer);
+    }
+
     return list.TryAddBrush(GetGeometry(), brush_, color_.Get(), layer);
 }
 

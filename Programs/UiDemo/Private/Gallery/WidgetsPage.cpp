@@ -364,7 +364,29 @@ Result<WidgetsPage> BuildWidgetsPage(GalleryContext& context) noexcept {
                      })});
             if (status.Take(built)) {
                 const SharedPtr<Element> parts[] = {combo.Value(), chosen.Value()};
-                rows.AddRow("Combo Box", "ComboBox (MenuAnchor)", parts);
+                rows.AddRow("Combo Box", "ComboBox + DefaultComboBoxStyle()", parts);
+            }
+        }
+    }
+
+    // 테두리 없는 콤보(UE "SimpleComboBox" — 23.2절).
+    {
+        auto combo = SharedPtr<ComboBox>::TryMake(allocator, allocator);
+        if (status.Take(combo)) {
+            auto built = combo.Value()->Construct(
+                {.count = ComboItemCount,
+                 .selected = 0,
+                 .makeOption = ComboBox::MakeOption::CreateLambda(
+                     [target = &context](usize index, bool) noexcept -> Result<SharedPtr<Element>> {
+                         return AsElement(MakeText(*target, ComboItems[index]));
+                     })});
+            if (built) {
+                built = combo.Value()->SetComboStyle(DefaultSimpleComboBoxStyle());
+            }
+
+            if (status.Take(built)) {
+                one("Simple Combo Box", "ComboBox + DefaultSimpleComboBoxStyle()",
+                    Result<SharedPtr<Element>>::Success(combo.Value()));
             }
         }
     }

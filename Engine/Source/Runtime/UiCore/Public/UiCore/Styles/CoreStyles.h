@@ -2,6 +2,7 @@
 
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
+#include <UiCore/Styles/ComboBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
 #include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/MenuBarStyle.h>
@@ -9,6 +10,7 @@
 #include <UiCore/Styles/ProgressBarStyle.h>
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
+#include <UiCore/Styles/TableRowStyle.h>
 #include <UiCore/Styles/TextStyle.h>
 #include <UiCore/Styles/ToolTipStyle.h>
 #include <UiCore/Styles/WindowStyle.h>
@@ -79,6 +81,32 @@ ROCKS_UICORE_API const ProgressBarStyle& DefaultProgressBarStyle() noexcept;
 // 기본 스크롤 막대 스타일이다(UE "Scrollbar" — 186–195행: 손잡이 RB(Hover, 4), 올림·끌기 RB(Hover2,
 // 4), 트랙 없음, 두께 8).
 ROCKS_UICORE_API const ScrollBarStyle& DefaultScrollBarStyle() noexcept;
+
+// 콤보 버튼 여백이다(UE ComboButtonMargin (8, 1, 8, 1)·PressedComboButtonMargin (8, 2, 8, 0) —
+// CoreStyle.cpp 58–59행)와 펼침 목록 행 여백(UE "ComboBox" (8, 3)·"SimpleComboBox" (8, 2) —
+// StarshipCoreStyle.cpp 1590·1617행)이다.
+inline constexpr Vec4 ComboButtonMargin{8.0f, 1.0f, 8.0f, 1.0f};
+inline constexpr Vec4 PressedComboButtonMargin{8.0f, 2.0f, 8.0f, 0.0f};
+inline constexpr Vec4 ComboMenuRowPadding{8.0f, 3.0f, 8.0f, 3.0f};
+inline constexpr Vec4 SimpleComboMenuRowPadding{8.0f, 2.0f, 8.0f, 2.0f};
+// 콤보 입력 반경·외곽선 두께다(UE InputFocusRadius 4·InputFocusThickness 1).
+inline constexpr float ComboCornerRadius = 4.0f;
+inline constexpr float ComboOutlineThickness = 1.0f;
+
+// 기본 콤보 버튼 스타일이다(UE "ComboButton" — StarshipCoreStyle.cpp 1557–1584행: 버튼 RB(Input,
+// 4, InputOutline, 1)·올림·눌림 RB(Input, 4, Hover, 1)·비활성 RB(Dropdown, 4, DropdownOutline, 1),
+// 전경 Foreground·나머지 ForegroundHover, 내용 여백 0, 화살표 wide-chevron-down 16, 목록 바탕
+// RB(Dropdown, 0, DropdownOutline, 1)·여백 0).
+ROCKS_UICORE_API const ComboButtonStyle& DefaultComboButtonStyle() noexcept;
+// 테두리 없는 콤보 버튼이다(UE "SimpleComboButton" — 버튼은 단순 버튼 스타일).
+ROCKS_UICORE_API const ComboButtonStyle& DefaultSimpleComboButtonStyle() noexcept;
+// 기본 콤보 상자 스타일이다(UE "ComboBox" — 내용 여백 0, 행 여백 (8, 3)).
+ROCKS_UICORE_API const ComboBoxStyle& DefaultComboBoxStyle() noexcept;
+// 테두리 없는 콤보 상자다(UE "SimpleComboBox" — 행 여백 (8, 2)).
+ROCKS_UICORE_API const ComboBoxStyle& DefaultSimpleComboBoxStyle() noexcept;
+// 콤보 펼침 목록 행 스타일이다(UE "ComboBox.Row" — 1620–1640행: 바탕 없음·올림 Color(Primary),
+// 선택 행 바탕 없음·올림 Primary, 초점 선택 RB(Transparent, 4, Select, 1), 글자 White).
+ROCKS_UICORE_API const TableRowStyle& DefaultComboBoxRowStyle() noexcept;
 
 // 편집 글자 상자의 반경·여백이다(UE "NormalEditableTextBox" — StarshipCoreStyle.cpp 1364–1378행:
 // RB(…, InputFocusRadius 4, …), Padding (8, 3, 8, 4)).

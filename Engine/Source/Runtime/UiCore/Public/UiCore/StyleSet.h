@@ -4,6 +4,7 @@
 #include <Core/Text/String.h>
 #include <UiCore/Styles/ButtonStyle.h>
 #include <UiCore/Styles/CheckBoxStyle.h>
+#include <UiCore/Styles/ComboBoxStyle.h>
 #include <UiCore/Styles/DockTabStyle.h>
 #include <UiCore/Styles/MenuBarStyle.h>
 #include <UiCore/Styles/MenuStyle.h>
@@ -11,6 +12,7 @@
 #include <UiCore/Styles/EditableTextBoxStyle.h>
 #include <UiCore/Styles/ScrollBarStyle.h>
 #include <UiCore/Styles/SliderStyle.h>
+#include <UiCore/Styles/TableRowStyle.h>
 #include <UiCore/Styles/TextStyle.h>
 #include <UiCore/Styles/ToolTipStyle.h>
 #include <UiCore/Styles/WindowStyle.h>
@@ -64,6 +66,10 @@ public:
     const ButtonStyle* FindValue(StringView name, const ButtonStyle*) const noexcept;
     Result<void> SetValue(StringView name, const CheckBoxStyle& value) noexcept;
     const CheckBoxStyle* FindValue(StringView name, const CheckBoxStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const ComboButtonStyle& value) noexcept;
+    const ComboButtonStyle* FindValue(StringView name, const ComboButtonStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const ComboBoxStyle& value) noexcept;
+    const ComboBoxStyle* FindValue(StringView name, const ComboBoxStyle*) const noexcept;
     Result<void> SetValue(StringView name, const DockTabStyle& value) noexcept;
     const DockTabStyle* FindValue(StringView name, const DockTabStyle*) const noexcept;
     Result<void> SetValue(StringView name, const EditableTextStyle& value) noexcept;
@@ -81,6 +87,8 @@ public:
     const ScrollBarStyle* FindValue(StringView name, const ScrollBarStyle*) const noexcept;
     Result<void> SetValue(StringView name, const SliderStyle& value) noexcept;
     const SliderStyle* FindValue(StringView name, const SliderStyle*) const noexcept;
+    Result<void> SetValue(StringView name, const TableRowStyle& value) noexcept;
+    const TableRowStyle* FindValue(StringView name, const TableRowStyle*) const noexcept;
     Result<void> SetValue(StringView name, const TextStyle& value) noexcept;
     const TextStyle* FindValue(StringView name, const TextStyle*) const noexcept;
     Result<void> SetValue(StringView name, const ToolTipStyle& value) noexcept;
@@ -113,6 +121,8 @@ private:
     uint64 revision_ = 0;
     Array<Entry<ButtonStyle>> buttons_;
     Array<Entry<CheckBoxStyle>> checkBoxes_;
+    Array<Entry<ComboButtonStyle>> comboButtons_;
+    Array<Entry<ComboBoxStyle>> comboBoxes_;
     Array<Entry<DockTabStyle>> dockTabs_;
     Array<Entry<EditableTextStyle>> editableTexts_;
     Array<Entry<EditableTextBoxStyle>> editableTextBoxes_;
@@ -121,6 +131,7 @@ private:
     Array<Entry<ProgressBarStyle>> progressBars_;
     Array<Entry<ScrollBarStyle>> scrollBars_;
     Array<Entry<SliderStyle>> sliders_;
+    Array<Entry<TableRowStyle>> tableRows_;
     Array<Entry<TextStyle>> texts_;
     Array<Entry<ToolTipStyle>> toolTips_;
     Array<Entry<WindowStyle>> windows_;

@@ -160,6 +160,88 @@ const EditableTextStyle& DefaultEditableTextStyle() noexcept {
     return style;
 }
 
+const ComboButtonStyle& DefaultComboButtonStyle() noexcept {
+    static const ComboButtonStyle style = [] {
+        const ColorRef foreground = ColorRef::FromTheme(ThemeSlot::Foreground);
+        const ColorRef hover = ColorRef::FromTheme(ThemeSlot::ForegroundHover);
+        ComboButtonStyle combo;
+        ButtonStyle& button = combo.button;
+        button.normal = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius,
+                                               ThemeSlot::InputOutline, ComboOutlineThickness);
+        button.hovered = StyleBrush::RoundedBox(ThemeSlot::Input, ComboCornerRadius,
+                                                ThemeSlot::Hover, ComboOutlineThickness);
+        button.pressed = button.hovered;
+        button.disabled = StyleBrush::RoundedBox(ThemeSlot::Dropdown, ComboCornerRadius,
+                                                 ThemeSlot::DropdownOutline, ComboOutlineThickness);
+        button.normalForeground = foreground;
+        button.hoveredForeground = hover;
+        button.pressedForeground = hover;
+        button.disabledForeground = hover;
+        button.normalPadding = ComboButtonMargin;
+        button.pressedPadding = PressedComboButtonMargin;
+        combo.contentPadding = {};
+        // 흰 이미지에 전경색을 곱해 그린다(UE ForegroundArrowImage UseForeground).
+        combo.downArrow = StyleBrush::Svg(icons::WideChevronDown, icons::Icon16, ThemeSlot::White);
+        combo.menuBorder =
+            StyleBrush::RoundedBox(ThemeSlot::Dropdown, 0.0f, ThemeSlot::DropdownOutline, 1.0f);
+        combo.menuBorderPadding = {};
+        return combo;
+    }();
+    return style;
+}
+
+const ComboButtonStyle& DefaultSimpleComboButtonStyle() noexcept {
+    static const ComboButtonStyle style = [] {
+        ComboButtonStyle combo = DefaultComboButtonStyle();
+        combo.button = SimpleButtonStyle();
+        return combo;
+    }();
+    return style;
+}
+
+const ComboBoxStyle& DefaultComboBoxStyle() noexcept {
+    static const ComboBoxStyle style = [] {
+        ComboBoxStyle combo;
+        combo.comboButton = DefaultComboButtonStyle();
+        combo.contentPadding = {};
+        combo.menuRowPadding = ComboMenuRowPadding;
+        return combo;
+    }();
+    return style;
+}
+
+const ComboBoxStyle& DefaultSimpleComboBoxStyle() noexcept {
+    static const ComboBoxStyle style = [] {
+        ComboBoxStyle combo;
+        combo.comboButton = DefaultSimpleComboButtonStyle();
+        combo.contentPadding = {};
+        combo.menuRowPadding = SimpleComboMenuRowPadding;
+        return combo;
+    }();
+    return style;
+}
+
+const TableRowStyle& DefaultComboBoxRowStyle() noexcept {
+    static const TableRowStyle style = [] {
+        TableRowStyle row;
+        const StyleBrush primary = StyleBrush::Color(ThemeSlot::Primary);
+        row.evenRow = StyleBrush::None();
+        row.evenRowHovered = primary;
+        row.oddRow = StyleBrush::None();
+        row.oddRowHovered = primary;
+        row.active = StyleBrush::None();
+        row.activeHovered = primary;
+        // 투명 채움에 Select 외곽선이다(UE FSlateRoundedBoxBrush(Transparent, 4, Select, 1)).
+        row.selectorFocused = StyleBrush::RoundedBox(ThemeSlot::Select, ComboCornerRadius,
+                                                     ThemeSlot::Select, ComboOutlineThickness);
+        row.selectorFocused.fill = ColorRef::Specified({0.0f, 0.0f, 0.0f, 0.0f});
+        row.text = ColorRef::FromTheme(ThemeSlot::White);
+        row.selectedText = ColorRef::FromTheme(ThemeSlot::White);
+        return row;
+    }();
+    return style;
+}
+
 const EditableTextBoxStyle& DefaultEditableTextBoxStyle() noexcept {
     static const EditableTextBoxStyle style = [] {
         EditableTextBoxStyle box;
