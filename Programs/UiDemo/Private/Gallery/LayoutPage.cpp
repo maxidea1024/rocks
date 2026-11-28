@@ -34,6 +34,9 @@ constexpr Vec2 FitStage{110, 70};
 constexpr Vec2 CanvasStage{320, 120};
 constexpr Vec2 ScrollStage{200, 100};
 constexpr Vec2 HorizontalScrollStage{200, 44};
+// 스크롤 막대 정책 견본 하나의 무대다(넷을 나란히 둔다 — 23.6절).
+constexpr Vec2 PolicyScrollStage{96, 72};
+constexpr float PolicyGap = 8;
 constexpr Vec2 SwitchStage{160, 60};
 constexpr Vec2 DockStage{520, 260};
 // 무대 테두리·안쪽 여백·상자 반경이다.
@@ -383,13 +386,18 @@ Result<SharedPtr<Element>> MakeCanvas(GalleryContext& context) noexcept {
     return MakeStage(context, canvas.Value(), CanvasStage);
 }
 
-Result<SharedPtr<Element>> MakeScroll(GalleryContext& context, bool horizontal) noexcept {
+// prefix는 칸 이름 앞말이다("Row"·"Item", 정책 견본은 정책 이름).
+Result<SharedPtr<Element>> MakeScroll(GalleryContext& context, bool horizontal,
+                                      ScrollBarVisibility visibility = ScrollBarVisibility::Auto,
+                                      StringView prefix = {}, Vec2 stage = ScrollStage) noexcept {
     auto scroll = SharedPtr<ScrollView>::TryMake(context.allocator, context.allocator,
                                                  horizontal ? StackDirection::Horizontal
                                                             : StackDirection::Vertical);
     if (!scroll) {
         return Result<SharedPtr<Element>>::Failure(scroll.Error());
     }
+
+    scroll.Value()->SetScrollBarVisibility(visibility);
 
     // ScrollView는 내용 하나를 받는다. 상자들은 같은 방향 스택에 담는다.
     SharedPtr<StackPanel> list;
@@ -412,7 +420,8 @@ Result<SharedPtr<Element>> MakeScroll(GalleryContext& context, bool horizontal) 
     StringBuilder<> label(context.allocator);
     for (usize i = 0; i < ScrollRowCount; ++i) {
         label.Clear();
-        auto formatted = label.TryAppendFormat(horizontal ? "Item {}" : "Row {}", i + 1);
+        const StringView name = !prefix.IsEmpty() ? prefix : horizontal ? "Item" : "Row";
+        auto formatted = label.TryAppendFormat("{} {}", name, i + 1);
         auto block = formatted ? MakeBlock(context, label.View(), i)
                                : Result<SharedPtr<Element>>::Failure(formatted.Error());
         if (!block) {
@@ -429,7 +438,39 @@ Result<SharedPtr<Element>> MakeScroll(GalleryContext& context, bool horizontal) 
         return Result<SharedPtr<Element>>::Failure(added.Error());
     }
 
-    return MakeStage(context, scroll.Value(), horizontal ? HorizontalScrollStage : ScrollStage);
+    return MakeStage(context, scroll.Value(), horizontal ? HorizontalScrollStage : stage);
+}
+
+// 두 줄(위·아래)에 견본을 나란히 둔다(넓은 견본 넷을 좁은 칸에 — 스크롤 막대 정책 행).
+Result<SharedPtr<Element>> MakePairRows(GalleryContext& context, Span<const SharedPtr<Element>> top,
+                                        Span<const SharedPtr<Element>> bottom) noexcept {
+    auto column = SharedPtr<VerticalStack>::TryMake(context.allocator, context.allocator);
+    if (!column) {
+        return Result<SharedPtr<Element>>::Failure(column.Error());
+    }
+
+    const Span<const SharedPtr<Element>> lines[] = {top, bottom};
+    for (usize line = 0; line < 2; ++line) {
+        auto row = SharedPtr<HorizontalStack>::TryMake(context.allocator, context.allocator);
+        if (!row) {
+            return Result<SharedPtr<Element>>::Failure(row.Error());
+        }
+
+        for (usize i = 0; i < lines[line].Size(); ++i) {
+            auto added =
+                row.Value()->TryAddSlot(lines[line][i], {.before = i == 0 ? 0 : PolicyGap});
+            if (!added) {
+                return Result<SharedPtr<Element>>::Failure(added.Error());
+            }
+        }
+
+        auto added = column.Value()->TryAddSlot(row.Value(), {.before = line == 0 ? 0 : PolicyGap});
+        if (!added) {
+            return Result<SharedPtr<Element>>::Failure(added.Error());
+        }
+    }
+
+    return Result<SharedPtr<Element>>::Success(column.Value());
 }
 
 // 단추로 바꾸는 전환 상자다(Switcher 또는 Carousel).
@@ -606,7 +647,8 @@ Result<SharedPtr<Element>> MakeTitleBar(GalleryContext& context,
 } // namespace
 
 Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
-    auto grid = UniquePtr<GalleryGrid>::TryMake(context.allocator, context);
+    // 도킹 견본(520)이 넓어 묶음 둘이 창(1280)에 들어가지 않는다 — 한 묶음으로 세로로 둔다.
+    auto grid = UniquePtr<GalleryGrid>::TryMake(context.allocator, context, 1u);
     if (!grid) {
         return Result<LayoutPage>::Failure(grid.Error());
     }
@@ -682,6 +724,29 @@ Result<LayoutPage> BuildLayoutPage(GalleryContext& context) noexcept {
         if (status.Take(vertical, "Scroll View") && status.Take(horizontal, "Scroll View")) {
             const SharedPtr<Element> parts[] = {vertical.Value(), horizontal.Value()};
             rows.AddRow("Scroll View", "ScrollView (vertical, horizontal)", parts);
+        }
+    }
+
+    // 스크롤 막대 표시 정책 넷(23.6절): 넘칠 때만·늘·안 쓰면 흐려짐·올렸을 때. 둘째 묶음 폭에 맞게
+    // 2x2로 둔다.
+    {
+        auto automatic =
+            MakeScroll(context, false, ScrollBarVisibility::Auto, "Auto", PolicyScrollStage);
+        auto always =
+            MakeScroll(context, false, ScrollBarVisibility::Always, "Always", PolicyScrollStage);
+        auto fading = MakeScroll(context, false, ScrollBarVisibility::HideWhenNotInUse, "Fade",
+                                 PolicyScrollStage);
+        auto hover =
+            MakeScroll(context, false, ScrollBarVisibility::OnHover, "Hover", PolicyScrollStage);
+        if (status.Take(automatic, "Scroll Bar Visibility") && status.Take(always) &&
+            status.Take(fading) && status.Take(hover)) {
+            const SharedPtr<Element> top[] = {automatic.Value(), always.Value()};
+            const SharedPtr<Element> bottom[] = {fading.Value(), hover.Value()};
+            auto square = MakePairRows(context, top, bottom);
+            if (status.Take(square, "Scroll Bar Visibility")) {
+                rows.AddRow("Scroll Bar Visibility", "Auto, Always, HideWhenNotInUse, OnHover",
+                            square.Value());
+            }
         }
     }
 

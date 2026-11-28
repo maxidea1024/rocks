@@ -30,7 +30,13 @@ public:
     Result<void> SetConsumeMouseWheel(ConsumeMouseWheel policy) noexcept;
     Result<void> SetWheelScrollMultiplier(float multiplier) noexcept;
     Result<void> SetScrollbarThickness(float logicalPixels) noexcept;
-    void SetShowScrollbar(bool visible, bool alwaysShow = false) noexcept;
+    void SetShowScrollbar(bool visible) noexcept;
+    // 막대 표시 정책·배치다(Docs/Design/UiToolkit 23.6절 — UScrollBox AlwaysShowScrollbar 대신).
+    void SetScrollBarVisibility(ScrollBarVisibility visibility) noexcept;
+    ScrollBarVisibility GetScrollBarVisibility() const noexcept;
+    // 배치를 정한다. 정하지 않으면(UseDefaultPlacement) OnHover는 Overlay, 나머지는 Reserve다.
+    void SetScrollBarPlacement(ScrollBarPlacement placement) noexcept;
+    void UseDefaultScrollBarPlacement() noexcept;
     // 여백의 성분은 왼쪽·위·오른쪽·아래 순이다. 화면 축을 바꿔도 의미를 유지한다.
     Result<void> SetScrollbarPadding(Vec4 padding) noexcept;
     Vec4 GetScrollbarPadding() const noexcept;
@@ -62,7 +68,10 @@ private:
     ROCKS_PROPERTY(ReadOnly, Name = "wheelMultiplier") float wheelMultiplier_ = 1;
     ROCKS_PROPERTY(ReadOnly, Name = "scrollbarThickness") float thickness_ = 6;
     ROCKS_PROPERTY(ReadOnly, Name = "showScrollbar") bool showBar_ = true;
-    ROCKS_PROPERTY(ReadOnly, Name = "alwaysShowScrollbar") bool alwaysShow_ = false;
+    // ScrollBarVisibility 값이다.
+    ROCKS_PROPERTY(ReadOnly, Name = "scrollbarVisibility") uint8 visibility_ = 0;
+    // ScrollBarPlacement 값 + 1이다(0은 정하지 않음 — 정책 기본).
+    ROCKS_PROPERTY(ReadOnly, Name = "scrollbarPlacement") uint8 placement_ = 0;
     ROCKS_PROPERTY(ReadOnly, Name = "touchScrolling") bool touchScrolling_ = true;
     ROCKS_PROPERTY(ReadOnly, Name = "rightDragScrolling") bool rightDrag_ = false;
     ROCKS_PROPERTY(ReadOnly, Name = "scrollbarPadding") Vec4 barPadding_ {};

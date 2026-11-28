@@ -37,7 +37,14 @@ void ScrollBoxWidget::ApplyProperties(Element& element) noexcept {
     view.SetWheelPolicy(static_cast<ConsumeMouseWheel>(wheelPolicy_));
     (void)view.SetWheelMultiplier(wheelMultiplier_);
     (void)view.SetScrollbarThickness(thickness_);
-    view.SetShowScrollbar(showBar_, alwaysShow_);
+    view.SetShowScrollbar(showBar_);
+    view.SetScrollBarVisibility(static_cast<ScrollBarVisibility>(visibility_));
+    if (placement_ != 0) {
+        view.SetScrollBarPlacement(static_cast<ScrollBarPlacement>(placement_ - 1));
+    } else {
+        view.ResetScrollBarPlacement();
+    }
+
     (void)view.SetScrollbarPadding(barPadding_);
     view.SetAlwaysShowTrack(alwaysShowTrack_);
     view.SetScrollPadding(padBefore_, padAfter_);
@@ -140,9 +147,33 @@ Result<void> ScrollBoxWidget::SetScrollbarThickness(float value) noexcept {
     return Result<void>::Success();
 }
 
-void ScrollBoxWidget::SetShowScrollbar(bool visible, bool alwaysShow) noexcept {
+void ScrollBoxWidget::SetShowScrollbar(bool visible) noexcept {
     showBar_ = visible;
-    alwaysShow_ = alwaysShow;
+    if (auto view = CachedElement()) {
+        ApplyProperties(*view);
+    }
+}
+
+void ScrollBoxWidget::SetScrollBarVisibility(ScrollBarVisibility visibility) noexcept {
+    visibility_ = static_cast<uint8>(visibility);
+    if (auto view = CachedElement()) {
+        ApplyProperties(*view);
+    }
+}
+
+ScrollBarVisibility ScrollBoxWidget::GetScrollBarVisibility() const noexcept {
+    return static_cast<ScrollBarVisibility>(visibility_);
+}
+
+void ScrollBoxWidget::SetScrollBarPlacement(ScrollBarPlacement placement) noexcept {
+    placement_ = static_cast<uint8>(static_cast<uint8>(placement) + 1);
+    if (auto view = CachedElement()) {
+        ApplyProperties(*view);
+    }
+}
+
+void ScrollBoxWidget::UseDefaultScrollBarPlacement() noexcept {
+    placement_ = 0;
     if (auto view = CachedElement()) {
         ApplyProperties(*view);
     }

@@ -27,7 +27,8 @@ public:
     // 위젯 줄 안에서 위젯 사이 기본 간격이다.
     static constexpr float WidgetSpacing = 8;
 
-    explicit GalleryGrid(GalleryContext& context) noexcept;
+    // bands는 가로 묶음 수(1..MaxBands)다. 견본이 넓은 페이지(배치 — 도킹 520)는 1이다.
+    explicit GalleryGrid(GalleryContext& context, uint32 bands = MaxBands) noexcept;
 
     // 위젯들을 가로로 놓은 행을 더한다. 첫 실패를 보존하고, 그 뒤 호출은 아무것도 하지 않는다.
     void AddRow(StringView name, StringView usage, Span<const SharedPtr<Element>> widgets,
@@ -52,6 +53,7 @@ private:
     Array<SharedPtr<Element>> toggles_;
     Array<SharedPtr<Element>> names_;
     uint32 count_ = 0;
+    uint32 bands_ = MaxBands;
     Result<void> status_ = Result<void>::Success();
 };
 

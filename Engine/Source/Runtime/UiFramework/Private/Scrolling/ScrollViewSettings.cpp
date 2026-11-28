@@ -31,18 +31,54 @@ Result<void> ScrollView::SetScrollbarThickness(float value) noexcept {
 
     if (thickness_ != value) {
         thickness_ = value;
-        InvalidatePaint();
+        // Reserve 칸이 바뀐다.
+        InvalidateLayout();
     }
 
     return Result<void>::Success();
 }
 
-void ScrollView::SetShowScrollbar(bool visible, bool alwaysShow) noexcept {
-    if (showBar_ != visible || alwaysShowBar_ != alwaysShow) {
+void ScrollView::SetShowScrollbar(bool visible) noexcept {
+    if (showBar_ != visible) {
         showBar_ = visible;
-        alwaysShowBar_ = alwaysShow;
-        InvalidatePaint();
+        InvalidateLayout();
     }
+}
+
+void ScrollView::SetScrollBarVisibility(ScrollBarVisibility visibility) noexcept {
+    if (visibility_ != visibility) {
+        visibility_ = visibility;
+        // 배치를 정하지 않았으면 정책에 따라 바뀌고, Always는 칸을 늘 둔다.
+        InvalidateLayout();
+        UpdateFadeTimer();
+    }
+}
+
+ScrollBarVisibility ScrollView::GetScrollBarVisibility() const noexcept {
+    return visibility_;
+}
+
+void ScrollView::SetScrollBarPlacement(ScrollBarPlacement placement) noexcept {
+    if (GetScrollBarPlacement() != placement || !placement_) {
+        placement_ = placement;
+        InvalidateLayout();
+    }
+}
+
+void ScrollView::ResetScrollBarPlacement() noexcept {
+    if (placement_) {
+        placement_.Reset();
+        InvalidateLayout();
+    }
+}
+
+ScrollBarPlacement ScrollView::GetScrollBarPlacement() const noexcept {
+    if (placement_) {
+        return placement_.Value();
+    }
+
+    return visibility_ == ScrollBarVisibility::OnHover ? ScrollBarPlacement::Overlay
+                                                       : ScrollBarPlacement::Reserve;
 }
 
 Result<void> ScrollView::SetScrollbarPadding(Vec4 value) noexcept {
@@ -52,7 +88,7 @@ Result<void> ScrollView::SetScrollbarPadding(Vec4 value) noexcept {
 
     if (barPadding_ != value) {
         barPadding_ = value;
-        InvalidatePaint();
+        InvalidateLayout();
     }
 
     return Result<void>::Success();

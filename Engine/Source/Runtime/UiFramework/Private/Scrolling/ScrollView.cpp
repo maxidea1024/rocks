@@ -1,5 +1,8 @@
 #include <UiCore/InputMetrics.h>
 #include <UiFramework/Scrolling/ScrollView.h>
+#include <UiCore/UiHostServices.h>
+#include <UiFramework/Application/Application.h>
+#include <UiFramework/Application/UiTimer.h>
 #include <UiFramework/Scrolling/ScrollBar.h>
 #include "TouchPan.h"
 
@@ -25,8 +28,27 @@ Result<void> ScrollView::TryAddChild(const SharedPtr<Element>& child) noexcept {
 
 Vec2 ScrollView::ComputeDesiredSize(float) const noexcept {
     const Element* child = ChildAt(0);
-    return child && child->GetVisibility() != Visibility::Collapsed ? child->GetDesiredSize()
-                                                                    : Vec2{};
+    Vec2 desired =
+        child && child->GetVisibility() != Visibility::Collapsed ? child->GetDesiredSize() : Vec2{};
+    // Reserve 칸을 더한다 — 넘침은 지난 배치 값이다(UE도 지난 프레임 막대 보임으로 정한다, 23.6절).
+    const float reserved = ReservedBarExtent(overflowing_);
+    if (direction_ == StackDirection::Vertical) {
+        desired.x += reserved;
+    } else {
+        desired.y += reserved;
+    }
+
+    return desired;
+}
+
+float ScrollView::ReservedBarExtent(bool overflowing) const noexcept {
+    if (!showBar_ || thickness_ <= 0 || GetScrollBarPlacement() != ScrollBarPlacement::Reserve ||
+        (!overflowing && visibility_ != ScrollBarVisibility::Always)) {
+        return 0;
+    }
+
+    return direction_ == StackDirection::Vertical ? thickness_ + barPadding_.x + barPadding_.z
+                                                  : thickness_ + barPadding_.y + barPadding_.w;
 }
 
 Result<void> ScrollView::Arrange(const Geometry& geometry) noexcept {
@@ -41,6 +63,7 @@ Result<void> ScrollView::Arrange(const Geometry& geometry) noexcept {
     if (!child || child->GetVisibility() == Visibility::Collapsed) {
         maxOffset_ = 0;
         offset_ = 0;
+        overflowing_ = false;
         return Result<void>::Success();
     }
 
@@ -53,7 +76,25 @@ Result<void> ScrollView::Arrange(const Geometry& geometry) noexcept {
                                      (padAfter_ ? viewport : 0) - viewport);
     offset_ = endRequested_ ? maxOffset_ : math::Clamp(offset_, 0.0f, maxOffset_);
     endRequested_ = false;
-    const Vec2 size = vertical ? Vec2(geometry.size.x, content) : Vec2(content, geometry.size.y);
+    // 넘침이 바뀌면 원하는 크기(Reserve 칸)가 바뀐다 — 부모가 다시 재게 한다.
+    const bool overflowing = maxOffset_ > 0;
+    if (overflowing_ != overflowing) {
+        overflowing_ = overflowing;
+        if (GetScrollBarPlacement() == ScrollBarPlacement::Reserve) {
+            InvalidateLayout();
+        }
+    }
+
+    // 위치가 바뀌면 막대 상호작용이다(UE SScrollBar::SetState — 흐려짐 정책이면 다시 보인다).
+    if (offset_ != arrangedOffset_) {
+        arrangedOffset_ = offset_;
+        NoteBarInteraction();
+    }
+
+    // Reserve면 막대 칸만큼 내용의 교차 축을 줄인다(막대는 그 칸에 놓인다).
+    const float reserved = ReservedBarExtent(overflowing);
+    const float cross = math::Max(0.0f, (vertical ? geometry.size.x : geometry.size.y) - reserved);
+    const Vec2 size = vertical ? Vec2(cross, content) : Vec2(content, cross);
     const AffineTransform2D translation{
         1, 0, 0, 1, vertical ? 0 : before - offset_, vertical ? before - offset_ : 0};
     auto arranged = child->ArrangeIfNeeded(GetGeometry().MakeChild(size, translation, {}, {}));
@@ -129,9 +170,14 @@ PointerReply ScrollView::OnTouchPan(const PointerEvent& move, Vec2 origin) noexc
 
 void ScrollView::SetDragging(bool dragging, bool content) noexcept {
     if (dragging_ != dragging || draggingContent_ != content) {
+        const bool ended = dragging_ && !dragging;
         dragging_ = dragging;
         draggingContent_ = content;
         InvalidatePaint();
+        // 끌기가 끝난 시각부터 흐려진다(UE EndScrolling).
+        if (ended) {
+            NoteBarInteraction();
+        }
     }
 }
 
@@ -139,20 +185,107 @@ void ScrollView::UpdateThumbHover(Vec2 position) noexcept {
     Vec2 thumbPosition;
     Vec2 size;
     Vec2 local;
-    const bool over = GetThumb(thumbPosition, size) && ToLocal(position, local) &&
-                      local.x >= thumbPosition.x && local.y >= thumbPosition.y &&
-                      local.x < thumbPosition.x + size.x && local.y < thumbPosition.y + size.y;
+    const bool inside = ToLocal(position, local);
+    const bool over = GetThumb(thumbPosition, size) && inside && local.x >= thumbPosition.x &&
+                      local.y >= thumbPosition.y && local.x < thumbPosition.x + size.x &&
+                      local.y < thumbPosition.y + size.y;
     if (thumbHovered_ != over) {
         thumbHovered_ = over;
         InvalidatePaint();
+    }
+
+    // 막대(트랙) 위 들어옴·나감은 상호작용이고, 올린 동안 손잡이는 불투명도 1이다(UE IsHovered —
+    // 막대 전체).
+    Vec2 trackPosition;
+    Vec2 trackSize;
+    const bool overBar = (maxOffset_ > 0 || visibility_ == ScrollBarVisibility::Always) &&
+                         GetTrack(trackPosition, trackSize) && inside &&
+                         local.x >= trackPosition.x && local.y >= trackPosition.y &&
+                         local.x < trackPosition.x + trackSize.x &&
+                         local.y < trackPosition.y + trackSize.y;
+    if (barHovered_ != overBar) {
+        barHovered_ = overBar;
+        NoteBarInteraction();
+    }
+}
+
+double ScrollView::Now() const noexcept {
+    const UiHostServices* host = FindUiHostServices();
+    return host ? host->Time().current : 0.0;
+}
+
+ScrollThumbState ScrollView::ThumbState() const noexcept {
+    return {.active = barHovered_ || (dragging_ && !draggingContent_),
+            .scrolling = dragging_ && draggingContent_,
+            .areaHovered = areaHovered_,
+            .sinceInteraction = Now() - lastInteraction_};
+}
+
+float ScrollView::GetThumbOpacity() const noexcept {
+    Vec2 position;
+    Vec2 size;
+    return GetThumb(position, size) ? ScrollThumbOpacity(visibility_, ThumbState()) : 0.0f;
+}
+
+void ScrollView::NoteBarInteraction() noexcept {
+    lastInteraction_ = Now();
+    InvalidatePaint();
+    UpdateFadeTimer();
+}
+
+void ScrollView::UpdateFadeTimer() noexcept {
+    if (!IsScrollThumbFading(visibility_, ThumbState())) {
+        fadeTimer_.Reset();
+        return;
+    }
+
+    if (fadeTimer_) {
+        return;
+    }
+
+    // 흐려지는 동안 매 프레임 다시 그린다. 다 흐려지면 타이머를 놓는다. 트리에 붙지 않았거나
+    // 타이머를 못 만들면 다음 상호작용·그리기에서 맞춘다(흐려짐만 늦다).
+    Application* app = Application::Find(*this);
+    const SharedPtr<Element> self = Parent() ? Parent()->FindChild(this) : SharedPtr<Element>{};
+    if (!app || !self) {
+        return;
+    }
+
+    auto timer =
+        app->StartFrameTimer(self, Delegate<void(double)>::CreateLambda([this](double) noexcept {
+                                 InvalidatePaint();
+                                 if (!IsScrollThumbFading(visibility_, ThumbState())) {
+                                     fadeTimer_.Reset();
+                                 }
+                             }));
+    fadeTimer_ = timer ? Move(timer.Value()) : SharedPtr<UiTimer>{};
+}
+
+void ScrollView::OnMouseEnter(uint32 user) noexcept {
+    Super::OnMouseEnter(user);
+    if (!areaHovered_) {
+        areaHovered_ = true;
+        // OnHover는 들어오면 보인다.
+        if (visibility_ == ScrollBarVisibility::OnHover) {
+            InvalidatePaint();
+            UpdateFadeTimer();
+        }
     }
 }
 
 void ScrollView::OnMouseLeave(uint32 user) noexcept {
     Super::OnMouseLeave(user);
+    const bool wasOverBar = barHovered_;
+    barHovered_ = false;
+    areaHovered_ = false;
     if (thumbHovered_) {
         thumbHovered_ = false;
         InvalidatePaint();
+    }
+
+    // 나감은 상호작용이다 — 흐려짐 정책이면 그 시각부터 흐려진다(UE OnMouseLeave).
+    if (wasOverBar || visibility_ == ScrollBarVisibility::OnHover) {
+        NoteBarInteraction();
     }
 }
 
@@ -248,7 +381,8 @@ void ScrollView::OnPointerCaptureLost(PointerSource source, uint32 userId,
 Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noexcept {
     Vec2 position;
     Vec2 size;
-    if (alwaysShowTrack_ && GetTrack(position, size)) {
+    if ((alwaysShowTrack_ || visibility_ == ScrollBarVisibility::Always) &&
+        GetTrack(position, size)) {
         const auto geometry =
             GetGeometry().MakeChild(size, {1, 0, 0, 1, position.x, position.y}, {}, {});
         // 항상 보이는 트랙은 스타일 트랙이다(UE AlwaysShowScrollbarTrack — Starship 트랙은 None이라
@@ -274,9 +408,16 @@ Result<void> ScrollView::OnPaintOverlay(PaintList& list, int32 layer) const noex
     const StyleBrush& thumb = dragging_ && !draggingContent_ ? style.thumbDragged
                               : thumbHovered_                ? style.thumbHovered
                                                              : style.thumb;
+    // 불투명도는 정책·상호작용 시각에서 나온다(23.6절 — UE GetThumbOpacity).
+    const float opacity = ScrollThumbOpacity(visibility_, ThumbState());
+    if (opacity <= 0) {
+        return Result<void>::Success();
+    }
+
     const AffineTransform2D translation{1, 0, 0, 1, position.x, position.y};
     return list.TryAddBrush(GetGeometry().MakeChild(size, translation, {}, {}),
-                            thumb.Resolve(list.Theme(), list.ColorContext()), {1, 1, 1, 1}, layer);
+                            thumb.Resolve(list.Theme(), list.ColorContext()), {1, 1, 1, opacity},
+                            layer);
 }
 
 void ScrollView::ApplyStyles(const UiHostServices& host) noexcept {
@@ -316,7 +457,8 @@ bool ScrollView::GetThumb(Vec2& position, Vec2& size) const noexcept {
     const bool vertical = direction_ == StackDirection::Vertical;
     const float length = vertical ? viewport.y : viewport.x;
     const float cross = vertical ? viewport.x : viewport.y;
-    if (!showBar_ || thickness_ <= 0 || (maxOffset_ <= 0 && !alwaysShowBar_) || length <= 0 ||
+    if (!showBar_ || thickness_ <= 0 ||
+        (maxOffset_ <= 0 && visibility_ != ScrollBarVisibility::Always) || length <= 0 ||
         cross <= 0) {
         return false;
     }

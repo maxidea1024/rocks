@@ -3,8 +3,13 @@
 #include <UiCore/Styles/CoreStyles.h>
 #include <UiFramework/Layout/StackPanel.h>
 #include <UiFramework/Scrolling/ScrollAlignment.h>
+#include <UiFramework/Scrolling/ScrollBarPlacement.h>
+#include <UiFramework/Scrolling/ScrollBarVisibility.h>
+#include <UiFramework/Scrolling/ScrollThumbOpacity.h>
 
 namespace rocks::ui {
+
+class UiTimer;
 
 // 스크롤 막대 둘레 여백 기본값(UI 단위)이다(UE SScrollBox ScrollBarPadding 2).
 inline constexpr float ScrollBarPaddingDefault = 2.0f;
@@ -39,6 +44,7 @@ public:
     PointerReply OnPointerEvent(const PointerEvent& event) noexcept override;
     void OnPointerCaptureLost(PointerSource source, uint32 userId,
                               uint32 pointerId) noexcept override;
+    void OnMouseEnter(uint32 user) noexcept override;
     void OnMouseLeave(uint32 user) noexcept override;
     Result<void> OnPaintOverlay(PaintList& list, int32 layer) const noexcept override;
 
@@ -48,7 +54,19 @@ public:
     void SetWheelPolicy(ConsumeMouseWheel policy) noexcept;
     Result<void> SetWheelMultiplier(float value) noexcept;
     Result<void> SetScrollbarThickness(float logicalPixels) noexcept;
-    void SetShowScrollbar(bool visible, bool alwaysShow = false) noexcept;
+    // 막대를 아예 끈다(UE ScrollBarVisibility Collapsed). 언제 보일지는 SetScrollBarVisibility다.
+    void SetShowScrollbar(bool visible) noexcept;
+    // 막대 표시 정책이다(Docs/Design/UiToolkit 23.6절 — 기본 Auto). Always는 트랙도 그린다.
+    void SetScrollBarVisibility(ScrollBarVisibility visibility) noexcept;
+    ScrollBarVisibility GetScrollBarVisibility() const noexcept;
+    // 막대 칸을 둘지(Reserve — 내용이 줄어든다) 내용 위에 겹칠지(Overlay)다. 정하지 않으면
+    // OnHover는 Overlay, 나머지는 Reserve다.
+    void SetScrollBarPlacement(ScrollBarPlacement placement) noexcept;
+    // 정한 배치를 지워 정책 기본으로 돌린다.
+    void ResetScrollBarPlacement() noexcept;
+    ScrollBarPlacement GetScrollBarPlacement() const noexcept;
+    // 지금 손잡이 불투명도(0–1)다(프레임 시각 기준 — 시험·진단). 손잡이를 그리지 않으면 0이다.
+    float GetThumbOpacity() const noexcept;
     Result<void> SetScrollbarPadding(Vec4 padding) noexcept;
     void SetAlwaysShowTrack(bool show) noexcept;
     void SetScrollPadding(bool before, bool after) noexcept;
@@ -76,6 +94,15 @@ private:
     bool GetTrack(Vec2& position, Vec2& size) const noexcept;
     bool GetThumb(Vec2& position, Vec2& size) const noexcept;
     bool ToLocal(Vec2 position, Vec2& local) const noexcept;
+    // Reserve이고 막대가 보이는 자리면 내용에서 뺄 칸(교차 축 길이)이다. 아니면 0이다.
+    float ReservedBarExtent(bool overflowing) const noexcept;
+    // 지금 프레임 시각(트리에 붙기 전에는 0)이다.
+    double Now() const noexcept;
+    ScrollThumbState ThumbState() const noexcept;
+    // 막대 상호작용(위치 변화·막대 들어옴·나감·영역 나감)을 적고, 흐려짐 정책이면 흐려지는 동안
+    // 다시 그릴 프레임 타이머를 건다(23.6절).
+    void NoteBarInteraction() noexcept;
+    void UpdateFadeTimer() noexcept;
 
     ScrollBarStyle barStyle_ = DefaultScrollBarStyle();
     StackDirection direction_;
@@ -98,7 +125,19 @@ private:
     bool alwaysShowTrack_ = false;
     bool padBefore_ = false;
     bool padAfter_ = false;
-    bool alwaysShowBar_ = false;
+    // 표시 정책·배치(정하지 않았으면 비어 있다 — 정책에서 나온다)다(23.6절).
+    ScrollBarVisibility visibility_ = ScrollBarVisibility::Auto;
+    Optional<ScrollBarPlacement> placement_{};
+    // 마지막 막대 상호작용 시각이다(처음에는 아주 오래전 — UE LastInteractionTime 0).
+    double lastInteraction_ = -1.0e9;
+    // 마지막 배치에서 넘쳤는지(원하는 크기의 Reserve 칸)와 그때의 위치(바뀌면 상호작용)다.
+    bool overflowing_ = false;
+    float arrangedOffset_ = 0;
+    // 포인터가 막대(트랙) 위·영역 안에 있는지다.
+    bool barHovered_ = false;
+    bool areaHovered_ = false;
+    // 흐려지는 동안 매 프레임 다시 그리는 타이머다.
+    SharedPtr<UiTimer> fadeTimer_;
     bool touchScrolling_ = true;
     bool rightDragScrolling_ = false;
     bool draggingContent_ = false;

@@ -11,7 +11,7 @@ UiDemo가 보여 주는 UI 갤러리의 페이지 구성이다(9.1절 UW4의 상
 
 - 견본은 실제 부품이다. 갤러리 전용 그리기 코드로 모양만 비슷하게 만들지 않는다. 에디터가 같은 클래스·스타일을 그대로 쓸 수 있어야 한다.
 - 모든 위젯 행에 활성 체크 상자를 둔다(UE `NextSlot`). 끄면 그 행을 `SetEnabled(false)`로 바꿔 UE 비활성 효과(알파 0.45, 비활성 전용 brush)를 보인다.
-- 행 묶음(체크·이름·위젯)은 가로로 둘까지만 둔다. 셋째 묶음은 창 오른쪽 밖이라 세로 스크롤로 닿지 않는다. 행이 30개를 넘으면 묶음마다 행 수를 늘린다(`GalleryGrid::MaxBands`, 배치는 `Finish`).
+- 행 묶음(체크·이름·위젯)은 가로로 둘까지만 둔다. 셋째 묶음은 창 오른쪽 밖이라 세로 스크롤로 닿지 않는다. 행이 30개를 넘으면 묶음마다 행 수를 늘린다(`GalleryGrid::MaxBands`, 배치는 `Finish`). 견본이 넓은 페이지(배치 — 도킹 520)는 묶음 하나다(`GalleryGrid` 묶음 수 인자 — 둘이면 둘째 묶음이 창 밖으로 잘렸다).
 - 이름 열은 위에 부품 이름(사람이 읽는 Rocks 이름 — "Horizontal Stack", "Spin Box"), 아래에 쓰는 법(클래스·스타일 함수·설정, 작은 글꼴, 흰색 25%)을 둔다. 예: "Primary Button" / `Button + PrimaryButtonStyle()`, "Fit Box" / `FitBox (Fit, Cover, Fill)`.
 - 상태가 있는 부품은 상태를 나란히 보인다(체크 상자 해제·체크·미정, 진행 막대 값·marquee).
 - 동작은 실제로 된다. 누르면 눌리고, 고르면 바뀌고, 끌면 움직인다. 값이 있는 부품(슬라이더·숫자 입력·체크 상자·원형 슬라이더·타임라인·키 선택·콤보)은 바뀐 값을 옆 레이블에 보인다(UE 갤러리의 콤보 레이블처럼).
@@ -120,7 +120,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 
 배치 부품을 실제 배치로 보인다. 각 견본은 테두리를 그린 칸 안에 색 상자들을 놓아 배치 규칙이 눈에 보이게 한다.
 
-- 가로·세로 상자(`HorizontalStack`·`VerticalStack` — Auto·Fill 비율, 정렬), 격자(`Grid` — 칸 합치기·채움 비율), 균등 격자(`UniformGrid`), 줄바꿈(`WrapStack` — 창 크기에 따라 줄이 바뀐다), 겹치기(`Overlay`), 크기 상자(`SizeBox` — 최소·최대·비율), 비율 맞춤(`FitBox`·`ScaleLayer`), 스크롤(`ScrollView` 가로·세로), 전환(`Switcher` — 단추로 바꾼다), 캐러셀(`Carousel`).
+- 가로·세로 상자(`HorizontalStack`·`VerticalStack` — Auto·Fill 비율, 정렬), 격자(`Grid` — 칸 합치기·채움 비율), 균등 격자(`UniformGrid`), 줄바꿈(`WrapStack` — 창 크기에 따라 줄이 바뀐다), 겹치기(`Overlay`), 크기 상자(`SizeBox` — 최소·최대·비율), 비율 맞춤(`FitBox`·`ScaleLayer`), 스크롤(`ScrollView` 가로·세로, 막대 표시 정책 넷 — Auto·Always·HideWhenNotInUse·OnHover, 23.6절), 전환(`Switcher` — 단추로 바꾼다), 캐러셀(`Carousel`).
 - 도킹(`DockManager`): 탭 묶음 셋을 좌우·상하로 나눈 영역. 분할선 끌기, 탭 끌어 다른 묶음·가장자리에 놓기, 창 밖에 놓아 분리 창을 연다(옛 궤도 화면 self-test가 보던 동작을 여기서 잇는다).
 - 그 밖의 있는 부품: 앵커 배치(`AnchorCanvas` — UE `SConstraintCanvas`, 점·늘이기 앵커·autoSize), 한 축 배치(`StackPanel` — FlowDirection 오른쪽에서 왼쪽, FillContent·shrinkWeight·min·max), 테두리 상자(`Frame` — UE `SBorder`), 슬롯 래퍼(`SlotPresenter` — 정렬 4×4), 캐러셀 lazy 페이지(`CarouselPage`), 제목 표시줄 영역(`WindowTitleBarArea`), 도킹 역할(Major·Panel·Global·Document)과 배치 저장·복원 JSON 견본. 표면·효과 부품은 Effects 탭에 둔다.
 - 펼침 영역은 Widget 층 `ExpandableAreaWidget`이 이미 있으므로 Widget 호스트로 지금 보이고, UW4c에서 Element로 옮긴다. 분할기(`SSplitter`)는 UW4c에서 더한다.
@@ -151,7 +151,7 @@ UE "List Widgets"(1499–1620행)처럼 목록·타일·트리를 나란히 둔�
 - **UiFramework 컨트롤**: Button(클릭·터치·누름 방식, 상태 이벤트, tint·전경·내용 여백), CheckBox, ComboBox, MenuAnchor(배치 13종·창 안 맞춤·Esc·바깥 누름), ActivityIndicator(원형·선형, 조각 수·반경·주기·축·brush), ProgressBar(방향 7종, Scale·Mask, marquee, BindValue), Slider(세로·step·snap·잠금·컨트롤러 잠금·손잡이 들여쓰기), SpinBox(범위·소수 자릿수·드래그 끄기·확정 사유), InputKeySelector(보조 키·게임패드·Esc 취소), RadialSlider(각·오프셋·손잡이·바늘), Timeline(눈금·마커), ScrollBar, Image, tooltip(대화형·지연·등장 시간).
 - **텍스트**: TextLabel(줄바꿈 정책·정렬·말줄임·장식·그림자·자간·ParagraphMetrics·최소 폭·HitText·CaretPosition), 문자 체계(라틴·한글·아랍 RTL·BiDi·이모지·수학), 글꼴 렌더링 선택(방향·shaping 방식·hinting — 데모가 노출할 때).
 - **목록**: ListView(선택 방식 넷, 행 높이, 휠, 포인터 스크롤, 이동 선택, ScrollIntoView, ScrollToEnd, 터치 팬), TreeView(펼침·모두), TileView(타일 너비), TableRowSource.
-- **배치**: HorizontalStack·VerticalStack·StackPanel, Grid(span·layer·nudge·채움 비율), UniformGrid, WrapStack(줄바꿈 선택 사항), Overlay, SizeBox(최소·최대·고정·종횡비), Frame, SlotPresenter, AnchorCanvas, FitBox(맞춤 7 × 방향 3), ScaleLayer, ScrollView(휠 정책·막대·scroll padding·터치·오른쪽 드래그), Switcher, Carousel·CarouselPage, DockManager(역할·분할·탭 끌기·분리 창·spawner·배치 JSON), WindowTitleBarArea.
+- **배치**: HorizontalStack·VerticalStack·StackPanel, Grid(span·layer·nudge·채움 비율), UniformGrid, WrapStack(줄바꿈 선택 사항), Overlay, SizeBox(최소·최대·고정·종횡비), Frame, SlotPresenter, AnchorCanvas, FitBox(맞춤 7 × 방향 3), ScaleLayer, ScrollView(휠 정책·막대 표시 정책·Reserve·Overlay 배치·scroll padding·터치·오른쪽 드래그), Switcher, Carousel·CarouselPage, DockManager(역할·분할·탭 끌기·분리 창·spawner·배치 JSON), WindowTitleBarArea.
 - **표면·효과**: CachePanel, OffscreenLayer, BackgroundBlur, PostBufferUpdate, Viewport.
 - **앱·입력·명령**: CommandSet·BindingManager·CommandList·SetCommands, 타이머(StartTimer·StartFrameTimer), 초점(SetFocus·MoveFocus·Navigate·게임패드), tooltip 상태, AccessibleTree, 커서(SetCursorOverride), SetTheme, InputAdapter·TouchPan.
 - **Widget 층 전용**: RichTextBlockWidget(+RichTextStyle·Decorator·ImageDecorator), EditableText·EditableTextBox·MultiLineEditableText(Box)Widget, ExpandableAreaWidget, ComboBoxString·KeyWidget, CarouselWidget(자동 넘김)·CarouselNavBarWidget, SafeZoneWidget, DynamicEntryBoxWidget(+RadialBoxSettings — 원형 배치는 private `EntryPatternPanel`), ListViewWidget::UseObjectItems·WidgetPool, UserWidget·UserWidgetAnimation·WidgetAnimation(채널·재생 방식), WidgetTransform, Widget 공통(SetToolTipText·SetAccessibleText·SetNavigationRule·SetCursor), MVVM 바인딩(WidgetFieldBindings·WidgetModelSource·WidgetPropertyBinding·WidgetEventBinding).

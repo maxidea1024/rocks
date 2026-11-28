@@ -1247,7 +1247,7 @@
       "name": "rocks::ui::ScrollBoxWidget::alwaysShow_",
       "id": "bb727f4feaa14032a3485c40e129ca98",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -1286,6 +1286,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::placement_",
+      "id": "ff154ca14c864199a9e025f2b4386768",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::ui::ScrollBoxWidget::rightDrag_",
       "id": "0ed5081a968847f088fab82cc775bc26",
       "aliases": [],
@@ -1316,6 +1323,13 @@
       "kind": "field",
       "name": "rocks::ui::ScrollBoxWidget::touchScrolling_",
       "id": "2d151391816543c58f4e2a3dbd48d88a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ui::ScrollBoxWidget::visibility_",
+      "id": "cb68d42aba114a378cdad0226537eb34",
       "aliases": [],
       "retired": false
     },

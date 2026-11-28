@@ -76,17 +76,18 @@
 
 ### 23.6 스크롤 막대 표시 정책(UW4v — 9.1절)
 
-- **정책 `ScrollBarVisibility`**
+- **정책 `ScrollBarVisibility`**(`UiFramework/Scrolling/ScrollBarVisibility.h`)
   - `Auto`(UE 기본): 넘칠 때만 보인다(UE `SScrollBar::ShouldBeVisible` 335–350행).
-  - `Always`: 늘 보이고, 트랙도 보인다(UE `AlwaysShowScrollbar`·`AlwaysShowScrollbarTrack`).
-  - `HideWhenNotInUse`(UE `bHideWhenNotInUse`): 넘칠 때만 보인다. 마지막 스크롤·올림 뒤 0.2초부터 0.2초 동안 흐려져 사라진다(`GetThumbOpacity` 284–305행의 Lerp 식 그대로).
-  - `OnHover`(Rocks 추가 — UE에 없음): 포인터가 영역에 들어오거나 스크롤하면 나타나고, 나가면 같은 식으로 흐려진다.
-- **배치 `ScrollBarPlacement`**: `Reserve`(막대 칸을 따로 두어 내용이 줄어든다 — UE `SScrollBox` 기본) / `Overlay`(내용 위). `OnHover`의 기본은 Overlay이고, 나머지 기본은 Reserve다.
-- **손잡이 불투명도**: 보통 0.75, 올림·끌기 1이다(UE 287–305행). 휠·끌기 중에는 정책과 관계없이 보인다.
-- **흐려짐 시계**: 프레임 시각(20.3절)이다. 흐려지는 동안은 volatile로 다시 그린다(20.12절). 시험은 시각을 주입한다.
-- 대상은 `ScrollView`와 그것을 쓰는 목록(`ListView`·`TreeView`·`TileView`), 그리고 독립 `ScrollBar`(값 계약만 — 정책은 호스트가 보임을 정한다)다.
-- 갤러리: Scroll View 행에 네 정책을 나란히 둔다(16장).
-- 시험: 정책마다 보임·불투명도(주입 시각 0·0.2·0.3·0.4초), Reserve 내용 폭, Overlay 겹침, 휠 중 보임.
+  - `Always`: 늘 보이고, 트랙도 보인다(UE `AlwaysShowScrollbar`·`AlwaysShowScrollbarTrack`). 넘치지 않으면 손잡이가 트랙 전체다.
+  - `HideWhenNotInUse`(UE `bHideWhenNotInUse`): 넘칠 때만 보인다. 마지막 상호작용 뒤 0.2초부터 0.2초 동안 흐려져 사라진다(`GetThumbOpacity` 284–305행의 `Lerp(1, 0, Clamp((Δ - 0.2) / 0.2))` 그대로). 상호작용은 UE처럼 스크롤 위치 변화(`SetState`)와 막대 위 포인터 들어옴·나감이다. 내용 끌기·터치 팬 중에는 Δ = 0이다(UE `bIsScrolling`). 처음에는 숨어 있다(UE `LastInteractionTime = 0`).
+  - `OnHover`(Rocks 추가 — UE에 없음): 넘칠 때, 포인터가 영역(내용 포함) 안에 있으면 보통 불투명도로 보인다. 나가거나 밖에서 스크롤되면 위 식으로 흐려진다(나간 뒤 0.2초부터, 최대 불투명도는 보통 값 0.75).
+- **배치 `ScrollBarPlacement`**(`ScrollBarPlacement.h`): `Reserve`(막대 칸 = 두께 + 막대 여백 양쪽을 따로 두어 내용이 줄어든다 — UE `SScrollBox` 기본: 막대가 내용 옆 칸이다) / `Overlay`(내용 위). 정하지 않으면 `OnHover`는 Overlay, 나머지는 Reserve다. Reserve 칸은 막대가 보일 때(`Always`, 또는 넘칠 때 — 흐려져 안 보여도 칸은 둔다, UE는 흐려짐이 불투명도뿐이다)만 둔다. 원하는 크기에도 그 칸을 더한다(넘침은 지난 배치 값 — UE도 지난 프레임 막대 보임으로 정한다).
+- **손잡이 불투명도**: 보통 0.75, 막대 위 올림·손잡이 끌기 1이다(UE 287–305행 — UE `IsHovered`는 막대 전체다). 휠·끌기는 위치를 바꾸므로 정책과 관계없이 보인다(그 뒤 흐려짐 정책이면 흐려진다).
+- **흐려짐 시계**: 프레임 시각(20.3절, `UiHostServices::Time`)이다. 흐려지는 동안만 프레임 타이머(`Application::StartFrameTimer`)로 매 프레임 다시 그리고, 다 흐려지면 타이머를 놓는다. 시험은 `BeginFrame` 시각을 주입한다.
+- 불투명도 식은 공용 함수(`ScrollThumbOpacity` — `UiFramework/Scrolling/ScrollThumbOpacity.h`)다. 목록(`ListView`·`TreeView`·`TileView`)은 지금 막대를 그리지 않는다 — 목록 탭(UW4a2)에서 막대를 얻을 때 같은 정책·함수를 쓴다. 독립 `ScrollBar`는 값 계약만이다(정책은 호스트가 보임을 정한다).
+- API: `ScrollView::SetScrollBarVisibility`·`GetScrollBarVisibility`·`SetScrollBarPlacement`·`GetScrollBarPlacement`. `SetShowScrollbar(visible)`는 막대를 아예 끈다(UE `ScrollBarVisibility` Collapsed). 옛 `SetShowScrollbar(visible, alwaysShow)`의 `alwaysShow`는 `Always` 정책으로 바뀐다(하위 호환 없음). `ScrollBoxWidget`도 `alwaysShowScrollbar` 대신 `scrollbarVisibility`·`scrollbarPlacement` 속성이다.
+- 갤러리: "Scroll Bar Visibility" 행에 네 정책을 나란히 둔다(16장).
+- 시험: 정책마다 보임·불투명도(주입 시각 0·0.2·0.3·0.4초), 올림·끌기 1, Reserve 내용 폭·원하는 크기, Overlay 겹침, 휠 뒤 보임, OnHover 들어옴·나감, 흐려짐 타이머 놓음.
 
 ### 23.7 갤러리
 
@@ -107,6 +108,6 @@
 - **UW4b2b**: 체크 상자 형식(토글·라디오·투명)(23.3절).
 - **UW4b2c**: 키 선택 스타일·고정 크기 지우기(23.4절).
 - **UW4b2d**: 끄는 동안 커서 숨김·되돌림(23.5절) — 창 `LockPointer`·`UnlockPointer`·`SetCursorPosition`(창이 이동량을 재고 되돌림), 입력 `relative`·`deltaX`·`deltaY`, UI 잠금 계약(`CursorService`), 편집 텍스트 오른쪽 끌기(소프트웨어 커서 `icons::CursorGrab`).
-- **UW4b2e**: 스크롤 막대 표시 정책(23.6절).
+- **UW4b2e**: 스크롤 막대 표시 정책(23.6절) — `ScrollBarVisibility`·`ScrollBarPlacement`, `ScrollThumbOpacity`, ScrollView Reserve 칸·흐려짐 타이머, `ScrollBoxWidget` 속성, 갤러리 행.
 - **UW4n**: 숫자 입력(24장 — 착수 때 쓴다).
 - 리뷰어는 9.1절대로 UW4b 2차 끝(UW4n 포함)에 한 번 둔다.

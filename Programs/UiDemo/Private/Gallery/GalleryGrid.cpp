@@ -16,9 +16,9 @@ constexpr Vec4 WidgetPadding{12, 16, 12, 16};
 
 } // namespace
 
-GalleryGrid::GalleryGrid(GalleryContext& context) noexcept
+GalleryGrid::GalleryGrid(GalleryContext& context, uint32 bands) noexcept
     : context_(context), contents_(context.allocator), toggles_(context.allocator),
-      names_(context.allocator) {
+      names_(context.allocator), bands_(bands == 0 || bands > MaxBands ? MaxBands : bands) {
     auto grid = SharedPtr<Grid>::TryMake(context.allocator, context.allocator);
     if (!grid) {
         status_ = Result<void>::Failure(grid.Error());
@@ -113,9 +113,9 @@ Result<SharedPtr<Element>> GalleryGrid::Finish() noexcept {
         return Result<SharedPtr<Element>>::Failure(status_.Error());
     }
 
-    // 묶음은 MaxBands개까지다 — 행이 많으면 묶음마다 행 수를 늘린다(최소 RowsPerColumn).
+    // 묶음은 bands_개까지다 — 행이 많으면 묶음마다 행 수를 늘린다(최소 RowsPerColumn).
     const uint32 perBand =
-        count_ > RowsPerColumn * MaxBands ? (count_ + MaxBands - 1) / MaxBands : RowsPerColumn;
+        count_ > RowsPerColumn * bands_ ? (count_ + bands_ - 1) / bands_ : RowsPerColumn;
     for (uint32 i = 0; i < count_; ++i) {
         const uint32 column = (i / perBand) * ColumnsPerRow;
         const uint32 line = i % perBand;
