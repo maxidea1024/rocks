@@ -488,6 +488,11 @@ private:
     // FieldWriteOperation이 알리므로(값 같음 포함) 경로 진입점이 최상위 필드를 다시 알리지 않는다
     // (Docs/Design/ChangeNotification.ko.md CN-D10).
     bool topValue_ = false;
+    // 게시된 객체 시작 위치의 변경 연산이 setter 있는 최상위 필드(RuntimeFieldOps::setter)를 지나면
+    // 연산하지 않고 그 setter를 남기고 돌아온다(redirectHooks_를 켠 공개 진입점만 —
+    // Docs/Design/ChangeNotification.ko.md CN-D14). 진입점이 최상위 값을 상자로 분리해 연산하고
+    // setter로 넣는다.
+    FieldSetterFunction setter_ = nullptr;
 };
 
 } // namespace rocks::detail

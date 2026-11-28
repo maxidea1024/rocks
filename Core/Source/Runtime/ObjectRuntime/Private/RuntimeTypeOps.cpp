@@ -1,4 +1,5 @@
 #include <Object/RuntimeTypeOps.h>
+#include "PropertyPathInternal.h"
 #include <Object/ClassRef.h>
 #include <Object/NameField.h>
 #include <Object/ObjectRegistry.h>
@@ -62,6 +63,8 @@ bool SameFieldValue(const FieldValue& current, const FieldValue& next) noexcept 
         return current.digest == next.digest;
     case ValueKind::Name:
         return current.name == next.name && current.name.displayId == next.name.displayId;
+    case ValueKind::Text:
+        return current.text.IsIdentical(next.text);
     default:
         return false;
     }
@@ -186,7 +189,12 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
     detail::FieldWriteBinding binding;
     binding.value = ValueType{valueKind_, referencedType_};
     binding.optional = optional_;
-    binding.readOnly = readOnly_;
+    // setter가 있는 필드는 ReadOnly를 막지 않는다(CN-D14 — 쓰기는 setter로 가고 setter가 검증한다).
+    binding.readOnly = readOnly_ && !setter_;
+    if (setter_) {
+        target.effectiveFlags &= ~static_cast<uint32>(FieldFlags::ReadOnly);
+    }
+
     if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) {
         return valid;
     }
@@ -233,14 +241,20 @@ Result<void> FieldWriteOperation::operator()(ObjectRegistry& registry,
         classLease = Move(found.Value());
     }
 
+    // setter가 있는 필드는 상자 경유로 setter에 넘긴다(CN-D14 — 통지는 setter가 낸다). 위 검증은
+    // 같은 순서의 오류를 내려고 먼저 했고, 상자 위 쓰기가 같은 검증을 다시 한다.
+    if (setter_) {
+        return detail::WriteFieldThroughSetter(registry, access, handle, fieldId_, value, setter_);
+    }
+
     // 변경 통지(Docs/Design/ChangeNotification.ko.md CN-D10): Notify 필드의 쓰기가 성공하면 알린다.
     // 강한 참조는 생성 write가 부르는 SetReference가 알린다(handle이 바뀐 때만). 구독자가 있을 때만
     // 쓰기 전 값을 등록된 read로 읽어 같은 값이면 알리지 않는다(CN-D15 — 읽지 못하면 다르다로
-    // 본다, Text는 늘 다르다로 보므로 읽지 않는다).
+    // 본다, Text는 이력 구조 비교).
     const bool notify = HasFlag(actual->flags, FieldFlags::Notify) &&
                         actual->value.kind != ValueKind::ObjectReference;
     bool unchanged = false;
-    if (notify && value.kind != ValueKind::Text && registry.NotifyWatched(handle)) {
+    if (notify && registry.NotifyWatched(handle)) {
         const RuntimeFieldOps* ops = type.Value().FieldOps(actualIndex);
         FieldValue current(value.GetAllocator());
         unchanged = ops && ops->read && ops->read(registry, access, handle, current) &&

@@ -305,6 +305,13 @@ ROCKS_OBJECTRUNTIME_API Result<void> ValidateClassReference(ObjectRegistry& regi
 // 고정해 할당 콜백의 재진입 쓰기를 Busy로 막지만, 수동 callback은 그렇지 않으므로 할당하는 수동
 // callback은 같은 규칙을 스스로 지킨다. callback 코드 수명은 TypeLease가 보유하는 ModuleLease에
 // 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지 않는다.
+// 생성 setter thunk다(Docs/Design/ChangeNotification.ko.md CN-D14 — RuntimeFieldOps::setter).
+// object(그 필드를 가진 클래스 또는 파생 객체)의 필드에 value(필드 형식 T의 값 — T*)를 setter의
+// 규칙으로 넣는다: 같은 값이면 아무것도 하지 않고, 다르면 교환으로 넣은 뒤(사본 없음 — value에는 옛
+// 값이 남는다) Apply·통지. 호출자(리플렉션 쓰기의 상자)는 value를 버린다. 생성 코드는
+// GeneratedType<C>::SetterOf<&C::field>()의 인라인 thunk다.
+using FieldSetterFunction = Result<void> (*)(Object& object, void* value) noexcept;
+
 class ROCKS_OBJECTRUNTIME_API FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
@@ -334,7 +341,8 @@ private:
 
     // 등록된 필드(field — 원본 스키마)의 쓰기 정책을 묶는다. FieldValue로 쓰는 값 형식은 Optional
     // 필드면 내부 형식(element), 아니면 값 형식이다.
-    void Bind(TypeRegistry& registry, const void* nativeType, const FieldSchema& field) noexcept {
+    void Bind(TypeRegistry& registry, const void* nativeType, const FieldSchema& field,
+              FieldSetterFunction setter) noexcept {
         const bool optional = field.value.kind == ValueKind::Optional;
         const ValueType& written = optional ? field.element : field.value;
         registry_ = &registry;
@@ -345,6 +353,7 @@ private:
         optional_ = optional;
         aggregate_ = FieldIsAggregate(field);
         readOnly_ = HasFlag(field.flags, FieldFlags::ReadOnly);
+        setter_ = setter;
         bound_ = true;
     }
 
@@ -358,6 +367,9 @@ private:
     bool aggregate_ = false;
     bool readOnly_ = false;
     bool bound_ = false;
+    // 이 필드의 생성 setter다(없으면 nullptr — CN-D14). 있으면 쓰기는 callback 대신 setter
+    // 경유(상자 — detail::WriteFieldThroughSetter)이고 ReadOnly는 막지 않는다.
+    FieldSetterFunction setter_ = nullptr;
 };
 
 // 함수는 owner context/handle을 검사하는 generated thunk다. offset이나 raw field 주소를 공개하지
@@ -429,6 +441,19 @@ struct RuntimeFieldOps {
     //                                sizeof(owner.materials));
     //   };
     Span<const uint8> (*storage)(const Object& object) noexcept = nullptr;
+    // 생성 setter thunk다(Docs/Design/ChangeNotification.ko.md CN-D14 — 생성 코드는
+    // GeneratedType<C>::SetterOf<&C::field>(), setter 없는 필드는 nullptr). 있으면 게시된 객체의 이
+    // 필드 쓰기(등록된 write·경로 연산 — 최상위 값과 하위 경로 모두)는 최상위 값을 상자로 분리해
+    // 같은 연산을 하고 검증한 뒤 이 thunk로 넣는다(ReadOnly는 막지 않는다 — setter가 검증한다).
+    // 통지는 setter가 낸다. staged 쓰기·로드는 거치지 않는다. Registry 참조를 담는 필드(강한
+    // 참조·참조 원소·참조 struct 대상)에는 둘 수 없고, 상자 경유가 path thunk로 분리·연산하므로
+    // path가 있어야 한다(등록 InvalidArgument).
+    //
+    // 사용 예(수동 함수표 — 교환이 아니라 setter를 부르면 사본이 하나 더 생긴다):
+    //   ops.setter = [](Object& object, void* value) noexcept -> Result<void> {
+    //       return static_cast<Label&>(object).SetText(*static_cast<const String*>(value));
+    //   };
+    FieldSetterFunction setter = nullptr;
 };
 
 // 리플렉션 enum 등록의 실행 정보다(TypeRegistry::RegisterEnum). nativeType은 NativeTypeKey<E>()이며

@@ -451,6 +451,14 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // setter는 사본을 만들 수 있는 값 필드에만 둔다(CN-D14 — 강한 참조와 그 원소는 Registry
+        // API로 제자리에 쓴다, 참조 struct 대상은 값 타입 해석 뒤에 본다). 상자 경유가 path thunk로
+        // 분리·연산하므로 path가 있어야 한다.
+        if (field.setter && (!field.path || matched->value.kind == ValueKind::ObjectReference ||
+                             matched->element.kind == ValueKind::ObjectReference)) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
         for (usize previous = 0; previous < index; ++previous) {
             if (field.fieldId == ops.fields[previous].fieldId) {
                 return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
@@ -527,6 +535,30 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
                                   HasFlag(schema.flags, TypeFlags::WorldOnly), nullptr, nullptr);
             !resolved) {
             return Result<TypeRegistrationToken>::Failure(resolved.Error());
+        }
+
+        // setter 필드의 struct 대상(필드·원소·Optional 내부)은 강한 참조를 담지 않는다(CN-D14 —
+        // 상자 사본을 만들 수 없다).
+        for (const RuntimeFieldOps& field : ops.fields) {
+            if (!field.setter) {
+                continue;
+            }
+
+            for (const FieldSchema& schemaField : schema.fields) {
+                if (schemaField.id != field.fieldId) {
+                    continue;
+                }
+
+                const TypeId target =
+                    schemaField.value.kind == ValueKind::Struct
+                        ? schemaField.value.type
+                        : (schemaField.element.kind == ValueKind::Struct ? schemaField.element.type
+                                                                         : TypeId{});
+                const Record* record = target == TypeId{} ? nullptr : FindLocked(target);
+                if (record && record->containsStrongReference) {
+                    return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+                }
+            }
         }
 
         if (schema.baseType != TypeId{}) {
@@ -758,11 +790,25 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
     record->opsIndex = opsIndex;
     for (usize index = 0; index < ops.fields.Size(); ++index) {
         ::new (fieldOps + index) RuntimeFieldOps(ops.fields[index]);
+        // 상속 필드의 setter는 기반 레코드의 함수표에서
+        // 물려받는다(Docs/Design/ChangeNotification.ko.md CN-D14 — 생성 코드는 자기 필드의 칸만
+        // 채운다. 기반 thunk는 파생 객체에도 맞다). 상자 경유가 path thunk로 분리·연산하므로 path가
+        // 있는 항목만 받는다.
+        if (!fieldOps[index].setter && fieldOps[index].path && base) {
+            for (const RuntimeFieldOps& inherited : base->ops.fields) {
+                if (inherited.fieldId == fieldOps[index].fieldId) {
+                    fieldOps[index].setter = inherited.setter;
+                    break;
+                }
+            }
+        }
+
         for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
             if (fields[fieldIndex].id == fieldOps[index].fieldId) {
                 opsIndex[fieldIndex] = static_cast<uint32>(index);
                 // 원본 입력 함수표는 변경하지 않는다. 등록된 복사본에만 정책을 결합한다.
-                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex]);
+                fieldOps[index].write.Bind(*this, ops.nativeType, fields[fieldIndex],
+                                           fieldOps[index].setter);
                 break;
             }
         }

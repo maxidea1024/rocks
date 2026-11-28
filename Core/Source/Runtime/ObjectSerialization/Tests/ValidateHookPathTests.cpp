@@ -557,7 +557,7 @@ TEST(ValidateHookPath_InsertKeyResetsExistingMapValue) {
 }
 
 // staged 재진입 감지는 분리(PathDetach) 전부터 잰다(CV4 리뷰 3): 분리의 할당 콜백이 같은 트랜잭션에
-// 쓰고 상자 연산이 할당하지 않는 쓰기(box.range.low)이면, 분리 뒤에 잰 누계로는 놓쳐 상자 맞바꿈이
+// 쓰고 상자 연산이 할당하지 않는 쓰기(ranges[0].low)이면, 분리 뒤에 잰 누계로는 놓쳐 상자 맞바꿈이
 // 그 쓰기를 덮을 수 있었다. 지금은 Busy이고 값은 그대로다.
 TEST(ValidateHookPath_ReentryDuringDetachIsBusy) {
     SystemAllocator system;
@@ -587,7 +587,12 @@ TEST(ValidateHookPath_ReentryDuringDetachIsBusy) {
             auto lease = types.Acquire(TypeIdOf<ValidHolder>());
             REQUIRE(lease);
             PropertyPathBuffer at;
-            REQUIRE(ParsePropertyPath(lease.Value(), "box.range.low", at));
+            // 분리(배열 원소 버퍼 사본)가 할당하도록 원소 하나를 미리 둔다(상자 저장소 자체는
+            // 인라인일 수 있다).
+            auto staged = transaction.GetForWrite<ValidHolder>(made.Value());
+            REQUIRE(staged);
+            REQUIRE(staged.Value()->ranges.TryPushBack(ValidRange{}));
+            REQUIRE(ParsePropertyPath(lease.Value(), "ranges[0].low", at));
             FieldValue minusOne(system);
             minusOne.kind = ValueKind::Int32;
             minusOne.signedInteger = -1;
@@ -613,7 +618,7 @@ TEST(ValidateHookPath_ReentryDuringDetachIsBusy) {
             CHECK(ErrorOf(result) == ErrorCode::Busy);
             auto value = transaction.Get<ValidHolder>(made.Value());
             REQUIRE(value);
-            CHECK(value.Value()->box.range.low == 0 && value.Value()->plain == 77);
+            CHECK(value.Value()->ranges[0].low == 0 && value.Value()->plain == 77);
         }
 
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
