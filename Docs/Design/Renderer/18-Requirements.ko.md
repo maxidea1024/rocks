@@ -33,6 +33,7 @@
 | RQ21 | TextureStreaming | 렌더러가 텍스처 사용 기록별 마지막 그린 프레임 번호(4.2절)와 view별 mip bias(11.2절)를 넘기는 형식. TextureStreaming 4.1절 요구를 렌더러 쪽에서 받은 것 | RS0(사용 기록)·RS6(mip bias) |
 | RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다. **반영(셰이더 시스템 개정 13)**: (2)와 (1)의 D3D11 16은 7.2절 4항·12.1절에 들어갔다. Vulkan은 개정 14에서 128(장치 요구는 `limits`와 `DeviceCaps` 대조, `maxDescriptorSetSampledImages`·`maxPerStageResources` 합산 포함) | MS2·RS1 |
 | RQ23 | 셰이더 시스템 7.2절 9항 | 짝 규칙의 예외로 머티리얼 텍스처의 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`와 같은 Wrap·Clamp 두 종, view 상수 쪽 샘플러, mip bias 포함)를 후속에서 앞당긴다. GLES는 공유 샘플러 객체를 각 텍스처 유닛에 묶어 combined sampler 규칙을 유지한다. 이것이 없으면 RQ22로 넓힌 형식도 샘플러 16에 묶인다(7.4절). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: SH2와 함께 구현한다. 공유 샘플러 상태(필터·이방성·mip bias)는 렌더러가 view마다 정해 파이프라인 layout의 공유 slot에 준다 | 머티리얼 텍스처가 16장을 넘는 콘텐츠 전(측정 MM5로 시점 판단) |
+| RQ24 | RenderBase GX13·GX2 텍스처 | 메모리 없는 attachment 용도 비트: Vulkan `TRANSIENT_ATTACHMENT` + `LAZILY_ALLOCATED`, Metal memoryless, D3D는 일반 텍스처(21.10절, UE `TexCreate_Memoryless`) | RS8 |
 
 ### 18.2 문서별 개정 위치
 

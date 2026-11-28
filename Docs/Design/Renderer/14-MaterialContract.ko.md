@@ -66,7 +66,7 @@
 
 | `MeshPass` | 경로 | 셰이더 | 부르는 머티리얼 함수(14.1절) | 대상 머티리얼 |
 |---|---|---|---|---|
-| `Depth` | 공통 | VS(+ masked 또는 PDO면 PS) | 정점, 마스크, PDO | Opaque·Masked |
+| `Depth` | 공통 | VS(+ masked 또는 PDO면 PS) | 정점, 마스크, PDO | Opaque·Masked. 위치를 바꾸지 않고 모든 픽셀을 쓰는 머티리얼은 머티리얼 타입이 아니라 엔진 타입 `DepthPositionOnlyVertex`로 그린다(21.3절, UE `TDepthOnlyVS<true>`) |
 | `DepthVelocity` | 공통 | VS·PS | 정점(현재·이전), 마스크, PDO | 이동 물체 |
 | `DepthAux` | Forward+ | VS·PS | 정점, 표면(normal·roughness), 마스크, PDO | Forward+ 보조 출력 view |
 | `GBuffer` | Deferred | VS·PS | 정점, 표면, PDO | Opaque·Masked |

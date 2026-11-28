@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-28, 개정 15(초안 — 17절 RS0을 RS0a 렌더 단독·RS0b 머티리얼 사용으로 나누고 머티리얼 최소 선행을 적음, 머티리얼 세션 질문 2026-11-28). 개정 14(2026-11-28). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-28, 개정 18(초안 — 21장 교차 리뷰 반영). 개정 17(초안 — 21.10절 TBDR: prepass 선택·메모리 없는 attachment RQ24). 개정 16(초안 — 21장 RS0a 설계: RendererShaders·pass 타입·위치 전용 depth·traits 거르기·정적 메시 정점 입력·GPU Scene 항목 10 float4·격자 2^21 cm·View·Scene RS0 멤버). 개정 15(초안 — 17절 RS0을 RS0a 렌더 단독·RS0b 머티리얼 사용으로 나누고 머티리얼 최소 선행을 적음, 머티리얼 세션 질문 2026-11-28). 개정 14(2026-11-28). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -50,3 +50,4 @@
 - [18. 선행 작업에 반영할 요구](18-Requirements.ko.md)
 - [19. 결정 필요 사항과 미확인 목록](19-OpenDecisions.ko.md)
 - [20. 개정 이력](20-Revisions.ko.md)
+- [21. RS0a 설계](21-RS0aDesign.ko.md)
