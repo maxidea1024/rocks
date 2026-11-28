@@ -79,6 +79,11 @@ constexpr NameEntry<uint32> FeatureNames[] = {
     {"typedUavLoad", ShaderFeatureTypedUavLoad},
     {"debugPixelUav", ShaderFeatureDebugPixelUav}};
 
+// 플랫폼 분류("platformClass" — 16.5절 SSD89, UE DDSPI bIsMobile·bIsPC·bIsConsole)다.
+constexpr NameEntry<uint32> PlatformClassNames[] = {{"Mobile", ShaderPlatformClassMobile},
+                                                    {"Pc", ShaderPlatformClassPc},
+                                                    {"Console", ShaderPlatformClassConsole}};
+
 constexpr NameEntry<uint32> DeviceRequirementNames[] = {
     {"D3D_FEATURE_LEVEL_11_0", DeviceRequiresD3DFeatureLevel11_0},
     {"D3D12_SHADER_MODEL_6_6", DeviceRequiresD3D12ShaderModel6_6},
@@ -733,6 +738,14 @@ bool CheckConsistency(Reader& reader, JsonValue root,
                            root.Find("compiler"));
     }
 
+    // OpenGL ES 형식은 ES 3.1 기능 수준이라 Mobile이다(UE IsMobilePlatform = 기능 수준 ES3_1 —
+    // 16.5절 SSD89).
+    if (definition.backend == ShaderBackend::OpenGL &&
+        (definition.platformClasses & ShaderPlatformClassMobile) == 0) {
+        return reader.Fail(ShaderFormatErrorCode::InvalidValue, "", "platformClass",
+                           root.Find("platformClass"));
+    }
+
     bool needsSpirvTools = true;
     bool needsSpirvCross = true;
     bool needsFxc = false;
@@ -964,6 +977,7 @@ ShaderFormatStatus ParseShaderFormatDefinition(Span<const uint8> bytes, StringVi
                                        "limits",
                                        "features",
                                        "deviceRequirements",
+                                       "platformClass",
                                        "producers"};
     if (!reader.CheckKeys(root, Span<const char* const>(Keys), "")) {
         return status;
@@ -1007,6 +1021,8 @@ ShaderFormatStatus ParseShaderFormatDefinition(Span<const uint8> bytes, StringVi
         !reader.ReadBits(root, "", "features", Names(FeatureNames), out.features) ||
         !reader.ReadBits(root, "", "deviceRequirements", Names(DeviceRequirementNames),
                          out.deviceRequirements) ||
+        !reader.ReadBits(root, "", "platformClass", Names(PlatformClassNames),
+                         out.platformClasses) ||
         !ReadProducers(reader, root, tools, out) || !CheckConsistency(reader, root, out)) {
         return status;
     }
@@ -1035,6 +1051,7 @@ ShaderFormatFacts MakeShaderFormatFacts(const ShaderFormatDefinition& definition
     facts.limits = definition.limits;
     facts.features = definition.features;
     facts.deviceRequirements = definition.deviceRequirements;
+    facts.platformClasses = definition.platformClasses;
     return facts;
 }
 

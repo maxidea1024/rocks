@@ -88,6 +88,19 @@ enum ShaderDeviceRequirementBits : uint32 {
     DeviceRequiresD3D12TypedUavLoadAdditionalFormats = 1u << 7
 };
 
+// 형식의 플랫폼 분류 비트("platformClass" — Docs/Design/ShaderSystem 16.5절 SSD89, UE DDSPI
+// bIsMobile·bIsPC·bIsConsole). UE처럼 서로 독립이다(GLES31_PC는 Mobile과 Pc 둘 다). 머티리얼 번역
+// 대상의 isMobile·isPc·isConsole이 이 값이다.
+enum ShaderPlatformClassBits : uint32 {
+    ShaderPlatformClassMobile = 1u << 0,
+    ShaderPlatformClassPc = 1u << 1,
+    ShaderPlatformClassConsole = 1u << 2
+};
+
+// 모든 플랫폼 분류 비트다(라이브러리 머리의 u8 칸에 들어간다).
+inline constexpr uint32 AllShaderPlatformClasses =
+    ShaderPlatformClassMobile | ShaderPlatformClassPc | ShaderPlatformClassConsole;
+
 // 셰이더 모델·언어 버전(major.minor)이다. 셰이더 모델 6.6은 {6, 6}, MSL 2.4는 {2, 4}다.
 struct ShaderVersion {
     uint8 major = 0;

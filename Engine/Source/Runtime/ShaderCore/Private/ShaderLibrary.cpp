@@ -8,8 +8,8 @@
 #include <Core/Encoding/ByteWriter.h>
 #include <string.h>
 
-// 셰이더 라이브러리 v1(Docs/Design/ShaderSystem 12.2.1절 SSD7·SSD8)이다. byte 형식과 규칙은 공개
-// 헤더 주석을 따른다.
+// 셰이더 라이브러리 v2(Docs/Design/ShaderSystem 12.2.1절 SSD7·SSD8, 16.5절 SSD90)다. byte 형식과
+// 규칙은 공개 헤더 주석을 따른다.
 namespace rocks::shader {
 
 namespace library_detail {
@@ -24,7 +24,7 @@ constexpr usize TypeSetShaAt = 80;
 constexpr usize BackendAt = 112;
 constexpr usize ShaderModelMajorAt = 113;
 constexpr usize ShaderModelMinorAt = 114;
-constexpr usize FactsPadAt = 115;
+constexpr usize PlatformClassAt = 115;
 constexpr usize FeaturesAt = 116;
 constexpr usize DeviceRequirementsAt = 120;
 constexpr usize LimitsAt = 124;
@@ -271,8 +271,10 @@ Result<void> BuildShaderLibrary(const ShaderLibraryBuildDesc& desc, Allocator& a
     out.Clear();
     if (static_cast<uint8>(desc.kind) > LastKind ||
         static_cast<uint8>(desc.facts.backend) > LastBackend ||
-        !core_detail::IsShaderFormatId(desc.facts.FormatId())) {
-        return Reject(reason, "shader library kind, backend or format id is invalid");
+        !core_detail::IsShaderFormatId(desc.facts.FormatId()) ||
+        (desc.facts.platformClasses & ~AllShaderPlatformClasses) != 0) {
+        return Reject(reason, "shader library kind, backend, format id or platform classes are "
+                              "invalid");
     }
 
     const Span<const ShaderLibraryBuildEntry> entries = desc.entries;
@@ -294,6 +296,11 @@ Result<void> BuildShaderLibrary(const ShaderLibraryBuildDesc& desc, Allocator& a
         const ShaderLibraryBuildEntry& entry = entries[index];
         if (const char* broken = CheckBuildEntry(entry); broken != nullptr) {
             return Reject(reason, broken);
+        }
+
+        // Engine 라이브러리는 엔진 셰이더 묶음만 담는다(16.5절 SSD85).
+        if (desc.kind == ShaderLibraryKind::Engine && entry.key.bundleId != EngineShaderBundleId) {
+            return Reject(reason, "an engine shader library entry has a material bundle id");
         }
 
         const Sha256Digest sha = FramedSha(entry);
@@ -377,7 +384,7 @@ Result<void> BuildShaderLibrary(const ShaderLibraryBuildDesc& desc, Allocator& a
     writer.WriteU8(static_cast<uint8>(desc.facts.backend));
     writer.WriteU8(desc.facts.shaderModel.major);
     writer.WriteU8(desc.facts.shaderModel.minor);
-    writer.WriteU8(0);
+    writer.WriteU8(static_cast<uint8>(desc.facts.platformClasses));
     writer.WriteU32LE(desc.facts.features);
     writer.WriteU32LE(desc.facts.deviceRequirements);
     const ShaderFormatLimits& limits = desc.facts.limits;
@@ -475,7 +482,7 @@ ShaderReadStatus ShaderLibraryView::Open(Span<const uint8> bytes) noexcept {
     }
 
     if (file.U32(VersionAt) != ShaderLibraryVersion) {
-        return ShaderReadStatus::Unsupported("shader library version is not 1");
+        return ShaderReadStatus::Unsupported("shader library version is not the supported version");
     }
 
     // 파일 SHA-256(자기 칸은 0으로 본다)이다.
@@ -491,9 +498,10 @@ ShaderReadStatus ShaderLibraryView::Open(Span<const uint8> bytes) noexcept {
     }
 
     if (file.U8(KindAt) > LastKind || !IsZero(bytes.Data() + KindPadAt, FormatIdAt - KindPadAt) ||
-        file.U8(BackendAt) > LastBackend || file.U8(FactsPadAt) != 0 || file.U32(CountPadAt) != 0) {
-        return ShaderReadStatus::Corrupt("shader library header has an invalid kind, backend or "
-                                         "non-zero padding");
+        file.U8(BackendAt) > LastBackend ||
+        (file.U8(PlatformClassAt) & ~AllShaderPlatformClasses) != 0 || file.U32(CountPadAt) != 0) {
+        return ShaderReadStatus::Corrupt("shader library header has an invalid kind, backend, "
+                                         "platform classes or non-zero padding");
     }
 
     const uint8* idField = bytes.Data() + FormatIdAt;
@@ -597,6 +605,7 @@ ShaderReadStatus ShaderLibraryView::Open(Span<const uint8> bytes) noexcept {
     bytes_ = bytes;
     nameOffset_ = static_cast<usize>(nameOffset);
     nameCount_ = nameCount;
+    const bool engineLibrary = file.U8(KindAt) == static_cast<uint8>(ShaderLibraryKind::Engine);
     for (uint32 index = 0; index < entryCount; ++index) {
         const uint8* row =
             bytes.Data() + entryOffset + static_cast<uint64>(index) * ShaderLibraryEntryStride;
@@ -614,6 +623,13 @@ ShaderReadStatus ShaderLibraryView::Open(Span<const uint8> bytes) noexcept {
             return ShaderReadStatus::Corrupt("shader library entry is out of order, out of range "
                                              "or names a type missing from the name table");
         }
+
+        // Engine 라이브러리는 엔진 셰이더 묶음만 담는다(16.5절 SSD85).
+        if (engineLibrary && key.bundleId != EngineShaderBundleId) {
+            Close();
+            return ShaderReadStatus::Corrupt("shader library entry of an engine library has a "
+                                             "material bundle id");
+        }
     }
 
     kind_ = static_cast<ShaderLibraryKind>(file.U8(KindAt));
@@ -623,6 +639,7 @@ ShaderReadStatus ShaderLibraryView::Open(Span<const uint8> bytes) noexcept {
     facts_.shaderModel.minor = file.U8(ShaderModelMinorAt);
     facts_.features = file.U32(FeaturesAt);
     facts_.deviceRequirements = file.U32(DeviceRequirementsAt);
+    facts_.platformClasses = file.U8(PlatformClassAt);
     uint32 limitValues[LimitCount];
     for (usize index = 0; index < LimitCount; ++index) {
         limitValues[index] = file.U32(LimitsAt + index * sizeof(uint32));

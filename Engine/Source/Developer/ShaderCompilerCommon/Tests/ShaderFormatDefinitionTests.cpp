@@ -386,6 +386,44 @@ TEST(ShaderFormat_RejectsInconsistentValues) {
     CHECK(traversal.code == ShaderFormatErrorCode::InvalidValue);
 }
 
+TEST(ShaderFormat_PlatformClassFollowsUeDataDrivenFlags) {
+    // 16.5절 SSD89: UE DDSPI bIsMobile·bIsPC·bIsConsole처럼 독립 집합이다(GLES31_PC는 UE
+    // OPENGL_PCES3_1과 같이 Pc·Mobile 둘 다).
+    LoadedFormats loaded;
+    REQUIRE(loaded.Load(
+        {"D3D12_SM6", "D3D11_SM5", "VULKAN_SM5", "METAL_SM5", "GLES31_PC", "GLES31_ANDROID"}));
+    for (const char* id : {"D3D12_SM6", "D3D11_SM5", "VULKAN_SM5", "METAL_SM5"}) {
+        const ShaderFormatDefinition* desktop = Find(loaded, id);
+        REQUIRE(desktop != nullptr);
+        CHECK(desktop->platformClasses == ShaderPlatformClassPc);
+        CHECK(MakeShaderFormatFacts(*desktop).platformClasses == ShaderPlatformClassPc);
+    }
+
+    CHECK(Find(loaded, "GLES31_PC")->platformClasses ==
+          (ShaderPlatformClassPc | ShaderPlatformClassMobile));
+    CHECK(Find(loaded, "GLES31_ANDROID")->platformClasses == ShaderPlatformClassMobile);
+
+    // 음성 대조: 없음, 어휘 밖(대소문자 구분), 중복, OpenGL ES 형식의 Mobile 빠짐.
+    CHECK(FailsWith("D3D12_SM6", "  \"platformClass\": [\"Pc\"],\n", "",
+                    ShaderFormatErrorCode::MissingProperty, "platformClass"));
+    CHECK(FailsWith("D3D12_SM6", "\"platformClass\": [\"Pc\"]", "\"platformClass\": [\"PC\"]",
+                    ShaderFormatErrorCode::InvalidValue, "platformClass"));
+    CHECK(FailsWith("D3D12_SM6", "\"platformClass\": [\"Pc\"]",
+                    "\"platformClass\": [\"Pc\", \"Pc\"]", ShaderFormatErrorCode::DuplicateValue,
+                    "platformClass"));
+    CHECK(FailsWith("GLES31_ANDROID", "\"platformClass\": [\"Mobile\"]",
+                    "\"platformClass\": [\"Pc\"]", ShaderFormatErrorCode::InvalidValue,
+                    "platformClass"));
+    // 대조: 빈 집합(UE VULKAN_SM5_ANDROID처럼 셋 다 없음)과 Console은 받는다.
+    Mutated empty;
+    REQUIRE(Mutate("VULKAN_SM5", "\"platformClass\": [\"Pc\"]", "\"platformClass\": []", empty));
+    CHECK(empty.status && empty.definition.platformClasses == 0u);
+    Mutated console;
+    REQUIRE(Mutate("D3D12_SM6", "\"platformClass\": [\"Pc\"]", "\"platformClass\": [\"Console\"]",
+                   console));
+    CHECK(console.status && console.definition.platformClasses == ShaderPlatformClassConsole);
+}
+
 TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
     // job 키 3항 입력: 같은 byte는 같은 SHA-256, 값 하나·공백 하나만 바뀌어도 다른 SHA-256이다.
     const Array<uint8> original = ReadConfig("VULKAN_SM5");
