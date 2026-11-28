@@ -634,7 +634,7 @@ Build 의존 순환의 SCC 구성원은 함께 만들어지므로 **SCC 하나�
 |---|---|---|
 | `Process`: 분리 실행(10.4절 규칙)·(pid, 시작 시각) 정체·생존 확인·권한 상승 여부 | PlatformBase | PlatformLayer P1 "프로세스와 pipe", UE `FPlatformProcess`. 임포트 worker process(AssetSystem 17절)도 쓴다. Android는 `Unsupported` |
 | `LocalChannel`: Windows named pipe·POSIX UDS 클라이언트, 완료 기반 API(`WorkerTaskEvent`로 이음), 서버 정체 조회(pipe 소유자 SID·서버 프로세스 SID / peer uid) | PlatformBase | UE `FPlatformNamedPipe`가 Core HAL에 있다. 구현은 Windows overlapped IO(AsyncFile과 같은 IOCP), POSIX는 v1에서 전용 IO 스레드(후속 kqueue). TCP·UDP 소켓은 넣지 않는다(NetCore 계획 — 계획 §3.1) |
-| SHA-256 하드웨어 경로(SHA-NI·ARMv8 SHA2) + 스칼라 차등 시험 | Core Encoding | 클라이언트는 Put마다 저장 byte·원본·조각을 해시한다. 지금 Core 구현은 스칼라뿐이다 |
+| SHA-256 하드웨어 경로(SHA-NI·ARMv8 SHA2) + 스칼라 차등 시험 | Core Encoding | 클라이언트는 Put마다 저장 byte·원본·조각을 해시한다. 셰이더 워커 시작 비용 때문에 앞당겨 구현한다(2026-11-28, [CoreDataFoundations](CoreDataFoundations.ko.md) 6절 C7) |
 | TLS·HTTP | 넣지 않는다 | 원격은 로컬 Rockpile이 대신한다 |
 
 ## 13. .NET 구현
