@@ -350,8 +350,9 @@ ROCKS_ASSETRUNTIME_API Result<void> CheckCookedPackage(const CookedManifest& man
 
 // 파일 쪽 대조다(AS 11.6절 3 — 로더가 해석 전에 부른다): file 길이 = packageBytes(PackageBytes),
 // SHA-256 = packageSha256(PackageSha256). 오류는 CheckCookedPackage와 같다.
-Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
-                                    AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
+                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // 내용 쪽 대조다(AS 11.6절 3 — 로더가 Prepare 뒤에 부른다): contents의 종류(PackageKind)·
 // assetId(AssetId)·대표 에셋 타입(TypeId)·패키지 안 BulkIndex rawBytes 합(BulkRawBytes — sidecar
