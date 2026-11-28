@@ -21,12 +21,105 @@ internal static class ModuleDescriptor
     // 8: 이벤트 필드 flag ScriptAssignable과 이벤트 필드 scriptName(노출 이벤트의 최종 Sparks 이름 — Docs/Design/SparksBinding.ko.md B25).
     // 9: 필드 flag Notify와 함수 flag Notify(변경 통지 대상 — Docs/Design/ChangeNotification.ko.md CN-D1). 파생 모듈이 상속 필드를 schema에 다시
     // 실을 때 flag를 잃지 않고, 통지 번호(등록 때 정한다)가 기반 체인의 Notify 함수를 센다.
-    private const int DescriptorSchema = 9;
+    // 10: 클래스 항목 subobjects(선언 subobject 소유 구조 지정자의 필드 ID와 펼친 표 — Docs/Design/Prefab 10.2절). 다른 모듈의 파생 클래스가
+    // base 표를 이어받고 Root 유일성·AttachParent·이름 충돌을 모듈 경계 너머까지 본다.
+    private const int DescriptorSchema = 10;
+
+    // 클래스의 선언 subobject 소유 구조(Docs/Design/Prefab 10.2절)를 쓴다.
+    private static void WriteSubobjects(Utf8JsonWriter json, ClassModel type)
+    {
+        json.WriteStartObject("subobjects");
+        void Id(string key, string? value)
+        {
+            if (value is null)
+            {
+                json.WriteNull(key);
+            }
+            else
+            {
+                json.WriteString(key, value);
+            }
+        }
+
+        Id("list", type.SubobjectListId);
+        Id("root", type.SubobjectRootId);
+        Id("attach", type.SubobjectAttachId);
+        json.WriteStartArray("entries");
+        foreach (SubobjectModel entry in type.Subobjects)
+        {
+            json.WriteStartObject();
+            json.WriteString("id", entry.Id);
+            json.WriteString("field", entry.Field);
+            json.WriteString("toolName", entry.ToolName);
+            json.WriteString("type", entry.Type);
+            json.WriteString("typeId", entry.TypeId);
+            json.WriteNumber("attachParent", entry.AttachParent);
+            json.WriteBoolean("root", entry.Root);
+            json.WriteString("owner", entry.Owner);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    // WriteSubobjects가 쓴 값을 import 클래스 모델에 읽는다. 표의 모양(부착 부모 index가 앞쪽, Root 하나)이 어긋나면 손상이다.
+    private static void ReadSubobjects(JsonElement element, ClassModel model, Func<string, MetadataException> invalid)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw invalid("subobjects of " + model.Name);
+        }
+
+        RequireKeys(element, SubobjectsKeys, invalid);
+        string? Id(string key)
+        {
+            JsonElement value = element.GetProperty(key);
+            return value.ValueKind == JsonValueKind.Null ? null : Hex(value, invalid);
+        }
+
+        model.SubobjectListId = Id("list");
+        model.SubobjectRootId = Id("root");
+        model.SubobjectAttachId = Id("attach");
+        List<SubobjectModel> table = [];
+        foreach (JsonElement entry in element.GetProperty("entries").EnumerateArray())
+        {
+            RequireKeys(entry, SubobjectEntryKeys, invalid);
+            string Text(string key) => entry.GetProperty(key).GetString() is string text && text.Length != 0 ? text : throw invalid($"subobject {key} of {model.Name}");
+            if (!entry.GetProperty("attachParent").TryGetInt32(out int parent) || parent < -1 || parent >= table.Count ||
+                entry.GetProperty("root").ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                throw invalid("subobject entry of " + model.Name);
+            }
+
+            bool root = entry.GetProperty("root").GetBoolean();
+            if (root && (parent != -1 || table.Any(other => other.Root)))
+            {
+                throw invalid("subobject Root of " + model.Name);
+            }
+
+            table.Add(new SubobjectModel(Hex(entry.GetProperty("id"), invalid), Text("field"), Text("toolName"), Text("type"),
+                Hex(entry.GetProperty("typeId"), invalid), parent, root, Text("owner")));
+        }
+
+        if (table.Count != 0 && model.SubobjectListId is null)
+        {
+            throw invalid("subobject list of " + model.Name);
+        }
+
+        model.Subobjects = table;
+    }
 
     // 클래스 항목이다. toolName은 실효 타입 도구 이름(Docs/Design/ReflectionExtensions.ko.md 1.8·5.2절 — 지정하지 않았으면 한정하지
     // 않은 C++ 이름)이다.
     private static readonly string[] TypeKeys =
-        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields", "functions"];
+        ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields", "functions", "subobjects"];
+
+    // 클래스 항목 subobjects의 키다(Docs/Design/Prefab 10.2절). list·root·attach는 실효 소유 구조 지정자의 필드 ID(없으면 null), entries는
+    // 펼친 표다.
+    private static readonly string[] SubobjectsKeys = ["list", "root", "attach", "entries"];
+
+    private static readonly string[] SubobjectEntryKeys = ["id", "field", "toolName", "type", "typeId", "attachParent", "root", "owner"];
 
     // struct 항목: base(리플렉션 base struct의 정규 이름, 없으면 "" — 리플렉션 B9k, ReflectionExtensions.ko.md 12절), flags(선언
     // 플래그 Atomic(base에서 상속된 것 포함) 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference → RequiresWorldOnlyOwner →
@@ -142,6 +235,11 @@ internal static class ModuleDescriptor
                 json.WriteString("header", type.Header);
                 json.WriteString("visibility", type.Private ? "private" : "public");
                 json.WriteString("toolName", type.EffectiveToolName);
+                if (!type.IsStruct)
+                {
+                    WriteSubobjects(json, type);
+                }
+
                 WriteFields(json, type);
                 WriteFunctions(json, type);
                 json.WriteEndObject();
@@ -636,6 +734,11 @@ internal static class ModuleDescriptor
                 {
                     throw Invalid("within of " + name);
                 }
+            }
+
+            if (!isStruct)
+            {
+                ReadSubobjects(type.GetProperty("subobjects"), model, Invalid);
             }
 
             List<FieldModel> fields = [];

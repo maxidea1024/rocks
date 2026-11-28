@@ -768,6 +768,33 @@ struct FunctionSchema {
     uint32 frameAlignment = 0;
 };
 
+// 선언 subobject 항목의 flag다(SubobjectSchema::flags — Docs/Design/Prefab 10.2절).
+//   Root — 소유 클래스의 SubobjectRoot 필드(Actor rootComponent)에 넣는 subobject다. 펼친 표에
+//          많아야 하나이고 부착 부모가 없다.
+enum class SubobjectFlags : uint32 {
+    None = 0,
+    Root = 1u << 0
+};
+
+// SubobjectFlags의 알려진 비트 전부다(등록 검사).
+inline constexpr uint32 KnownSubobjectFlags = (1u << 1) - 1;
+
+// 클래스 하나(base 포함)의 선언 subobject 수 상한이다(Docs/Design/Prefab 3.8·10.2절 — 펼친 표
+// 크기, MetaCompiler 오류·등록 CapacityExceeded).
+inline constexpr usize MaxClassSubobjects = 256;
+
+// 선언 subobject 하나다(UE CreateDefaultSubobject 대응 — Docs/Design/Prefab 10.2절). 소유 클래스의
+// ROCKS_PROPERTY(Subobject) 필드 하나가 항목 하나다. id는 그 소유 필드의 FieldId(=
+// SubobjectGuid), type은 instancing이 만드는 타입(필드의 T), attachParent는 펼친 표 안 부착 부모
+// index(-1 = 붙이지 않음 — 앞쪽 항목만), flags는 SubobjectFlags다. 객체 이름은 소유 필드의 실효
+// 도구 이름이다.
+struct SubobjectSchema {
+    Guid id;
+    TypeId type;
+    int32 attachParent = -1;
+    uint32 flags = 0;
+};
+
 struct TypeSchema {
     TypeId id;
     uint32 version = 1;
@@ -805,6 +832,19 @@ struct TypeSchema {
     // 이름)은 기반 체인의 함수 사이에서 대소문자 무시로 유일하고 ID는 0이 아니며 유일하다. 등록이
     // 깊게 복사한다.
     Span<const FunctionSchema> functions{};
+    // 선언 subobject 표다(Docs/Design/Prefab 10.2절 — 클래스만). 상속 필드처럼 **펼친 표**(base 표
+    // 뒤에 자기 항목)를 싣고, 등록은 base 표가 앞부분과 같은지 검사한다. 비어 있지 않으면
+    // subobjectListField가 있어야 하고, Root 항목이 있으면 subobjectRootField가 있어야 한다. 표
+    // 크기는 MaxClassSubobjects 이하다. 등록이 깊게 복사한다.
+    Span<const SubobjectSchema> subobjects{};
+    // 소유 구조 클래스 지정자다(ROCKS_CLASS(SubobjectList·SubobjectRoot·SubobjectAttach) —
+    // Docs/Design/Prefab 10.2절). 이 클래스 필드의 FieldId이며 0은 지정 없음이다. 실효 값(base에서
+    // 상속한 값 포함)을 싣고, base에 값이 있으면 같아야 한다. List는 선언 subobject를 담는 소유
+    // 목록(ObjectRefArray), Root는 Root subobject를 넣는 ObjectRef 필드, Attach는 이 타입이
+    // subobject일 때의 부착 부모 WeakObjectRef 필드다.
+    Guid subobjectListField{};
+    Guid subobjectRootField{};
+    Guid subobjectAttachField{};
 };
 
 // schema가 id를 EditorOnly 필드 ID로 싣는지다(editorOnlyFieldIds — 선형 탐색, 목록은 작다).

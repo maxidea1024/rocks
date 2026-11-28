@@ -129,6 +129,8 @@ public:
 | `ScriptExtensible`·`NotScriptExtensible` | CLASS | Sparks class가 상속할 수 있다(`ScriptType`을 함께 뜻한다, 상속된다) / 그 상속을 끊는다 |
 | `ScriptReadOnly`·`ScriptWritable` | PROPERTY | 필드가 Sparks에 읽기 전용·읽기 쓰기로 보인다(둘 중 하나, `ReadOnly` 필드에 `ScriptWritable`은 RMC2603) |
 | `Notify` | PROPERTY·FUNCTION | 실행 중 변경 통지 대상(UE `FieldNotify` — [변경 통지](../Design/ChangeNotification.ko.md) CN-D1). 필드는 클래스의 이벤트·EditorOnly 아닌 필드만(RMC2901), 함수는 매개변수 없이 값을 돌려주는 `Pure` const 멤버만(RMC2902) |
+| `Subobject`·`Root`·`AttachParent="…"` | PROPERTY | 선언 default subobject(UE `CreateDefaultSubobject` — [Prefab](../Design/Prefab/07-Pf1ClassSubobjects.ko.md) 10.2절). `ObjectRef<T>` 필드, protected 이상, 암묵 ReadOnly, ID kind `subobject`. 조합 위반 RMC3001, 소유·타입·상속·이름 규칙 RMC3002 |
+| `SubobjectList`·`SubobjectRoot`·`SubobjectAttach="…"` | CLASS | 선언 subobject 소유 구조(소유 목록·Root 필드·부착 부모 필드 — 도구 이름, 상속되고 다시 지정 불가, RMC3001·RMC3002). `static Result<void> InitSubobjectDefaults(SubobjectDefaultsContext&) noexcept`는 기본값 덮기 hook(RMC3003) |
 | `ScriptAssignable` | PROPERTY(이벤트 필드) | 이벤트가 Sparks `on`·`await`에 보인다(UE `BlueprintAssignable` — 노출 타입의 object 종류만, `EditorOnly` 불가, 이름은 필드 규칙이고 `Changed`는 예약 — SparksBinding B20–B22). 값 필드에 쓰거나 `ScriptReadOnly`·`ScriptWritable`과 함께 쓰면 RMC2603 |
 | `ScriptName="X"` | PROPERTY | Sparks 이름(PascalCase ASCII). 노출 지정자(`ScriptReadOnly`·`ScriptWritable`·이벤트의 `ScriptAssignable`)와 함께만. 없으면 도구 이름의 끝 `_`를 떼고 첫 글자를 대문자로 바꾼 것이며 그 밖의 `_`가 있으면 필요하다 |
 | `ScriptCallable` | FUNCTION | Sparks에서 부를 수 있다(UE `BlueprintCallable` — 노출 타입의 함수만, `EditorOnly` 불가). 입력 오류로 Fatal하지 않고 Game lane에서 부른다는 계약이다(파괴 대기 대상의 비 const 호출은 실행 host가 건너뛴다). 이름이 예약 이름(prelude·핵심 엔진 타입·문맥 이름 등)이면 RMC2606이다. 리플렉션 `Pure`가 schema `pure`다 |
